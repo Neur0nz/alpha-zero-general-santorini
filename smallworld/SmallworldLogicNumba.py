@@ -1,10 +1,8 @@
 import numpy as np
-from numba import njit
-import numba
 
-from .SmallworldConstants import *
-from .SmallworldMaps import *
-from .SmallworldDisplay import print_board, print_valids, move_to_str
+from SmallworldConstants import *
+from SmallworldMaps import *
+from SmallworldDisplay import print_board, print_valids, move_to_str
 
 ############################## BOARD DESCRIPTION ##############################
 
@@ -89,25 +87,20 @@ from .SmallworldDisplay import print_board, print_valids, move_to_str
 #####   129   Decline
 #####   130   End
 
-@njit(cache=True, fastmath=True, nogil=True)
 def observation_size():
 	return (NB_AREAS + 5*NUMBER_PLAYERS + DECK_SIZE+1, 8)
 
-@njit(cache=True, fastmath=True, nogil=True)
 def action_size():
 	return 5*NB_AREAS + MAX_REDEPLOY + DECK_SIZE + 2
 
-@njit(cache=True, fastmath=True, nogil=True)
 def my_dot(array1, array2):
 	return np.multiply(array1, array2).sum(dtype=np.int8)
 
-@njit(cache=True, fastmath=True, nogil=True)
 def my_dot2d(array1, array2):
 	return np.multiply(array1, array2).sum(axis=1, dtype=np.int8)
 
 mask = np.array([128, 64, 32, 16, 8, 4, 2, 1], dtype=np.uint16)
 
-@njit(cache=True, fastmath=True, nogil=True)
 def my_packbits(array):
 	if len(array)%8 == 0:
 		padded_array = array.astype(np.uint16)
@@ -116,29 +109,18 @@ def my_packbits(array):
 	result = my_dot2d(padded_array.reshape((-1, 8)), mask)
 	return result
 
-@njit(cache=True, fastmath=True, nogil=True)
 def my_unpackbits(values):
 	result = np.zeros((len(values), 8), dtype=np.uint8)
 	for i, v in enumerate(values):
 		result[i, :] = (np.bitwise_and(v, mask) != 0)
 	return result.flatten()
 
-@njit(cache=True, fastmath=True, nogil=True)
 def _split_pwr_data(unified_value):
 	dataB, dataA = divmod(unified_value, 2**6)
 	dataB = bool(dataB)
 	return dataA, dataB
 
-spec = [
-	('state'         , numba.int8[:,:]),
-	('territories'   , numba.int8[:,:]),
-	('peoples'       , numba.int8[:,:,:]),
-	('visible_deck'  , numba.int8[:,:]),
-	('round_status'  , numba.int8[:,:]),
-	('game_status'   , numba.int8[:,:]),
-	('invisible_deck', numba.int8[:]),
-]
-@numba.experimental.jitclass(spec)
+
 class Board():
 	def __init__(self, num_players):
 		self.state = np.zeros(observation_size(), dtype=np.int8)
@@ -153,7 +135,7 @@ class Board():
 		# Fill map with lost tribe
 		nb_lt = initial_nb_people[-LOST_TRIBE]
 		for i in range(NB_AREAS):
-			self.territories[i,:] = [nb_lt, LOST_TRIBE, NOPOWER, 0, 0, nb_lt+int(descr[i, 0] == MOUNTAIN), 0, -1] if descr[i][4] else [0, NOPPL, NOPOWER, 0, 0, 0, 0, -1]
+			self.territories[i,:] = [nb_lt, LOST_TRIBE, NOPOWER, 0, 0, nb_lt+int(descr[i, 0] == MOUNTAIN), 0, -1] if descr[i][4] else [0, NOPPL, NOPOWER, 0, 0, int(descr[i, 0] == MOUNTAIN), 0, -1]
 
 		# Init deck
 		self._init_deck()
@@ -181,14 +163,6 @@ class Board():
 		self.territories    = self.state[0                                  :NB_AREAS                             ,:]
 		self_peoples_2d     = self.state[NB_AREAS                           :NB_AREAS+3*NUMBER_PLAYERS            ,:]
 		self.peoples = np.ascontiguousarray(self_peoples_2d).reshape((NUMBER_PLAYERS, 3, 8))
-		# Warning: np.ascontiguousarray may return a copy in general case. but
-		# in this particular case it returns a view. And Numba needs it to
-		# ensure that reshape is done on a contiguous array.
-		# See this test code:
-		#   base_ptr = self.state.ctypes.data
-		#   total_bytes_big = self.state.size # itemsize = 1 for np.int8
-		#   view_ptr = self.peoples.ctypes.data
-		#   print((view_ptr >= base_ptr) and (view_ptr < base_ptr + total_bytes_big))
 		self.visible_deck   = self.state[NB_AREAS+3*NUMBER_PLAYERS          :NB_AREAS+3*NUMBER_PLAYERS+DECK_SIZE  ,:]
 		self.round_status   = self.state[NB_AREAS+3*NUMBER_PLAYERS+DECK_SIZE:NB_AREAS+4*NUMBER_PLAYERS+DECK_SIZE  ,:]
 		self.game_status    = self.state[NB_AREAS+4*NUMBER_PLAYERS+DECK_SIZE:NB_AREAS+5*NUMBER_PLAYERS+DECK_SIZE  ,:]
@@ -286,12 +260,12 @@ class Board():
 		# Whatever the score difference is
 		scores = self.game_status[:, 6]
 		for _ in range(2):
-			mini, maxi = -np.int16(127)-scores.min(), np.int16(127)-scores.max()
+			mini, maxi = -127-scores.min(), 127-scores.max()
 			if mini >= maxi:
 				print('symmetrie scores:', mini, maxi)
 			else:
 				random_offset = np.random.randint(mini, maxi)
-				self.game_status[:, 6] += np.int16(random_offset)
+				self.game_status[:, 6] += random_offset
 				symmetries.append((self.state.copy(), policy.copy(), valids.copy()))
 				self.state[:,:], policy, valids = state_backup.copy(), policy_backup.copy(), valids_backup.copy()
 
@@ -426,7 +400,7 @@ class Board():
 			else:
 				# https://stackoverflow.com/questions/3062746/special-simple-random-number-generator
 				# m=6, c=5, a=1980+1
-				rnd_value = (1981 * (random_seed+np.int64(self.invisible_deck[5])) + 5) % 6
+				rnd_value = (1981 * (random_seed+self.invisible_deck[5]) + 5) % 6
 				dice = DICE_VALUES[rnd_value]
 			self.invisible_deck[5] += 1
 			if nb_ppl_of_player + dice < minimum_ppl_for_attack:
@@ -1194,7 +1168,7 @@ class Board():
 			else:
 				# https://stackoverflow.com/questions/3062746/special-simple-random-number-generator
 				# m=6, c=5, a=1980+1
-				rnd_value = (1981 * (random_seed+np.int64(self.invisible_deck[5])) + 5) % 6
+				rnd_value = (1981 * (random_seed+self.invisible_deck[5]) + 5) % 6
 				dice = DICE_VALUES[rnd_value]
 			self.invisible_deck[5] += 1
 			current_ppl[4] = dice + 2**6
@@ -1373,9 +1347,9 @@ class Board():
 			else:
 				# https://stackoverflow.com/questions/3062746/special-simple-random-number-generator
 				# m=avail_people_id.size, c=0, a=2*3*5*7*9*11*13*17+1
-				rnd_value = (4594591 * (random_seed+np.int64(self.invisible_deck[6]))) % avail_people_id.size
+				rnd_value = (4594591 * (random_seed+self.invisible_deck[6]).astype(np.int64)) % avail_people_id.size
 				chosen_ppl = avail_people_id[rnd_value]
-				rnd_value = (4594591 * (random_seed+np.int64(self.invisible_deck[6]))) % avail_power_id.size
+				rnd_value = (4594591 * (random_seed+self.invisible_deck[6]).astype(np.int64)) % avail_power_id.size
 				chosen_power = avail_power_id[rnd_value]
 			self.invisible_deck[6] += 1
 			nb_of_ppl = initial_nb_people[chosen_ppl] + initial_nb_power[chosen_power]
@@ -1416,9 +1390,9 @@ class Board():
 					else:
 						# https://stackoverflow.com/questions/3062746/special-simple-random-number-generator
 						# m=avail_people_id.size, c=0, a=2*3*5*7*9*11*13*17+1
-						rnd_value = (4594591 * (random_seed+np.int64(self.invisible_deck[6]))) % avail_people_id.size
+						rnd_value = (4594591 * (random_seed+self.invisible_deck[6]).astype(np.int64)) % avail_people_id.size
 						chosen_ppl = avail_people_id[rnd_value]
-						rnd_value = (4594591 * (random_seed+np.int64(self.invisible_deck[6]))) % avail_power_id.size
+						rnd_value = (4594591 * (random_seed+self.invisible_deck[6]).astype(np.int64)) % avail_power_id.size
 						chosen_power = avail_power_id[rnd_value]
 					self.invisible_deck[6] += 1
 					nb_of_ppl = initial_nb_people[chosen_ppl] + initial_nb_power[chosen_power]						

@@ -1,8 +1,6 @@
 import numpy as np
-from numba import njit
-import numba
-from .SantoriniConstants import *
-from .SantoriniConstants import _decode_action, _encode_action
+from SantoriniConstants import *
+from SantoriniConstants import _decode_action, _encode_action
 
 # 0: 2x2 workers set at an arbitrary position before 1st move
 # 1: 2x2 workers set at a random position before 1st move
@@ -10,11 +8,9 @@ from .SantoriniConstants import _decode_action, _encode_action
 # Don't forget to update NB_GODS in SantoriniConstants.py
 INIT_METHOD = 1
 
-@njit(cache=True, fastmath=True, nogil=True)
 def observation_size():
-	return (5, 5, 3) # True size is 5,5,3 but other functions expects 2-dim answer
+	return (25, 3) # True size is 5,5,3 but other functions expects 2-dim answer
 
-@njit(cache=True, fastmath=True, nogil=True)
 def action_size():
 	return NB_GODS*2*9*9
 
@@ -48,11 +44,9 @@ def action_size():
 #   3  4  5
 #   6  7  8
 
-@njit(cache=True, fastmath=True, nogil=True)
 def _position_if_pushed(old, new):
 	return (2*new[0] - old[0], 2*new[1] - old[1])
 
-@njit(cache=True, fastmath=True, nogil=True)
 def _apply_direction(position, direction):
 	DIRECTIONS = [
 		(-1,-1),
@@ -68,16 +62,9 @@ def _apply_direction(position, direction):
 	delta = DIRECTIONS[direction]
 	return (position[0]+delta[0], position[1]+delta[1])
 
-spec = [
-	('state'      , numba.int8[:,:,:]),
-	('workers'    , numba.int8[:,:]),
-	('levels'     , numba.int8[:,:]),
-	('gods_power' , numba.int8[:,:]),
-]
-@numba.experimental.jitclass(spec)
 class Board():
 	def __init__(self, num_players):
-		self.state = np.zeros(observation_size(), dtype=np.int8)
+		self.state = np.zeros((5,5,3), dtype=np.int8)
 		self.init_game()
 
 	def get_score(self, player):
@@ -96,7 +83,7 @@ class Board():
 		return highest_level
 
 	def init_game(self):
-		self.copy_state(np.zeros(observation_size(), dtype=np.int8), copy_or_not=False)
+		self.copy_state(np.zeros((5,5,3), dtype=np.int8), copy_or_not=False)
 
 		# Place workers
 		if INIT_METHOD == 0:
@@ -111,6 +98,7 @@ class Board():
 				self.workers[place//5, place%5] = worker
 
 			gods = [NO_GOD, NO_GOD] if NB_GODS <= 1 else (np.random.choice(NB_GODS-1, 2, replace=False)+1)
+			# gods = [HERMES, HERMES]
 			self.gods_power.flat[gods[0]+NB_GODS*0] = 64
 			self.gods_power.flat[gods[1]+NB_GODS*1] = 64
 
@@ -421,7 +409,7 @@ class Board():
 
 		return actions
 
-	def make_move(self, move, player, random_seed):
+	def make_move(self, move, player, deterministic):
 		opponent_to_play_next = True
 
 		if INIT_METHOD == 2 and np.abs(self.workers).sum() != 6:	# Not all workers are set, need to chose their position

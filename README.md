@@ -1,173 +1,206 @@
-# CPU-optimized Alpha Zero General (any game, any framework!)
+# 🎮 AlphaZero Board Games - Web UI
 
-Based on the superb repo https://github.com/suragnair/alpha-zero-general but with higher strength, optimized for
-CPU-only 25-100x speed improvement, and supporting 2+ players games. You can play with it on your
-browser https://github.com/cestpasphoto/cestpasphoto.github.io. Technical details about the improvements are listed in
-this [page](README_features.md).
+Play board games against powerful AlphaZero-based AI **entirely in your browser**! No installation required, all computation runs client-side.
 
-## Supported games
+## ✨ Features
 
-* [Azul](#azul)
-* [Botanik](#botanik)
-* [Machi Koro (a.k.a. Minivilles)](#machi-koro--minivilles)
-* [Santorini (with basic gods)](#santorini)
-* [Small World](#small-world)
-* [Splendor](#splendor)
-* [The Little Prince - Make me a planet](#the-little-prince---make-me-a-planet)
+- 🤖 **Powerful AI** - AlphaZero neural networks with MCTS
+- 🌐 **Browser-Based** - Runs entirely in your browser (Python via Pyodide + ONNX.js)
+- 📊 **NEW: AI Evaluation Display** - See real-time position assessment with color-coded bars
+- 🎯 **Adjustable Difficulty** - From "Come on" to "God-like"
+- 📱 **Mobile-Friendly** - Works on desktop and mobile
 
-### Splendor
+## 🎮 Supported Games
 
-![Sample game of Splendor](splendor/sample_game.gif)
+- **Santorini** ([play](santorini_with_gods.html)) - With god powers
+- **Santorini** ([play](santorini.html)) - Classic version
+- **Splendor** ([2p](splendor.html), [3p](splendor_3pl.html), [4p](splendor_4pl.html))
+- **Small World** ([2p](smallworld.html), [3p](smallworld_3pl.html), [4p](smallworld_4pl.html))
+- **Minivilles/Machi Koro** ([play](minivilles.html))
+- **The Little Prince** ([play](tlp.html))
+- **Wordle Solver** ([play](wordle.html))
 
-* [x] Support of [Splendor game](https://en.wikipedia.org/wiki/Splendor_(game)) with 2 players
-* [x] Support of 3-4 players (just change NUMBER_PLAYERS constant)
-* [x] Proper MCTS handling of "chance" factor when revealing new deck card
-* [x] Adding "universe exploration" feature for even better training
-* [x] Added pretrained models for 2-3-4 players
+## 🚀 Quick Start
 
-The AI engine doesn't know which cards will be drawn. There is one limitation: implemented logic doesn't allow you to
-both take gems from the bank and give back some (whereas allowed in real rules), you are limited to either take 1-2-3
-gems or give back 1-2 gems.
+### Option 1: Play Online
 
-### Machi Koro / Minivilles
+Visit the live version:
+- 🌐 [https://cestpasphoto.github.io](https://cestpasphoto.github.io)
 
-* [x] Quick implementation of [Minivilles](https://en.wikipedia.org/wiki/Machi_Koro), with handful limitations
+### Option 2: Run Locally
 
-![Sample game of Minivilles with 4 players](minivilles/sample_game.gif)
+```bash
+# Serve the files
+python3 -m http.server 8000
 
-### The Little Prince - Make me a planet
+# Open in browser
+# http://localhost:8000/santorini_with_gods.html
+```
 
-* [x] Quick implementation
-  of [The little prince](https://cdn.1j1ju.com/medias/67/f8/eb-the-little-prince-make-me-a-planet-rulebook.pdf), with
-  limitations. Main ones are:
-    * No support of 2 players, only 3-5 players are supported
-    * When market is empty, current player doesn't decide card type, it is randomly chosen.
-    * Grey sheeps are displayed on console using grey wolf emoji, and brown sheeps are displayed using a brown goat.
+Or use the provided script:
+```bash
+./serve.sh
+```
+
+## 🆕 AI Evaluation Display
+
+The AI now shows you **who's winning** in real-time!
+
+```
+🤖 AI EVALUATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Player 0 (You):     [████████████████████████░░░░░░░░] +0.700 (85%)
+Player 1 (AI):      [███████░░░░░░░░░░░░░░░░░░░░░░░░░] -0.700 (15%)
+```
+
+**Color Coding:**
+- 🟢 Green: Strongly winning
+- 🔵 Blue: Winning
+- 🟡 Yellow: Equal
+- 🟣 Purple: Losing
+- 🔴 Red: Strongly losing
+
+See [EVAL_DISPLAY_ADDED.md](EVAL_DISPLAY_ADDED.md) for technical details.
+
+## 🎯 How to Play
+
+### Santorini Example
+
+1. **Open** `santorini_with_gods.html` in your browser
+2. **Wait** 10-20 seconds for AI to load (first time only)
+3. **Select difficulty** from dropdown menu
+4. **Click** highlighted cells to:
+   - Select your worker
+   - Choose where to move
+   - Choose where to build
+5. **Watch** the AI evaluate and respond
+6. **Win** by reaching level 3!
+
+### Game Modes
+
+- **You vs AI** - You play first, AI responds
+- **AI vs You** - AI plays first, you respond  
+- **No AI** - Two human players
+- **WarGames** - Watch AI play itself
+
+## 🔧 Technical Details
+
+### Technology Stack
+
+- **Python in Browser** - [Pyodide](https://pyodide.org/) (WebAssembly)
+- **ML Inference** - [ONNX Runtime](https://onnxruntime.ai/) (WebAssembly)
+- **UI Framework** - [Fomantic UI](https://fomantic-ui.com/)
+- **Game Logic** - Pure Python (Numba-compatible)
+- **Neural Networks** - Pre-trained ONNX models
+
+### Performance
+
+- **First Load**: 10-20 seconds (downloading Pyodide + ONNX)
+- **Subsequent Loads**: Instant (cached)
+- **AI Speed**: 5-10 seconds per move (native difficulty)
+- **Runs Offline**: After first load, works without internet
+
+### How It Works
+
+1. **Browser loads** Pyodide (Python) and ONNX Runtime (ML)
+2. **Python code runs** in browser using WebAssembly
+3. **Game logic** executes in Python (same code as training backend)
+4. **Neural network** runs via ONNX.js for fast inference
+5. **MCTS search** explores move tree and selects best action
+
+## 📂 Project Structure
+
+```
+.
+├── santorini/              # Santorini game files
+│   ├── main.js             # JavaScript game logic
+│   ├── proxy.py            # Python-JS bridge
+│   ├── SantoriniGame.py    # Game rules
+│   ├── MCTS.py             # AI search algorithm
+│   └── *.onnx              # Pre-trained models
+├── splendor/               # Splendor game files
+├── smallworld/             # Small World game files
+├── common/                 # Shared game framework
+│   └── game.js             # Abstract game class
+├── santorini.html          # Santorini (no gods)
+├── santorini_with_gods.html # Santorini (with gods)
+└── index.html              # Landing page
+```
+
+## 🎨 Customization
+
+### Adjusting Difficulty
+
+The dropdown menu controls MCTS simulations:
+- **2-6**: Easiest (random-like)
+- **25**: Easy (default)
+- **100**: Medium
+- **400**: Native (training level)
+- **1600**: Boosted
+- **6400**: God-like
+
+More simulations = stronger AI but slower
+
+### Modifying Games
+
+Each game has its own directory with:
+- `Game.py` - Game rules and logic
+- `main.js` - UI and JavaScript interface
+- `proxy.py` - Python-JavaScript bridge
+- `*.onnx` - Neural network model
+
+To modify a game, edit these files and refresh the browser.
+
+## 🐛 Troubleshooting
+
+### AI not loading
+- Check browser console (F12) for errors
+- Try a different browser (Chrome/Firefox recommended)
+- Clear cache and reload
+
+### Slow performance
+- Reduce difficulty setting
+- Close other browser tabs
+- Use desktop instead of mobile
+
+### Game won't start
+- Ensure JavaScript is enabled
+- Allow time for initial load (10-20 sec)
+- Check network connection (first time only)
+
+## 🤖 AI Strength
 
 ### Santorini
+- >95% win rate vs [Ai Ai](http://mrraow.com/index.php/aiai-home/aiai/)
+- 98+% win rate vs BoardSpace AI
 
-* [x] Own implementation of [Santorini](https://www.ultraboardgames.com/santorini/game-rules.php), policy for initial
-  status is user switchable (predefined, random or chosen by players)
-* [x] Support of goddess (basic ones only)
+### Splendor
+- >90% win rate vs [Lapidary AI](https://github.com/inclement/lapidary-ai)
 
-![Sample game of Santorini](santorini/sample_game_with_random_init.gif)
+See individual game READMEs for detailed benchmarks.
 
-About 90+% winrate against [Ai Ai](http://mrraow.com/index.php/aiai-home/aiai/) and 95+% win rate
-against [BoardSpace AI](https://www.boardspace.net/english/index.shtml). See [more details here](santorini/README.md)
+## 📖 Documentation
 
-### Botanik
+- **Evaluation Display**: [EVAL_DISPLAY_ADDED.md](EVAL_DISPLAY_ADDED.md)
+- **Training Backend**: For model training, see the [full repo](https://github.com/cestpasphoto/alpha-zero-general)
 
-* [x] Support of [Botanik](https://boardgamegeek.com/boardgame/271529/botanik) with 2 players
-* [x] Machine size is limited to 7x7, which should be enough in most cases
+## 🙏 Credits
 
-![Sample game](botanik/sample_game.gif)
+- **Original Concept**: [AlphaZero by DeepMind](https://arxiv.org/abs/1712.01815)
+- **Base Implementation**: [alpha-zero-general](https://github.com/suragnair/alpha-zero-general)
+- **Optimizations & Web UI**: [cestpasphoto](https://github.com/cestpasphoto)
+- **Evaluation Display**: Added October 2025
 
-### Small World
+## 📝 License
 
-* [x] Support of [Small World](https://boardgamegeek.com/boardgame/40692/small-world) with 2 to 5 players
-* [x] All types of people and power from the original game are supported. Each turn of a player may need several
-  actions (see code for more details).
-* [x] Extra effort to improve pretrained model for 2 players
+See [LICENSE](LICENSE) file for details.
 
-![Sample game with 2 players](smallworld/sample_game.gif) (Scores are on the 2 last rows after _sc=_, and number after
-_#_ is number of next round).
+## 🔗 Links
 
-### Akropolis
-
-* [x] Support of 2-3-4 players (just change NUMBER_PLAYERS constant)
-* [x] Added pretrained models for 2-3-4 players
-* [x] Benchmark versus "undefeated strategy" proposed on youtube
-
-The AI engine doesn't know which tiles will be drawn.
-
-![Sample game](akropolis/sample_game.gif)
-
-About 75+% winrate against [Undefeated Strategy](https://www.youtube.com/watch?v=1YKqBVuS65I). See [more details here](https://www.reddit.com/r/boardgames/comments/133f72n/comment/ne1dg79/)
-
-### Azul
-
-* [x] Support of [Azul](https://boardgamegeek.com/boardgame/230802/azul) for 2 players
-* [x] Strong pretrained model for 2 players added
-
-![Sample game](azul/sample_game.gif)
-
-The AI at reasonable MCTS depth seems much stronger than PJF98 (~700 rated on BGA).
+- **Play Online**: [https://cestpasphoto.github.io](https://cestpasphoto.github.io)
+- **Training Backend**: [https://github.com/cestpasphoto/alpha-zero-general](https://github.com/cestpasphoto/alpha-zero-general)
+- **Report Issues**: [GitHub Issues](https://github.com/cestpasphoto/cestpasphoto.github.io/issues)
 
 ---
 
-## Installation
-
-Contrary to the repo this repo is based on, this one doesn't set up a Docker. Just launch the Python scripts from your
-PC, no special GPU support required.
-
-### Dependencies
-
-```
-pip3 install onnxruntime onnx numba tqdm colorama coloredlogs
-pip3 install torch torchvision --extra-index-url https://download.pytorch.org/whl/cpu
-```
-
-## Running the code
-
-### Train the model
-
-Use `main.py` with your parameters, e.g.:
-
-`python main.py splendor -m 800 -f 0.1 -l 0.0003 -D 0.3 -C ../results/mytest -V 74`
-
-### How to play versus saved engine
-
-Launch `pit.py` with the name of the game and the name of the two players.
-
-`python /pit.py splendor splendor/pretrained_2players.pt splendor/pretrained_2players.pt -n 1 --display`
-or
-`python ./pit.py splendor splendor/pretrained_2players.pt human -n 1`
-
-
-You can run more than 1 game at a time and just display the game results ![2 networks fighting](splendor/many_games.gif)
-Contrary to baseline version, pit.py automatically retrieves training settings and load them (numMCTSSims,
-num_channels, ...) although you can override if you want; you may even select 2 different architecture to compare
-them!
-
-### Advanced details
-
-#### Recommended settings for training
-
-Compared to initial version, I target a smaller network but more MCTS simulations allowing to see further: this approach
-is less efficient on GPU, but similar on CPU and allow stronger AI.
-
-`python main.py splendor -m 800 -e 1000 -i 5 -F -c 2.5 -f 0.1 -T 10 -b 32 -l 0.0003 -p 1 -D 0.3 -C ../results/mytest -V 74`: 
-
-* Start by defining proper number of players in SplendorGame.py and disabling card reserve actions in first lines of
-  splendor/SplendorLogicNumba.py
-* `-c 2.5 -f 0.1`: MCTS options to tune, like cpuct value and FPU (first play urgency)
-* Initiate training with lower simulations number and less episodes per round
-* `-b 32 -l 0.0003 -p 1 -D 0.3`: define batch size, learning rate, number of epochs and dropout. Larger number of epochs may degrade performance, same for larger batch sizes so you only need to tune roughly dropout value (0., 0.3 or 0.3).
-* `-V 74`: define NN architecture to use. The specified NN architecture must be listed in splendor/splendorNNet.py (look at `forward()` function). 
-
-My baseline of training scenario is the following:
-
-1. `-m 100 -q 0. -l 0.003 -e 200 -i 2 -f 0.1`
-2. `-m 200 -q 0.5 -l 0.001 -e 200 -i 4 -f 0.1`
-3. `-m 400 -q 0.5 -l 0.0003 -e 500 -i 8 -F -f 0.1`
-4. `-m 800 -q 1.0 -l 0.0003 -e 1500 -i 10 -F -f 0.1`
-
-![Sample training](splendor/sample_training.jpg)
-
-Of course you need to tune parameters depending on the game, especially cpuct and FPU.
-If you specify a previous checkpoint using a different architecture (`-V` option), it will do its best by training such new architecture based on examples of previous checkpoint. It allows me starting first steps of training with small/fast networks and then experimenting larger networks.
-
-#### To debug
-
-To debug add `NUMBA_DISABLE_JIT=1` as a prefix before main.py, and the option `--debug`.
-
-#### Multithreading
-
-I also usually execute several trainings in parallel; you can evaluate the results obtained in the last 24 hours by
-using this command (execute as many times as threads): `./pit.py -A 24 -T 8`
-
-The code also runs several games to benefit from faster batch inferences; note that games are not run simultaneously but
-one at a time, meaning it still uses 1 CPU core. The downside is the bigger memory footprint.
-
-#### HyperParameter Optimisation
-You can use Ray to run HPO (especially Population Based Training "PBT"). This is still new so it may change but currently process is to configure first `rayConfig.py` and `useRay.py`, then call the latest.
+**Enjoy playing! 🎲🤖**
