@@ -252,7 +252,7 @@ function reset() {
   }
 }
 
-function cancel_and_undo() {
+async function cancel_and_undo() {
   if (move_sel.stage == 0) {
     game.revert_to_previous_human_move();
   }
@@ -262,9 +262,19 @@ function cancel_and_undo() {
   refreshButtons();
   changeMoveText();
   
-  // Refresh evaluation bar
+  // Recalculate evaluation for the new position after undo
   if (typeof refreshEvaluation === 'function') {
-    refreshEvaluation();
+    // First, trigger a recalculation via the Alpine component
+    const evalContainer = window.evalBar;
+    if (evalContainer && evalContainer._x_dataStack) {
+      const alpineData = evalContainer._x_dataStack[0];
+      if (alpineData && alpineData.recalculate) {
+        await alpineData.recalculate();
+      }
+    } else {
+      // Fallback to just refreshing display
+      await refreshEvaluation();
+    }
   }
 }
 

@@ -61,12 +61,7 @@ async def guessBestAction():
 	else:
 		current_eval = [-float(q[0]), float(q[0])]
 	
-	# Check for mate (forced win)
-	mate_status = ''
-	if abs(current_eval[0]) >= 0.99:
-		mate_status = ' 🏆 MATE DETECTED!' if current_eval[0] > 0 else ' 💀 MATE DETECTED!'
-	
-	print(f'AI Evaluation: Player 0: {current_eval[0]:+.3f}, Player 1: {current_eval[1]:+.3f} (current player: {player}){mate_status}')
+	print(f'AI Evaluation: Player 0: {current_eval[0]:+.3f}, Player 1: {current_eval[1]:+.3f} (current player: {player})')
 
 	# Compute good moves
 	print('List of best moves found by AI:')
@@ -102,12 +97,7 @@ async def calculate_eval_for_current_position():
 	else:
 		current_eval = [-float(q[0]), float(q[0])]
 	
-	# Check for mate (forced win)
-	mate_status = ''
-	if abs(current_eval[0]) >= 0.99:
-		mate_status = ' 🏆 MATE!' if current_eval[0] > 0 else ' 💀 MATE!'
-	
-	print(f'🔄 Eval recalculated: Player 0: {current_eval[0]:+.3f}, Player 1: {current_eval[1]:+.3f} (current player: {player}){mate_status}')
+	print(f'🔄 Eval recalculated: Player 0: {current_eval[0]:+.3f}, Player 1: {current_eval[1]:+.3f} (current player: {player})')
 	
 	return current_eval
 

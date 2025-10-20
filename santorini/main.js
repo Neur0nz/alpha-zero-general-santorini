@@ -511,20 +511,17 @@ function getChessStyleEvalBar(value, width=400) {
   const clampedValue = Math.max(-1, Math.min(1, value)); // Clamp to [-1, 1]
   const halfWidth = width / 2;
   
-  // Detect mate (forced win/loss)
-  const isMate = Math.abs(clampedValue) >= 0.99;
-  
   // Determine color and width based on value
   let barColor, barWidth, barDirection;
   
   if (clampedValue > 0) {
     // Player 0 (Green) winning - expand right, green color
-    // Use full halfWidth when at max (±1.0)
-    barWidth = Math.abs(clampedValue) >= 0.999 ? halfWidth : Math.round(Math.abs(clampedValue) * halfWidth);
+    // Use full halfWidth when at max (±1.0) to ensure bar reaches 100%
+    barWidth = Math.abs(clampedValue) >= 0.995 ? halfWidth : Math.round(Math.abs(clampedValue) * halfWidth);
     barDirection = 'right';
     
-    if (isMate || clampedValue > 0.6) {
-      barColor = '#21BA45'; // Strong green (mate or big advantage)
+    if (clampedValue > 0.6) {
+      barColor = '#21BA45'; // Strong green
     } else if (clampedValue > 0.2) {
       barColor = '#6DD47E'; // Light green
     } else {
@@ -532,11 +529,11 @@ function getChessStyleEvalBar(value, width=400) {
     }
   } else if (clampedValue < 0) {
     // Player 1 (Red) winning - expand left, red color
-    barWidth = Math.abs(clampedValue) >= 0.999 ? halfWidth : Math.round(Math.abs(clampedValue) * halfWidth);
+    barWidth = Math.abs(clampedValue) >= 0.995 ? halfWidth : Math.round(Math.abs(clampedValue) * halfWidth);
     barDirection = 'left';
     
-    if (isMate || clampedValue < -0.6) {
-      barColor = '#DB2828'; // Strong red (mate or big advantage)
+    if (clampedValue < -0.6) {
+      barColor = '#DB2828'; // Strong red
     } else if (clampedValue < -0.2) {
       barColor = '#F2711C'; // Orange-red
     } else {
@@ -564,99 +561,113 @@ function getChessStyleEvalBar(value, width=400) {
   
   barHTML += '</div>';
   
-  // Add numeric value or "MATE" centered below
-  let evalText, advantage;
-  
-  if (isMate) {
-    // Forced win detected
-    if (clampedValue > 0) {
-      evalText = '♔ MATE';
-      advantage = 'Green (Player 0) has forced win!';
-    } else {
-      evalText = '♔ MATE';
-      advantage = 'Red (Player 1) has forced win!';
-    }
+  // Add numeric value centered below
+  let evalText = (value >= 0 ? '+' : '') + value.toFixed(2);
+  let advantage = '';
+  if (Math.abs(value) < 0.1) {
+    advantage = 'Equal position';
+  } else if (value > 0) {
+    advantage = 'Green (Player 0) advantage';
   } else {
-    // Normal evaluation
-    evalText = (value >= 0 ? '+' : '') + value.toFixed(2);
-    if (Math.abs(value) < 0.1) {
-      advantage = 'Equal position';
-    } else if (value > 0) {
-      advantage = 'Green (Player 0) advantage';
-    } else {
-      advantage = 'Red (Player 1) advantage';
-    }
+    advantage = 'Red (Player 1) advantage';
   }
   
   barHTML += '<div style="text-align: center; font-size: 13px; margin-top: 4px;">';
-  barHTML += '<span style="font-weight: bold; font-size: ' + (isMate ? '18px' : '16px') + '; color: ' + (isMate ? (clampedValue > 0 ? '#21BA45' : '#DB2828') : '#333') + ';">' + evalText + '</span>';
+  barHTML += '<span style="font-weight: bold; font-size: 16px;">' + evalText + '</span>';
   barHTML += ' <span style="color: #666; margin-left: 8px;">(' + advantage + ')</span>';
   barHTML += '</div>';
   
   return barHTML;
 }
 
-async function refreshEvaluation() {
-  const evalContainer = document.getElementById('evalContainer');
-  if (!evalContainer) return;
-  
-  let evalValue = 0.0; // Default to equal position
-  
-  if (game.py != null) {
-    try {
-      const evalValues = game.py.get_current_eval().toJs({create_proxies: false});
-      if (evalValues && evalValues.length >= 1) {
-        evalValue = evalValues[0]; // Player 0 perspective
+// Alpine.js data function for evaluation bar
+function evalBarData() {
+  return {
+    value: 0.0,
+    calculating: false,
+    
+    get barWidth() {
+      const halfWidth = 200; // 400px / 2
+      const absValue = Math.abs(this.value);
+      return absValue >= 0.995 ? halfWidth : Math.round(absValue * halfWidth);
+    },
+    
+    get barColor() {
+      const v = this.value;
+      if (v > 0) {
+        // Player 0 (Green) winning
+        if (v > 0.6) return '#21BA45'; // Strong green
+        if (v > 0.2) return '#6DD47E'; // Light green
+        return '#95E1A1'; // Very light green
+      } else {
+        // Player 1 (Red) winning
+        if (v < -0.6) return '#DB2828'; // Strong red
+        if (v < -0.2) return '#F2711C'; // Orange-red
+        return '#FF9E80'; // Light orange
       }
-    } catch (e) {
-      console.log('Could not get evaluation, using 0.0:', e);
+    },
+    
+    get evalText() {
+      return (this.value >= 0 ? '+' : '') + this.value.toFixed(2);
+    },
+    
+    get advantage() {
+      if (Math.abs(this.value) < 0.1) return 'Equal position';
+      if (this.value > 0) return 'Green (Player 0) advantage';
+      return 'Red (Player 1) advantage';
+    },
+    
+    updateValue(newValue) {
+      this.value = newValue;
+    },
+    
+    async recalculate() {
+      if (game.py == null) {
+        console.log('Game not initialized yet');
+        return;
+      }
+      
+      this.calculating = true;
+      try {
+        console.log('🔄 Calculating evaluation...');
+        await game.py.calculate_eval_for_current_position();
+        await this.fetchEvaluation();
+        console.log('✅ Evaluation updated!');
+      } catch (e) {
+        console.error('Error calculating evaluation:', e);
+      } finally {
+        this.calculating = false;
+      }
+    },
+    
+    async fetchEvaluation() {
+      let evalValue = 0.0;
+      
+      if (game.py != null) {
+        try {
+          const evalValues = game.py.get_current_eval().toJs({create_proxies: false});
+          if (evalValues && evalValues.length >= 1) {
+            evalValue = evalValues[0]; // Player 0 perspective
+          }
+        } catch (e) {
+          console.log('Could not get evaluation, using 0.0:', e);
+        }
+      }
+      
+      this.value = evalValue;
     }
-  }
-  
-  // Always show the bar with calc button
-  let html = '<div class="ui segment" style="background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); padding: 12px; margin-top: 10px;">';
-  html += '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">';
-  html += '<div style="flex: 1;"></div>';
-  html += '<div style="text-align: center; font-weight: bold; font-size: 14px; color: #333;">🤖 AI EVALUATION</div>';
-  html += '<div style="flex: 1; text-align: right;">';
-  html += '<button class="ui mini compact button" onclick="calculateEval()" id="calcEvalBtn" title="Recalculate evaluation for current position">🔄 Calc</button>';
-  html += '</div>';
-  html += '</div>';
-  html += '<div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; padding: 0 20px; color: #666;">';
-  html += '<span style="color: #DB2828;">← Red (Player 1)</span>';
-  html += '<span style="color: #21BA45;">Green (Player 0) →</span>';
-  html += '</div>';
-  html += getChessStyleEvalBar(evalValue, 400);
-  html += '</div>';
-  
-  evalContainer.innerHTML = html;
-  evalContainer.style.display = 'block';
+  };
 }
 
-async function calculateEval() {
-  if (game.py == null) {
-    console.log('Game not initialized yet');
-    return;
-  }
+// Keep refreshEvaluation for compatibility with existing code
+async function refreshEvaluation() {
+  // Get the Alpine component instance
+  const evalContainer = window.evalBar;
+  if (!evalContainer || !evalContainer._x_dataStack) return;
   
-  const calcBtn = document.getElementById('calcEvalBtn');
-  if (calcBtn) {
-    calcBtn.classList.add('loading');
-    calcBtn.disabled = true;
-  }
-  
-  try {
-    console.log('🔄 Calculating evaluation...');
-    await game.py.calculate_eval_for_current_position();
-    await refreshEvaluation();
-    console.log('✅ Evaluation updated!');
-  } catch (e) {
-    console.error('Error calculating evaluation:', e);
-  } finally {
-    if (calcBtn) {
-      calcBtn.classList.remove('loading');
-      calcBtn.disabled = false;
-    }
+  const alpineData = evalContainer._x_dataStack[0];
+  if (alpineData && alpineData.fetchEvaluation) {
+    await alpineData.fetchEvaluation();
   }
 }
 

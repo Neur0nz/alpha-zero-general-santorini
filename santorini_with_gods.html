@@ -6,6 +6,7 @@
   <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/fomantic-ui@2.9.3/dist/semantic.min.css">
   <script src="https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.0/dist/ort.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   
   <script src="./santorini/constants_withgods.js"></script>
   <script src="./common/game.js"></script>
@@ -87,7 +88,55 @@
 
 
   <!-- Evaluation Display -->
-  <div id="evalContainer"></div>
+  <div id="evalContainer" x-data="evalBarData()" x-init="window.evalBar = $el">
+    <div class="ui segment" style="background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%); padding: 12px; margin-top: 10px;">
+      <!-- Header with Calc button -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="flex: 1;"></div>
+        <div style="text-align: center; font-weight: bold; font-size: 14px; color: #333;">🤖 AI EVALUATION</div>
+        <div style="flex: 1; text-align: right;">
+          <button 
+            class="ui mini compact button" 
+            @click="recalculate()" 
+            :class="{ 'loading': calculating }"
+            :disabled="calculating"
+            title="Recalculate evaluation for current position">
+            🔄 Calc
+          </button>
+        </div>
+      </div>
+      
+      <!-- Labels -->
+      <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; padding: 0 20px; color: #666;">
+        <span style="color: #DB2828;">← Red (Player 1)</span>
+        <span style="color: #21BA45;">Green (Player 0) →</span>
+      </div>
+      
+      <!-- Evaluation Bar -->
+      <div style="position: relative; width: 400px; height: 24px; border: 2px solid #333; border-radius: 4px; margin: 8px auto; background: #f0f0f0;">
+        <!-- Center line marker -->
+        <div style="position: absolute; left: 50%; top: 0; width: 2px; height: 100%; background: #666; transform: translateX(-1px);"></div>
+        
+        <!-- Colored bar expanding from center -->
+        <template x-if="value > 0">
+          <div 
+            :style="`position: absolute; left: 50%; top: 0; width: ${barWidth}px; height: 100%; background: ${barColor}; transition: width 0.3s ease;`">
+          </div>
+        </template>
+        <template x-if="value < 0">
+          <div 
+            :style="`position: absolute; right: 50%; top: 0; width: ${barWidth}px; height: 100%; background: ${barColor}; transition: width 0.3s ease;`">
+          </div>
+        </template>
+      </div>
+      
+      <!-- Numeric value and description -->
+      <div style="text-align: center; font-size: 13px; margin-top: 4px;">
+        <span style="font-weight: bold; font-size: 16px;" x-text="evalText"></span>
+        <span style="color: #666; margin-left: 8px;" x-text="'(' + advantage + ')'"></span>
+      </div>
+    </div>
+  </div>
 
   <!-- Table -->
 
