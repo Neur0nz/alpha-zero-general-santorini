@@ -69,6 +69,12 @@ class AbstractGame {
       return;
     }
 
+    if (typeof redoStack !== 'undefined' && isManualMove) {
+      if (typeof isRedoInProgress === 'undefined' || !isRedoInProgress) {
+        redoStack = [];
+      }
+    }
+
     this.pre_move(action, isManualMove);
 
     this.previousPlayer = this.nextPlayer;
@@ -96,9 +102,13 @@ class AbstractGame {
   revert_to_previous_human_move() {
     const player = this.who_is_human();
     const data_tuple = this.py.revert_to_previous_move(player).toJs({ create_proxies: false });
-    [this.nextPlayer, this.gameEnded, this.validMoves] = data_tuple;
+    const [nextPlayer, gameEnded, validMoves, removedActions = []] = data_tuple;
+    this.nextPlayer = nextPlayer;
+    this.gameEnded = gameEnded;
+    this.validMoves = validMoves;
     this.previousPlayer = null;
     this.post_set_data();
+    return removedActions;
   }
 
   change_difficulty(numMCTSSims) {
@@ -234,8 +244,19 @@ function reset() {
 }
 
 async function cancel_and_undo() {
+  let undoneActions = [];
   if (move_sel.stage === 0) {
-    game.revert_to_previous_human_move();
+    const reverted = game.revert_to_previous_human_move();
+    undoneActions = Array.isArray(reverted) ? reverted : Array.from(reverted || []);
+  }
+
+  if (typeof redoStack !== 'undefined' && undoneActions && undoneActions.length > 0) {
+    undoneActions.forEach((action) => {
+      const numericAction = typeof action === 'number' ? action : Number(action);
+      if (!Number.isNaN(numericAction)) {
+        redoStack.push(numericAction);
+      }
+    });
   }
   move_sel.resetAndStart();
 

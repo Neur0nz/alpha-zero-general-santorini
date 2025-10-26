@@ -183,22 +183,29 @@ async def list_current_moves_with_adv(limit: int = 5, numMCTSSims: int | None = 
 		mcts.args.numMCTSSims = prev_sims
 
 def revert_to_previous_move(player_asking_revert):
-	global g, board, mcts, player, history
-	if len(history) > 0:
-		# Revert to the previous 0 before a 1, or first 0 from game
-		for index, state in enumerate(history):
-			if (state[0] == player_asking_revert) and (index+1 == len(history) or history[index+1][0] != player_asking_revert):
-				break
-		print(f'index={index} / {len(history)}');
-		
-		# Actually revert, and update history
-		# print(f'Board to revert: {state[1]}')
-		player, board = state[0], state[1]
-		history = history[index+1:]
+        global g, board, mcts, player, history
 
-	end = g.getGameEnded(board, player)
-	valids = g.getValidMoves(board, player)
-	return player, end, valids
+        removed_actions = []
+
+        if len(history) > 0:
+                # Revert to the previous 0 before a 1, or first 0 from game
+                for index, state in enumerate(history):
+                        if (state[0] == player_asking_revert) and (index+1 == len(history) or history[index+1][0] != player_asking_revert):
+                                break
+                print(f'index={index} / {len(history)}');
+
+                removed_states = history[:index+1]
+
+                # Actually revert, and update history
+                # print(f'Board to revert: {state[1]}')
+                player, board = state[0], state[1]
+                history = history[index+1:]
+
+                removed_actions = [int(state[2]) for state in removed_states]
+
+        end = g.getGameEnded(board, player)
+        valids = g.getValidMoves(board, player)
+        return player, end, valids, removed_actions
 
 def jump_to_move_index(move_index):
 	"""Jump to a specific move index in the history (0-based)"""
