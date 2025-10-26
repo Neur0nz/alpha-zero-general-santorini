@@ -16,7 +16,8 @@
     "@supabase/supabase-js": "^2.76.1",
     "framer-motion": "^11.0.25",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "supabase": "^2.53.6"
   },
   "devDependencies": {
     "@types/node": "^20.11.19",
