@@ -1,5 +1,4 @@
 *.pyc
-*.onnx
 *.prof
 *.nbi
 *.nbc
