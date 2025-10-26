@@ -405,15 +405,23 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         throw new Error('Match not found.');
       }
 
-      if (targetMatch.status !== 'waiting_for_opponent') {
-        throw new Error('Match is no longer accepting players.');
-      }
+      const isCreator = targetMatch.creator_id === profile.id;
+      const isOpponent = targetMatch.opponent_id === profile.id;
 
-      if (targetMatch.creator_id === profile.id) {
-        setState((prev) => ({ ...prev, activeMatch: targetMatch, joinCode: targetMatch.private_join_code, moves: [] }));
+      if (isCreator || isOpponent) {
+        setState((prev) => ({
+          ...prev,
+          activeMatch: targetMatch,
+          joinCode: targetMatch.private_join_code,
+          moves: [],
+        }));
         void ensurePlayersLoaded([targetMatch.creator_id, targetMatch.opponent_id ?? undefined]);
         const enriched = attachProfiles(targetMatch);
         return enriched ?? { ...targetMatch, creator: null, opponent: null };
+      }
+
+      if (targetMatch.status !== 'waiting_for_opponent') {
+        throw new Error('Match is no longer accepting players.');
       }
 
       const { data, error } = await client
