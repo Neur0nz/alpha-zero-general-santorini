@@ -44,7 +44,7 @@ jobs:
         run: |
           mkdir -p web/public/santorini
           echo "Copying model file from repository..."
-          cp santorini/model_no_god.onnx web/public/santorini/model_no_god.onnx
+          cp ../santorini/model_no_god.onnx web/public/santorini/model_no_god.onnx
           echo "Model file copied. Checking size..."
           ls -la web/public/santorini/model_no_god.onnx
           echo "Model file size: $(wc -c < web/public/santorini/model_no_god.onnx) bytes"
