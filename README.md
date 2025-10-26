@@ -28,7 +28,7 @@ haven't connected a Supabase project yet, follow the step-by-step guide in
 - creating the project and enabling email magic-link sign-in,
 - applying the `players`, `matches`, and `match_moves` schema,
 - adding Row Level Security policies so only participants can modify a match,
-- enabling Realtime for lobby updates (via the Replication UI **or** SQL `alter publication` commands if the UI is unavailable), and
+- turning on Realtime for lobby updates, and
 - configuring the required `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`
   environment variables (see `web/.env.example`).
 
