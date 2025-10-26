@@ -41,14 +41,22 @@ jobs:
         run: npm ci
         working-directory: web
 
-      - name: Download Santorini model
+      - name: Copy Santorini model
         run: |
           mkdir -p web/public/santorini
-          curl -L -o web/public/santorini/model_no_god.onnx \
-            https://github.com/cestpasphoto/alpha-zero-general-santorini/releases/latest/download/model_no_god.onnx
+          echo "Copying model file from repository..."
+          cp santorini/model_no_god.onnx web/public/santorini/model_no_god.onnx
+          echo "Model file copied. Checking size..."
+          ls -la web/public/santorini/model_no_god.onnx
+          echo "Model file size: $(wc -c < web/public/santorini/model_no_god.onnx) bytes"
 
       - name: Build static site
-        run: npm run build
+        run: |
+          echo "Environment variables check:"
+          echo "VITE_SUPABASE_URL: '$VITE_SUPABASE_URL'"
+          echo "VITE_SUPABASE_ANON_KEY: '$VITE_SUPABASE_ANON_KEY'"
+          echo "VITE_PUBLIC_BASE_PATH: '$VITE_PUBLIC_BASE_PATH'"
+          npm run build
         working-directory: web
 
       - name: Verify build output
