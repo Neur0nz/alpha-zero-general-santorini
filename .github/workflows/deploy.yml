@@ -42,19 +42,9 @@ jobs:
 
       - name: Copy Santorini model
         run: |
-          echo "Current directory: $(pwd)"
-          echo "Repository contents:"
-          ls -la
-          echo "Looking for ONNX files:"
-          find . -name "*.onnx" -type f
           mkdir -p web/public/santorini
-          echo "Copying model file from repository..."
           cp santorini/model_no_god.onnx web/public/santorini/model_no_god.onnx
-          echo "Model file copied. Checking size..."
-          ls -la web/public/santorini/model_no_god.onnx
-          echo "Model file size: $(wc -c < web/public/santorini/model_no_god.onnx) bytes"
-          echo "Checking if model file is valid ONNX format..."
-          file web/public/santorini/model_no_god.onnx
+          echo "Model file copied successfully"
 
       - name: Build static site
         run: |
