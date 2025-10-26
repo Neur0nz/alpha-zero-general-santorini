@@ -5,6 +5,7 @@
 *.nbc
 .DS_Store
 
+
 /temp/
 /.project
 /.pydevproject
@@ -27,4 +28,9 @@ __pycache__/
 # Vite build artifacts
 dist/
 web/node_modules/
+
+# Environment files
+.env
+.env.*
+*.env
 
