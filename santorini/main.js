@@ -22,12 +22,12 @@ const GAME_CONSTANTS = {
 };
 
 const list_of_files = [
-  ['santorini/Game.py', 'Game.py'],
-  ['santorini/proxy.py', 'proxy.py'],
-  ['santorini/MCTS.py', 'MCTS.py'],
-  ['santorini/SantoriniDisplay.py', 'SantoriniDisplay.py'],
-  ['santorini/SantoriniGame.py', 'SantoriniGame.py'],
-  ['santorini/SantoriniLogicNumba.py', 'SantoriniLogicNumba.py'],
+  ['./Game.py', 'Game.py'],
+  ['./proxy.py', 'proxy.py'],
+  ['./MCTS.py', 'MCTS.py'],
+  ['./SantoriniDisplay.py', 'SantoriniDisplay.py'],
+  ['./SantoriniGame.py', 'SantoriniGame.py'],
+  ['./SantoriniLogicNumba.py', 'SantoriniLogicNumba.py'],
   [pyConstantsFileName, 'SantoriniConstants.py'],
 ];
 
