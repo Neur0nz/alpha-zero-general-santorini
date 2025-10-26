@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - master
   workflow_dispatch:
 
 permissions:
@@ -19,6 +20,8 @@ env:
   VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
   VITE_PUBLIC_BASE_PATH: ${{ vars.PUBLIC_BASE_PATH || '/' }}
+  VITE_PYODIDE_URL: https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js
+  VITE_ONNX_URL: https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js
 
 jobs:
   build:
@@ -48,10 +51,15 @@ jobs:
         run: npm run build
         working-directory: web
 
+      - name: Verify build output
+        run: |
+          ls -la ../dist
+          echo "Build completed successfully"
+
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: ../dist
 
   deploy:
     environment:
