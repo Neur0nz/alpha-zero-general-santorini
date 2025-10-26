@@ -54,14 +54,16 @@ def changeDifficulty(numMCTSSims):
 
 
 def begin_setup():
-	"""Clear move history so edits become the new start state."""
-	global history, future_history
-	history = []
-	future_history = []
+    """Clear move history so edits become the new start state."""
+    global history, future_history, player
+    history = []
+    future_history = []
+    # Guided setups always start with Player 0 to move
+    player = 0
 
 def end_setup():
-	"""Finalize setup after edits and return new state."""
-	return update_after_edit()
+    """Finalize setup after edits and return new state."""
+    return update_after_edit()
 
 
 async def guessBestAction():
@@ -390,6 +392,7 @@ def _read_level(y, x):
 
 
 def editCell(clicked_y, clicked_x, editMode):
+    global board
     if editMode == 1:
         g.board.levels[clicked_y, clicked_x] = (
             g.board.levels[clicked_y, clicked_x] + 1
@@ -411,10 +414,13 @@ def editCell(clicked_y, clicked_x, editMode):
             elif g.board.workers.flat[xy] < 0:
                 counts[1] += 1
                 g.board.workers.flat[xy] = -counts[1]
-        if counts[0] != 2 or counts[0] != 2:
+        if counts[0] != 2 or counts[1] != 2:
             print("Invalid board", counts)
     else:
         print("Dont know what to do in editMode", editMode)
+
+    # Keep the exported board state in sync with edits applied to g.board
+    board = np.copy(g.board.get_state())
 
 
 def update_after_edit():

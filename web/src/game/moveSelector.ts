@@ -128,6 +128,15 @@ export class MoveSelector {
       return;
     }
 
+    if (this.editMode === 1 || this.editMode === 2) {
+      for (let y = 0; y < GAME_CONSTANTS.BOARD_SIZE; y += 1) {
+        for (let x = 0; x < GAME_CONSTANTS.BOARD_SIZE; x += 1) {
+          this.cells[y][x] = true;
+        }
+      }
+      return;
+    }
+
     if (!this.game.is_human_player('next')) {
       this.selectNone();
       return;
