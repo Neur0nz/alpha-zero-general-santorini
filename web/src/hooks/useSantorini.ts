@@ -368,18 +368,44 @@ export function useSantorini() {
     refreshHistory();
   }, [readBoard, updateSelectable, updateButtons, refreshHistory]);
 
+  const initializeStartedRef = useRef(false);
+  const initializePromiseRef = useRef<Promise<void> | null>(null);
+
   const initialize = useCallback(async () => {
-    setLoading(true);
-    await loadPyodideRuntime();
-    const game = gameRef.current;
-    const selector = selectorRef.current;
-    if (!game || !selector) return;
-    game.init_game();
-    selector.resetAndStart();
-    await syncUi(true);
-    await refreshEvaluation();
-    setLoading(false);
-    setButtons((prev) => ({ ...prev, loading: false }));
+    if (initializeStartedRef.current) {
+      if (initializePromiseRef.current) {
+        await initializePromiseRef.current;
+      }
+      return;
+    }
+
+    initializeStartedRef.current = true;
+
+    const initPromise = (async () => {
+      try {
+        setLoading(true);
+        await loadPyodideRuntime();
+        const game = gameRef.current;
+        const selector = selectorRef.current;
+        if (!game || !selector) {
+          return;
+        }
+        game.init_game();
+        selector.resetAndStart();
+        await syncUi(true);
+        await refreshEvaluation();
+        setLoading(false);
+        setButtons((prev) => ({ ...prev, loading: false }));
+      } catch (error) {
+        initializeStartedRef.current = false;
+        throw error;
+      } finally {
+        initializePromiseRef.current = null;
+      }
+    })();
+
+    initializePromiseRef.current = initPromise;
+    await initPromise;
   }, [loadPyodideRuntime, refreshEvaluation, syncUi]);
 
   const aiPlayIfNeeded = useCallback(async () => {
