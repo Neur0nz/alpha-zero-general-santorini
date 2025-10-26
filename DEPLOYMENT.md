@@ -37,12 +37,10 @@ mirror the file yourself, change the download URL accordingly.
 ### 1.2. Optional: override the base path
 
 When a Vite app is hosted under a subpath (e.g. `https://username.github.io/<repo>`),
-it must be built with the matching base. During the build the workflow writes
-`VITE_PUBLIC_BASE_PATH` into the environment: by default it uses `/<repo>/` based
-on `GITHUB_REPOSITORY`. If you need a different base (for example `/` on
-user/organization pages or a custom subdirectory), create a repository variable
-named `PUBLIC_BASE_PATH` and set it to the desired value (including the trailing
-slash).
+it must be built with the matching base. Set the repository variable
+`PUBLIC_BASE_PATH` to `/<repo>/` or edit the workflow’s `VITE_PUBLIC_BASE_PATH`
+value directly. The `base` option in `vite.config.ts` reads from
+`VITE_PUBLIC_BASE_PATH`, defaulting to `/` for user/organization pages.
 
 ### 1.3. Enable GitHub Pages
 

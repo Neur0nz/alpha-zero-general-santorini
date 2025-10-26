@@ -18,6 +18,7 @@ concurrency:
 env:
   VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+  VITE_PUBLIC_BASE_PATH: ${{ vars.PUBLIC_BASE_PATH || '/' }}
 
 jobs:
   build:
@@ -32,15 +33,6 @@ jobs:
           node-version: 20
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
-
-      - name: Configure Vite base path
-        run: |
-          if [ -n "${{ vars.PUBLIC_BASE_PATH }}" ]; then
-            echo "VITE_PUBLIC_BASE_PATH=${{ vars.PUBLIC_BASE_PATH }}" >> "$GITHUB_ENV"
-          else
-            REPO_NAME="${GITHUB_REPOSITORY##*/}"
-            echo "VITE_PUBLIC_BASE_PATH=/${REPO_NAME}/" >> "$GITHUB_ENV"
-          fi
 
       - name: Install dependencies
         run: npm ci

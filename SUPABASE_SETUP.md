@@ -164,6 +164,8 @@ your project, the Replication UI may not be available, so follow whichever path 
   alter publication supabase_realtime add table public.matches;
   alter publication supabase_realtime add table public.match_moves;
   ```
+1. Navigate to **Database → Replication → Realtime**.
+2. Add `public.matches` and `public.match_moves` to the enabled tables. The lobby and in-game updates depend on these realtime streams.
 
 ## 6. Configure the web app
 1. Duplicate `web/.env.example` to `web/.env.local` and fill in the values you copied earlier:

@@ -4,7 +4,7 @@
 PORT=${1:-5173}
 
 echo "╔════════════════════════════════════════════════════════════════════════════╗"
-echo "║                 Santorini AlphaZero Demo - Vite Dev Server                 ║"
+echo "║                 Ascent Demo - Vite Dev Server                 ║"
 echo "╚════════════════════════════════════════════════════════════════════════════╝"
 echo ""
 echo "🌐 Starting Vite on port $PORT..."
