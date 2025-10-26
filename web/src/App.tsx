@@ -42,23 +42,27 @@ function App() {
           <Flex
             direction={{ base: 'column', xl: 'row' }}
             align="flex-start"
-            justify="center"
-            gap={{ base: 8, xl: 12 }}
-            flexWrap="wrap"
+            justify="space-between"
+            gap={{ base: 8, xl: 8 }}
+            flexWrap="nowrap"
           >
             <Box
               flexShrink={0}
-              flexBasis={{ base: '100%', md: 'auto' }}
+              flexBasis={{ base: '100%', xl: '500px' }}
               display="flex"
               justifyContent="center"
+              w="500px"
+              minW="500px"
+              maxW="500px"
             >
               {loading ? (
                 <Flex
                   align="center"
                   justify="center"
-                  minH="360px"
-                  minW={{ base: '260px', md: '420px' }}
-                  w="100%"
+                  h="500px"
+                  w="500px"
+                  minH="500px"
+                  minW="500px"
                 >
                   <Spinner size="xl" color="teal.300" thickness="4px" />
                 </Flex>
@@ -76,10 +80,10 @@ function App() {
               )}
             </Box>
             <Box
-              flex="1"
+              flex="0 0 auto"
               minW={{ base: '100%', xl: '380px' }}
-              maxW={{ base: '100%', xl: '460px' }}
-              width="100%"
+              maxW={{ base: '100%', xl: '420px' }}
+              width={{ base: '100%', xl: '420px' }}
             >
               <EvaluationPanel
                 loading={loading}

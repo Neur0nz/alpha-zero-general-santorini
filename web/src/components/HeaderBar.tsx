@@ -41,6 +41,9 @@ interface HeaderBarProps {
 function HeaderBar({ controls, onReset, onShowHistory }: HeaderBarProps) {
   const { colorMode, toggleColorMode } = useColorMode();
   const bg = useColorModeValue('whiteAlpha.200', 'gray.800');
+  const selectBg = useColorModeValue('white', 'gray.700');
+  const selectBorderColor = useColorModeValue('gray.300', 'gray.600');
+  const selectTextColor = useColorModeValue('gray.900', 'white');
   const [difficulty, setDifficulty] = useState<number>(50);
   const [mode, setMode] = useState<'P0' | 'P1' | 'Human' | 'AI'>('P0');
 
@@ -86,12 +89,15 @@ function HeaderBar({ controls, onReset, onShowHistory }: HeaderBarProps) {
             size="sm"
             value={difficulty}
             onChange={handleDifficulty}
-            bg="blackAlpha.500"
-            borderColor="whiteAlpha.300"
+            bg={selectBg}
+            borderColor={selectBorderColor}
+            color={selectTextColor}
+            _hover={{ borderColor: selectBorderColor }}
+            _focus={{ borderColor: 'teal.400', boxShadow: '0 0 0 1px teal.400' }}
             maxW="200px"
           >
             {difficultyPresets.map((preset) => (
-              <option key={preset.value} value={preset.value}>
+              <option key={preset.value} value={preset.value} style={{ backgroundColor: colorMode === 'dark' ? '#2D3748' : 'white', color: colorMode === 'dark' ? 'white' : 'black' }}>
                 {preset.label}
               </option>
             ))}
@@ -100,12 +106,15 @@ function HeaderBar({ controls, onReset, onShowHistory }: HeaderBarProps) {
             size="sm"
             value={mode}
             onChange={handleMode}
-            bg="blackAlpha.500"
-            borderColor="whiteAlpha.300"
+            bg={selectBg}
+            borderColor={selectBorderColor}
+            color={selectTextColor}
+            _hover={{ borderColor: selectBorderColor }}
+            _focus={{ borderColor: 'teal.400', boxShadow: '0 0 0 1px teal.400' }}
             maxW="200px"
           >
             {gameModes.map((preset) => (
-              <option key={preset.value} value={preset.value}>
+              <option key={preset.value} value={preset.value} style={{ backgroundColor: colorMode === 'dark' ? '#2D3748' : 'white', color: colorMode === 'dark' ? 'white' : 'black' }}>
                 {preset.label}
               </option>
             ))}
