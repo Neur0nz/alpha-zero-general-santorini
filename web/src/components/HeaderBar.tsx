@@ -61,40 +61,71 @@ function HeaderBar({ controls, onReset, onShowHistory, buttons }: HeaderBarProps
   };
 
   return (
-    <Box bg={bg} borderBottomWidth="1px" borderColor="whiteAlpha.200" px={{ base: 4, md: 8 }} py={4}>
-      <Flex align="center" gap={4} wrap="wrap">
-        <Heading size="md" letterSpacing="wide">
-          Santorini AlphaZero
-        </Heading>
-        <HStack spacing={3} flexWrap="wrap">
-          <Button colorScheme="teal" size="sm" onClick={onReset} leftIcon={<RepeatIcon />}>
-            New game
+    <Box bg={bg} borderBottomWidth="1px" borderColor="whiteAlpha.200" px={{ base: 3, md: 8 }} py={{ base: 3, md: 4 }}>
+      <Flex 
+        direction={{ base: 'column', md: 'row' }} 
+        align={{ base: 'stretch', md: 'center' }} 
+        gap={{ base: 3, md: 4 }}
+      >
+        <Flex align="center" justify="space-between" flex="1">
+          <Heading size={{ base: "sm", md: "md" }} letterSpacing="wide">
+            Santorini AlphaZero
+          </Heading>
+          <HStack spacing={2} display={{ base: 'flex', md: 'none' }}>
+            <Tooltip label="Jump to history" hasArrow>
+              <IconButton
+                aria-label="History"
+                icon={<TimeIcon />}
+                size="sm"
+                variant="outline"
+                colorScheme="blue"
+                onClick={onShowHistory}
+              />
+            </Tooltip>
+            <Tooltip label="Toggle color mode" hasArrow>
+              <IconButton
+                aria-label="Toggle color mode"
+                icon={colorMode === 'dark' ? <SunIcon /> : <MoonIcon />}
+                size="sm"
+                variant="outline"
+                onClick={toggleColorMode}
+              />
+            </Tooltip>
+          </HStack>
+        </Flex>
+        
+        <HStack spacing={{ base: 2, md: 3 }} flexWrap="wrap" justify={{ base: 'center', md: 'flex-start' }}>
+          <Button colorScheme="teal" size={{ base: "xs", md: "sm" }} onClick={onReset} leftIcon={<RepeatIcon />}>
+            <Box display={{ base: 'none', sm: 'inline' }}>New game</Box>
+            <Box display={{ base: 'inline', sm: 'none' }}>New</Box>
           </Button>
           <Button 
             colorScheme="blue" 
-            size="sm" 
+            size={{ base: "xs", md: "sm" }}
             onClick={controls.startGuidedSetup}
             isDisabled={buttons.setupMode}
             title="Guided setup: place pieces then start"
           >
             Setup
           </Button>
-          <Button colorScheme="orange" size="sm" onClick={controls.toggleEdit}>
-            Toggle edit
+          <Button colorScheme="orange" size={{ base: "xs", md: "sm" }} onClick={controls.toggleEdit}>
+            <Box display={{ base: 'none', sm: 'inline' }}>Toggle edit</Box>
+            <Box display={{ base: 'inline', sm: 'none' }}>Edit</Box>
           </Button>
           <Tooltip label="Jump to history" hasArrow>
             <IconButton
               aria-label="History"
               icon={<TimeIcon />}
-              size="sm"
+              size={{ base: "sm", md: "sm" }}
               variant="outline"
               colorScheme="blue"
               onClick={onShowHistory}
+              display={{ base: 'none', md: 'flex' }}
             />
           </Tooltip>
         </HStack>
-        <Spacer />
-        <HStack spacing={3} flexWrap="wrap">
+        
+        <HStack spacing={3} flexWrap="wrap" justify={{ base: 'center', md: 'flex-end' }} display={{ base: 'none', md: 'flex' }}>
           <Select
             size="sm"
             value={difficulty}

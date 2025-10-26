@@ -36,17 +36,18 @@ function GameBoard({
   const setupSelectableBg = useColorModeValue('blue.100', 'blue.700');
 
   return (
-    <Flex direction="column" gap={5} w="500px" maxW="500px" minW="500px">
+    <Flex direction="column" gap={5} w={{ base: "100%", sm: "400px", md: "500px", lg: "550px" }} maxW={{ base: "100%", sm: "400px", md: "500px", lg: "550px" }} minW={{ base: "300px", sm: "400px", md: "500px", lg: "550px" }}>
       <Box>
         <Grid
           templateColumns="repeat(5, 1fr)"
-          gap={3}
+          gap={{ base: 2, sm: 3, md: 3 }}
           bg="blackAlpha.500"
-          p={4}
+          p={{ base: 3, sm: 4, md: 4 }}
           borderRadius="lg"
           boxShadow="xl"
-          w="500px"
-          h="500px"
+          w="100%"
+          h={{ base: "300px", sm: "400px", md: "500px", lg: "550px" }}
+          minH={{ base: "300px", sm: "400px", md: "500px", lg: "550px" }}
         >
           {board.map((row, y) =>
             row.map((cell, x) => {

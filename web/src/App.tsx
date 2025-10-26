@@ -41,29 +41,30 @@ function App() {
       <Flex flex="1" py={{ base: 6, md: 8 }}>
         <Container maxW="7xl" flex="1">
           <Flex
-            direction={{ base: 'column', xl: 'row' }}
-            align="flex-start"
-            justify="space-between"
-            gap={{ base: 8, xl: 8 }}
+            direction={{ base: 'column', lg: 'row' }}
+            align={{ base: 'center', lg: 'flex-start' }}
+            justify={{ base: 'center', lg: 'space-between' }}
+            gap={{ base: 6, lg: 8 }}
             flexWrap="nowrap"
+            w="100%"
           >
             <Box
               flexShrink={0}
-              flexBasis={{ base: '100%', xl: '500px' }}
+              flexBasis={{ base: '100%', lg: 'auto' }}
               display="flex"
               justifyContent="center"
-              w="500px"
-              minW="500px"
-              maxW="500px"
+              w={{ base: '100%', sm: '400px', md: '500px', lg: '550px' }}
+              minW={{ base: '300px', sm: '400px', md: '500px', lg: '550px' }}
+              maxW={{ base: '100%', sm: '400px', md: '500px', lg: '550px' }}
             >
               {loading ? (
                 <Flex
                   align="center"
                   justify="center"
-                  h="500px"
-                  w="500px"
-                  minH="500px"
-                  minW="500px"
+                  h={{ base: "300px", sm: "400px", md: "500px", lg: "550px" }}
+                  w={{ base: "100%", sm: "400px", md: "500px", lg: "550px" }}
+                  minH={{ base: "300px", sm: "400px", md: "500px", lg: "550px" }}
+                  minW={{ base: "300px", sm: "400px", md: "500px", lg: "550px" }}
                 >
                   <Spinner size="xl" color="teal.300" thickness="4px" />
                 </Flex>
@@ -81,10 +82,11 @@ function App() {
               )}
             </Box>
             <Box
-              flex="0 0 auto"
-              minW={{ base: '100%', xl: '380px' }}
-              maxW={{ base: '100%', xl: '420px' }}
-              width={{ base: '100%', xl: '420px' }}
+              flex={{ base: "0 0 auto", lg: "0 0 auto" }}
+              minW={{ base: '100%', lg: '320px' }}
+              maxW={{ base: '100%', lg: '420px' }}
+              width={{ base: '100%', lg: '420px' }}
+              order={{ base: -1, lg: 0 }}
             >
               <EvaluationPanel
                 loading={loading}

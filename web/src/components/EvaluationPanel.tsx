@@ -50,22 +50,25 @@ function EvaluationPanel({
       borderWidth="1px"
       borderColor="whiteAlpha.200"
       bgGradient="linear(to-br, blackAlpha.500, blackAlpha.400)"
-      p={{ base: 5, md: 6 }}
-      minH="360px"
+      p={disclosure.isOpen ? { base: 5, md: 6 } : 3}
+      minH={disclosure.isOpen ? "360px" : "auto"}
       boxShadow="dark-lg"
+      transition="all 0.3s ease"
     >
-      <Flex justify="space-between" align="center" mb={4}>
-        <Heading size="md">AI Evaluation</Heading>
-        <HStack spacing={3}>
-          <Button size="sm" variant="outline" onClick={disclosure.onToggle}>
-            {disclosure.isOpen ? 'Hide' : 'Show'}
-          </Button>
-          <Button size="sm" colorScheme="teal" onClick={refreshEvaluation} isLoading={loading}>
-            Refresh
-          </Button>
-        </HStack>
-      </Flex>
-      <Collapse in={disclosure.isOpen} animateOpacity>
+      {disclosure.isOpen ? (
+        <>
+          <Flex justify="space-between" align="center" mb={4}>
+            <Heading size="md">AI Evaluation</Heading>
+            <HStack spacing={3}>
+              <Button size="sm" variant="outline" onClick={disclosure.onToggle}>
+                Hide
+              </Button>
+              <Button size="sm" colorScheme="teal" onClick={refreshEvaluation} isLoading={loading}>
+                Refresh
+              </Button>
+            </HStack>
+          </Flex>
+          <Collapse in={disclosure.isOpen} animateOpacity>
         <Stack spacing={5}>
           <Box>
             <Text fontSize="sm" color="whiteAlpha.700" mb={2}>
@@ -161,7 +164,18 @@ function EvaluationPanel({
             </Collapse>
           </Box>
         </Stack>
-      </Collapse>
+          </Collapse>
+        </>
+      ) : (
+        <Flex justify="space-between" align="center">
+          <Heading size="sm" color="whiteAlpha.800">
+            AI Evaluation
+          </Heading>
+          <Button size="sm" colorScheme="teal" onClick={disclosure.onToggle}>
+            Show
+          </Button>
+        </Flex>
+      )}
     </Box>
   );
 }
