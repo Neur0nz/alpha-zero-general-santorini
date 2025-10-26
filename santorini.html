@@ -21,7 +21,6 @@
     }
   </style>
 </head>
-</head>
 <body>
 
 <div class="ui borderless menu">
@@ -68,7 +67,7 @@
 
 <div class="ui main container">
 
-  <h1 class="ui huge center aligned header">Santorini game with AI</h1> 
+  <h1 class="ui huge center aligned header">Santorini (no gods)</h1> 
   <div class="ui hidden divider"></div>
 
 
@@ -78,11 +77,11 @@
   <div class="ui horizontal basic segments">
     <div class="ui center aligned vertically fitted segment">
       <span class="ui large green text" id="p0title">You</span>
-      <p id="p0details">Click highlighted cells to select where to move/build</p>
+      <p id="p0details">Classic rules: click highlighted cells to move and build.</p>
     </div>
     <div class="ui center aligned vertically fitted segment">
       <span class="ui large red text" id="p1title">AI</span>
-      <p id="p1details">Will run after you</p>
+      <p id="p1details">Monte Carlo tree search opponent trained for the no-god variant.</p>
     </div>
   </div>
 
@@ -185,13 +184,11 @@
 
   <div class="ui fluid large compact buttons" id="allBtn" style="display: none">
     <button class="ui icon button" id="undoBtn" onclick="cancel_and_undo()"><i class="undo icon"></i></button>
-    <button class="ui basic teal button" id="usePowerBtn" onclick="togglePower(false)">Without power</button>
-    <button class="ui basic blue button" id="noPowerBtn" onclick="togglePower(true)">With power</button>
   </div>
   <button class="ui fluid large active loading button" id="loadingBtn">‌</button>
   <div class="ui hidden info message" id="editMsg">
     <div class="header">Info for editing</div>
-    <p>Tap on cells to change their heights, then tap again on edit button and tap on cells to toggle worker. Tap on god power to change them and finally tap edit button to validate</p>
+    <p>Tap on cells to change their heights, tap again on edit to toggle workers, then tap edit once more to validate.</p>
   </div>
 
   <div class="ui basic segment">
@@ -204,8 +201,6 @@
   const allBtn      = document.getElementById('allBtn');
   const undoBtn     = document.getElementById('undoBtn');
   const loadingBtn  = document.getElementById('loadingBtn');
-  const usePowerBtn = document.getElementById('usePowerBtn');
-  const noPowerBtn  = document.getElementById('noPowerBtn');
   const editBtn     = document.getElementById('editBtn');
   const moveSgmt    = document.getElementById('moveSgmt');
   const p0title     = document.getElementById('p0title');

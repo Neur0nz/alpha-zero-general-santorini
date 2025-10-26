@@ -4,8 +4,7 @@
 /* =====  CONST  ===== */
 /* =================== */
 
-// Here are common constants between nogod and god modes.
-// Check also constants_*.js
+// Shared constants live in constants_nogod.js.
 
 const directions_char = ['↖', '↑', '↗', '←', 'Ø', '→', '↙', '↓', '↘'];
 
@@ -39,10 +38,9 @@ function encodeDirection(oldX, oldY, newX, newY) {
 }
 
 function moveToString(move, subject='One') {
-  let [worker, power, move_direction, build_direction] = Santorini.decodeMove(move);
+  let [worker, _power, move_direction, build_direction] = Santorini.decodeMove(move);
   var description = subject + ' moved worker ' + worker + ' ' + directions_char[move_direction]
   description += ' then build ' + directions_char[build_direction];
-  description += (power > 0) ? ' with power' : '';
   description += ' [' + move + ']';
   return description;
 }
@@ -93,8 +91,6 @@ class Santorini extends AbstractGame {
     super()
     this.validMoves = Array(2*NB_GODS*9*9); this.validMoves.fill(false);
     this.lastMove = -1;
-    this.powers = [0, 0];       // Which power each player has
-    this.powers_data = [0, 0];  // Which data stored in power position
     this.cellsOfLastMove = [];
   }
 
@@ -102,8 +98,6 @@ class Santorini extends AbstractGame {
     this.lastMove = -1;
     this.cellsOfLastMove = [];
 
-    // Find powers and power info for each player
-    this._read_power_info(false);
   }
 
   pre_move(action, manualMove) {
@@ -116,13 +110,11 @@ class Santorini extends AbstractGame {
   }
 
   post_move(action, manualMove) {
-    this._read_power_info();    
   }
 
   post_set_data() {
     this.lastMove = -1;
     this.cellsOfLastMove = [];
-    this._read_power_info();
   }
 
   has_changed_on_last_move(item_vector) {
@@ -130,19 +122,12 @@ class Santorini extends AbstractGame {
   }
 
   _updateLastCells(action) {
-    let [worker, power, move_direction, build_direction] = Santorini.decodeMove(action);
+    let [worker, _power, move_direction, build_direction] = Santorini.decodeMove(action);
     let worker_id = (worker+1) * ((this.nextPlayer==0) ? 1 : -1);
     let [workerY, workerX] = this.py._findWorker(worker_id).toJs({create_proxies: false});
     let [moveY, moveX] = Santorini._applyDirection(workerY, workerX, move_direction);
     let [buildY, buildX] = Santorini._applyDirection(moveY, moveX, build_direction);
     this.cellsOfLastMove = [[workerY, workerX]];
-  }
-
-  _read_power_info(read_data_only=true) {
-    if (!read_data_only) {
-      this.powers = this.py._read_power().toJs({create_proxies: false});
-    }
-    this.powers_data = this.py._read_power_data().toJs({create_proxies: false});
   }
 
   editCell(clicked_y, clicked_x, editMode) {
@@ -151,14 +136,9 @@ class Santorini extends AbstractGame {
     if (editMode == 0) {
       let data_tuple = this.py.update_after_edit().toJs({create_proxies: false});
       [this.nextPlayer, this.gameEnded, this.validMoves] = data_tuple;
-      this._read_power_info();
     }
   }
 
-  editGod(player) {
-    this.py.editGod(player, this.powers[player]);
-    this._read_power_info(false);
-  }
 
   static decodeMove(move) {
     let worker = Math.floor(move / (NB_GODS*9*9));
@@ -185,13 +165,18 @@ class MoveSelector extends AbstractMoveSelector {
   }
 
   reset() {
-    this.cells = Array.from(Array(5), _ => Array(5).fill(false)); // 2D array containg true if cell should be selectable  
+    this.cells = Array.from(Array(5), _ => Array(5).fill(false)); // 2D array containing true if cell should be selectable
     this.stage = 0;
-    this.workerID = 0, this.workerX = 0, this.workerY = 0;
-    this.moveDirection = 0, this.workerNewX = 0, this.workerNewY = 0;
-    this.buildDirection = 0, this.buildX = 0, this.buildY = 0;
+    this.workerID = 0;
+    this.workerX = 0;
+    this.workerY = 0;
+    this.moveDirection = 0;
+    this.workerNewX = 0;
+    this.workerNewY = 0;
+    this.buildDirection = 0;
+    this.buildX = 0;
+    this.buildY = 0;
     this.currentMoveWoPower = 0; // Accumulate data about move being selected
-    this.power = -1; // -1 = undefined, 0 = no power used, x = power delta to add on 'currentMoveWoPower'
     this.editMode = 0; // 0 = no edit mode, 1 = editing levels, 2 = editing workers
   }
 
@@ -232,9 +217,6 @@ class MoveSelector extends AbstractMoveSelector {
     this._select_relevant_cells();
   }
 
-  togglePower(usePower) {
-    this.power = (usePower ? game.powers[game.nextPlayer]*9*9 : 0);
-  }
 
   isSelectable(y, x) {
     return this.cells[y][x];
@@ -257,27 +239,7 @@ class MoveSelector extends AbstractMoveSelector {
   // return move, or -1 if move is undefined
   getMove() {
     if (this.stage >= 3) {
-      if (this.power >= 0) {
-        return this.currentMoveWoPower + this.power;
-      }
-      if (game.powers[game.nextPlayer] == 0) {
-        this.power = 0;
-        return this.currentMoveWoPower;
-      }
-      // If power undefined, check how many options possible
-      let doableWithOutPower = game.validMoves[this.currentMoveWoPower                                   ];
-      let doableWithPower    = game.validMoves[this.currentMoveWoPower + game.powers[game.nextPlayer]*9*9];
-      if        ( doableWithOutPower &&  doableWithPower) {
-        console.log('2 moves possible, need user to decide whether s.he wants power or not');
-      } else if (!doableWithOutPower && !doableWithPower) {
-        console.log('No move possible, that should not happen');
-      } else if (!doableWithOutPower &&  doableWithPower) {
-        this.power = game.powers[game.nextPlayer]*9*9;
-        return this.currentMoveWoPower + game.powers[game.nextPlayer]*9*9;
-      } else if ( doableWithOutPower && !doableWithPower) {
-        this.power = 0;
-        return this.currentMoveWoPower;
-      }
+      return this.currentMoveWoPower;
     }
     return -1;
   }
@@ -322,52 +284,29 @@ class MoveSelector extends AbstractMoveSelector {
     this.cells = Array.from(Array(5), _ => Array(5).fill(false));
   }
 
-  // Whole function ignore value of this.power on purpose, consider both options
   _anySubmovePossible(coordY, coordX) {
-    let any_move_possible = true;
-    let power = game.powers[game.nextPlayer]*9*9;
     if (this.stage == 0) {
       let worker_id = Math.abs(game.py._read_worker(coordY, coordX)) - 1;
-      let moves_begin = (worker_id*NB_GODS    )*9*9;
-      let moves_end   = (worker_id*NB_GODS + 1)*9*9;
-      any_move_possible = game.validMoves.slice(moves_begin, moves_end).some(x => x);
-      if (!any_move_possible && power>0) {
-        // Check if any move with power
-        moves_begin += power;
-        moves_end   += power;
-        any_move_possible = game.validMoves.slice(moves_begin, moves_end).some(x => x);
-      }
+      let moves_begin = (worker_id * NB_GODS) * 9 * 9;
+      let moves_end = (worker_id * NB_GODS + 1) * 9 * 9;
+      return game.validMoves.slice(moves_begin, moves_end).some(x => x);
     } else if (this.stage == 1) {
-      // coord = worker move direction
       let move_direction = encodeDirection(this.workerX, this.workerY, coordX, coordY);
       if (move_direction < 0) {
-        return false; // Not valid move
+        return false;
       }
-      let moves_begin = this.currentMoveWoPower +  move_direction   *9;
-      let moves_end   = this.currentMoveWoPower + (move_direction+1)*9;
-      any_move_possible = game.validMoves.slice(moves_begin, moves_end).some(x => x);
-      if (!any_move_possible && power>0) {
-        // Check if any move with power
-        moves_begin += power;
-        moves_end   += power;
-        any_move_possible = game.validMoves.slice(moves_begin, moves_end).some(x => x);
-      }
+      let moves_begin = this.currentMoveWoPower + move_direction * 9;
+      let moves_end = this.currentMoveWoPower + (move_direction + 1) * 9;
+      return game.validMoves.slice(moves_begin, moves_end).some(x => x);
     } else if (this.stage == 2) {
-      // coord = build direction
       let build_direction = encodeDirection(this.workerNewX, this.workerNewY, coordX, coordY);
       if (build_direction < 0) {
-        return false; // Not valid move
+        return false;
       }
-      any_move_possible = game.validMoves[this.currentMoveWoPower + build_direction];
-      if (!any_move_possible && power>0) {
-        // Check if any move with power
-        any_move_possible = game.validMoves[this.currentMoveWoPower + build_direction + power];
-      }
-    } else {
-      console.log('Weird, I dont support this.stage=', this.stage, coordX, coordY);
+      return game.validMoves[this.currentMoveWoPower + build_direction];
     }
-
-    return any_move_possible;
+    console.log('Weird, I dont support this.stage=', this.stage, coordX, coordY);
+    return false;
   }
 }
 
@@ -411,7 +350,6 @@ function refreshBoard() {
 
 function refreshButtons(loading=false) {
   if (loading) {
-    // Loading
     allBtn.style = "display: none";
     loadingBtn.style = "";
     allBtn.classList.remove('green', 'red');
@@ -430,35 +368,13 @@ function refreshButtons(loading=false) {
     allBtn.style = "";
     loadingBtn.style = "display: none";
     if (game.is_ended()) {
-      // Game is finished, looking for the winner
-      console.log('End of game');
       allBtn.classList.add((game.gameEnded[0]>0) ? 'green' : 'red');
     } else {
-      // Ongoing game
       allBtn.classList.remove('green', 'red');
       if (game.py.get_last_action() == null && move_sel.stage <= 0) {
         undoBtn.classList.add('disabled');
       } else {
         undoBtn.classList.remove('disabled');
-      }
-    }
-
-    if (NB_GODS == 1) {
-      usePowerBtn.classList.remove('basic', 'teal'); usePowerBtn.classList.add('disabled');
-      noPowerBtn.classList.remove('basic', 'blue'); noPowerBtn.classList.add('disabled');
-    } else {
-      usePowerBtn.classList.remove('basic', 'disabled');
-      noPowerBtn.classList.remove('basic', 'disabled');
-      if (move_sel.stage <= 2) {
-        usePowerBtn.classList.add('disabled', 'basic');
-        noPowerBtn.classList.add('disabled', 'basic');
-      } else if (move_sel.power < 0) {
-        usePowerBtn.classList.add('basic');
-        noPowerBtn.classList.add('basic');
-      } else if (move_sel.power == 0) {
-        usePowerBtn.classList.add('basic');
-      } else {
-        noPowerBtn.classList.add('basic');
       }
     }
 
@@ -468,26 +384,16 @@ function refreshButtons(loading=false) {
 }
 
 function refreshPlayersText() {
-  let power = game.powers[0];
-  p0title.innerHTML = gods_name[power];
-  p0details.innerHTML = gods_descr[power];
-  p0details.innerHTML += '<span class="ui grey text"> ' + gods_instructions[power] + '</span>';
+  p0title.innerHTML = 'You';
+  p0details.innerHTML = 'Play classic Santorini without god powers.';
 
-  power = game.powers[1];
-  p1title.innerHTML = gods_name[power];
-  p1details.innerHTML = gods_descr[power];
+  p1title.innerHTML = 'AI';
+  p1details.innerHTML = 'Monte Carlo tree search opponent using the no-god model.';
 
-  if (move_sel.editMode > 0) {
-    p0title.setAttribute('onclick', 'godClick(0)');
-    p0details.setAttribute('onclick', 'godClick(0)');
-    p1title.setAttribute('onclick', 'godClick(1)');
-    p1details.setAttribute('onclick', 'godClick(1)');
-  } else {
-    p0title.removeAttribute('onclick');
-    p0details.removeAttribute('onclick');
-    p1title.removeAttribute('onclick');
-    p1details.removeAttribute('onclick');
-  }
+  p0title.removeAttribute('onclick');
+  p0details.removeAttribute('onclick');
+  p1title.removeAttribute('onclick');
+  p1details.removeAttribute('onclick');
 }
 
 var movesText = [];
@@ -699,25 +605,6 @@ function cellClick(clicked_y = null, clicked_x = null) {
   }
 }
 
-function godClick(player) {
-  game.editGod(player);
-  refreshPlayersText();
-}
-
-function togglePower(state) {
-  move_sel.togglePower(state);
-  refreshButtons();
-  refreshBoard();
-
-  let move = move_sel.getMove();
-  if (move >= 0) {
-    game.move(move, true);
-    move_sel.reset();
-    refreshBoard();
-    refreshButtons();
-
-    ai_play_if_needed();
-  }
 }
 
 function edit() {

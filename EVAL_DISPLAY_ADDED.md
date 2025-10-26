@@ -78,7 +78,6 @@ if (typeof refreshEvaluation === 'function') {
 
 ### 4. HTML Pages
 **Changed Files:**
-- `santorini_with_gods.html` - Added evaluation container
 - `santorini.html` - Added evaluation container
 
 **Key Addition:**
@@ -92,11 +91,10 @@ if (typeof refreshEvaluation === 'function') {
 ### Option 1: Test Locally
 
 ```bash
-# From the monorepo root
-./serve_web_ui.sh
+python3 -m http.server 8000
 
 # Open in browser:
-# http://localhost:8000/santorini_with_gods.html
+# http://localhost:8000/santorini.html
 ```
 
 ### Option 2: Deploy to GitHub Pages
@@ -106,7 +104,6 @@ The changes are ready to be deployed. Simply push the `web-ui/` folder to a GitH
 ### Option 3: Play Online
 
 If these changes are merged to the live site:
-- https://cestpasphoto.github.io/santorini_with_gods.html
 - https://cestpasphoto.github.io/santorini.html
 
 ## 🎮 User Experience
@@ -186,7 +183,7 @@ Possible improvements:
 - [ ] Add tooltips explaining evaluation values
 - [ ] Allow toggling evaluation display on/off
 - [ ] Show evaluation confidence/uncertainty
-- [ ] Add evaluation to other games (Splendor, Smallworld)
+- [ ] Add evaluation to any future games that may be added back in
 
 ## 🤝 Contributing
 
