@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => {
       host: true
     },
     build: {
-      outDir: path.resolve(__dirname, '../dist'),
+      outDir: 'dist',
       emptyOutDir: true,
       assetsDir: 'assets',
       sourcemap: mode === 'development',
