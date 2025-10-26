@@ -51,7 +51,7 @@ function EvaluationPanel({
       borderColor="whiteAlpha.200"
       bgGradient="linear(to-br, blackAlpha.500, blackAlpha.400)"
       p={disclosure.isOpen ? { base: 5, md: 6 } : 3}
-      minH={disclosure.isOpen ? "360px" : "auto"}
+      minH={disclosure.isOpen ? (movesDisclosure.isOpen ? "360px" : "200px") : "auto"}
       boxShadow="dark-lg"
       transition="all 0.3s ease"
     >
