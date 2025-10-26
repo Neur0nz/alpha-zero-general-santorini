@@ -1,81 +1,86 @@
 # 🏛️ Santorini AlphaZero Web Demo
 
-This repository hosts a browser-based Santorini client powered by AlphaZero.
-Everything runs locally in your browser thanks to [Pyodide](https://pyodide.org/)
-and [ONNX Runtime Web](https://onnxruntime.ai/). The project has been trimmed
-down to a single **no-god** variant of Santorini to keep the footprint and
-maintenance surface minimal.
+The Santorini client now runs on a modern [Vite](https://vitejs.dev/) +
+[React](https://react.dev/) stack with [Chakra UI](https://chakra-ui.com/) for
+styling. Game logic still executes client-side through
+[Pyodide](https://pyodide.org/) and [ONNX Runtime Web](https://onnxruntime.ai/),
+so once the assets are cached you can continue playing offline.
 
 ## 🚀 Quick start
 
 ```bash
-# Serve the static files (defaults to port 8000)
+# Install dependencies and launch the dev server
 ./serve.sh
 
-# Or use Python directly
-python3 -m http.server 8000
+# The app will be available on http://localhost:5173
 ```
 
-Then open <http://localhost:8000/>. The landing page redirects to the Santorini
-interface under `/santorini/index.html`.
+> ℹ️ The first run downloads Pyodide, ONNX Runtime Web and the Santorini model,
+> so expect a 15–20s warm up.
 
-The first load takes roughly 10–20 seconds while Pyodide and the ONNX model are
-downloaded. Subsequent loads are instant thanks to browser caching.
+### Preparing the neural-network model
+
+The AlphaZero evaluator is loaded from `web/public/santorini/model_no_god.onnx`.
+The file is not checked into the repository to keep the footprint small. Grab
+the model from the latest release or download it manually:
+
+```bash
+curl -L -o web/public/santorini/model_no_god.onnx \
+  https://github.com/cestpasphoto/alpha-zero-general-santorini/releases/latest/download/model_no_god.onnx
+```
 
 ## 🧩 Gameplay features
 
 - Play Santorini without god powers against an AlphaZero-style agent.
 - Adjustable difficulty via MCTS simulation count.
-- Move history viewer and undo support.
-- Evaluation bar displaying the current AI assessment of the position.
-
-Everything happens client-side: once assets are cached you can disconnect from
-the network and continue playing offline.
+- Responsive board rendered with Chakra UI components.
+- Evaluation bar, top-move explorer and move history modal.
+- Undo/redo support with AI autopilot when appropriate.
 
 ## 🛠️ Development workflow
 
-1. Run a static file server (`./serve.sh` or `python3 -m http.server 8000`).
-2. Make changes under the `santorini/` directory.
-3. Refresh the browser; Pyodide re-fetches the updated Python sources
-   automatically.
+The front-end source now lives under `web/` and is organised like a typical
+Vite/React project:
 
-Useful files:
+1. `npm --prefix web install` (handled automatically by `serve.sh`).
+2. `npm --prefix web run dev` to start the dev server with hot-module reload.
+3. Edit TypeScript/React files under `web/src/`.
+4. Python gameplay code is copied into the Vite public directory and reloaded by
+   Pyodide when changed.
 
-- `santorini/index.html` – App entry point and UI layout.
-- `santorini/frontend.js` – Lightweight web harness (Pyodide bootstrapping,
-  common UI actions).
-- `santorini/main.js` – Santorini-specific UI logic.
-- `santorini/proxy.py` – Bridge between JavaScript and the Python game logic.
-- `santorini/SantoriniLogicNumba.py` – Core rules implementation (no-god mode).
-- `santorini/SantoriniConstants.py` – Action encoding helpers and symmetry
-  permutations.
+### Useful paths
+
+- `web/src/App.tsx` – Chakra-based layout and screen composition.
+- `web/src/hooks/useSantorini.ts` – Pyodide/ONNX orchestration and game state
+  management.
+- `web/src/game/` – Port of the legacy Santorini game controller.
+- `web/public/santorini/` – Python sources served to Pyodide.
 
 ## 📦 Repository layout
 
 ```
 .
 ├── README.md
-├── index.html                # Redirects to the Santorini app
-├── serve.sh                  # Convenience server script
-└── santorini/
-    ├── constants_nogod.js
-    ├── frontend.js
-    ├── index.html            # Main UI
-    ├── main.js
-    ├── proxy.py
-    ├── SantoriniConstants.py
-    ├── SantoriniDisplay.py
-    ├── SantoriniGame.py
-    ├── SantoriniLogicNumba.py
-    ├── Game.py
-    └── MCTS.py
+├── index.html                # Landing page pointing to the Vite app
+├── serve.sh                  # Boots Vite dev server
+├── web/                      # Vite + Chakra UI front-end
+│   ├── public/
+│   │   └── santorini/        # Python files + ONNX model (download separately)
+│   └── src/
+└── santorini/                # Legacy assets kept for reference
 ```
+
+## 🧪 Continuous integration
+
+Production bundles are emitted to `dist/` via `npm --prefix web run build`. Any
+CI workflow should switch to the Vite commands (`npm run build`, `npm run test`
+if applicable) instead of serving static files directly.
 
 ## 🚢 Deployment
 
-The site is fully static and can be deployed to any static hosting provider
-(e.g. GitHub Pages, Netlify, Vercel). Simply upload the repository contents and
-point a browser to `index.html`.
+1. `npm --prefix web run build` – generates the static site in `dist/`.
+2. Upload the `dist/` directory and the ONNX model to your static hosting
+   provider.
 
 ## 📝 License
 
