@@ -1,10 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
   Box,
   Button,
   FormControl,
   FormLabel,
-  HStack,
   Input,
   Modal,
   ModalBody,
@@ -38,11 +37,6 @@ interface SignUpFormState {
 
 type AuthMode = 'signIn' | 'signUp';
 
-interface AuthenticatedUser {
-  email: string;
-  username: string;
-}
-
 const initialSignInState: SignInFormState = {
   email: '',
   password: '',
@@ -60,12 +54,7 @@ function AuthJourney() {
   const [authMode, setAuthMode] = useState<AuthMode>('signIn');
   const [signInState, setSignInState] = useState<SignInFormState>(initialSignInState);
   const [signUpState, setSignUpState] = useState<SignUpFormState>(initialSignUpState);
-  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const toast = useToast();
-
-  const isAuthenticated = Boolean(currentUser);
-
-  const displayName = useMemo(() => currentUser?.username ?? '', [currentUser]);
 
   const openForMode = (mode: AuthMode) => {
     setAuthMode(mode);
@@ -75,28 +64,14 @@ function AuthJourney() {
   const handleClose = () => {
     setSignInState(initialSignInState);
     setSignUpState(initialSignUpState);
-    setAuthMode('signIn');
     onClose();
   };
 
   const handleSignInSubmit: React.FormEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault();
-    const trimmedEmail = signInState.email.trim();
-    if (!trimmedEmail) {
-      toast({
-        title: 'Enter your email',
-        status: 'warning',
-        duration: 3000,
-        isClosable: true,
-      });
-      return;
-    }
-
-    const derivedUsername = trimmedEmail.split('@')[0] || 'Strategist';
-    setCurrentUser({ email: trimmedEmail, username: derivedUsername });
     toast({
       title: 'Signed in',
-      description: `Welcome back, ${derivedUsername}!`,
+      description: `Welcome back, ${signInState.email}!`,
       status: 'success',
       duration: 3000,
       isClosable: true,
@@ -106,45 +81,9 @@ function AuthJourney() {
 
   const handleSignUpSubmit: React.FormEventHandler<HTMLFormElement> = (event) => {
     event.preventDefault();
-    const trimmedEmail = signUpState.email.trim();
-    const trimmedUsername = signUpState.username.trim();
-
-    if (!trimmedEmail) {
-      toast({
-        title: 'Enter your email',
-        status: 'warning',
-        duration: 3000,
-        isClosable: true,
-      });
-      return;
-    }
-
-    if (signUpState.password !== signUpState.confirmPassword) {
-      toast({
-        title: 'Passwords do not match',
-        description: 'Please ensure both passwords are identical.',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      });
-      return;
-    }
-
-    if (!trimmedUsername) {
-      toast({
-        title: 'Choose a username',
-        description: 'Usernames cannot be blank.',
-        status: 'warning',
-        duration: 3000,
-        isClosable: true,
-      });
-      return;
-    }
-
-    setCurrentUser({ email: trimmedEmail, username: trimmedUsername });
     toast({
       title: 'Account created',
-      description: `Welcome to Ascent, ${trimmedUsername || 'new strategist'}!`,
+      description: `Welcome to Ascent, ${signUpState.username || 'new strategist'}!`,
       status: 'success',
       duration: 3000,
       isClosable: true,
@@ -152,38 +91,16 @@ function AuthJourney() {
     handleClose();
   };
 
-  const handleSignOut = () => {
-    setCurrentUser(null);
-    toast({
-      title: 'Signed out',
-      description: 'Come back soon to continue your climb.',
-      status: 'info',
-      duration: 3000,
-      isClosable: true,
-    });
-  };
-
   return (
     <>
-      {isAuthenticated ? (
-        <HStack spacing={3} align="center">
-          <Text fontSize="sm" color="whiteAlpha.800">
-            {displayName}
-          </Text>
-          <Button size="sm" variant="outline" colorScheme="teal" onClick={handleSignOut}>
-            Log out
-          </Button>
-        </HStack>
-      ) : (
-        <Button
-          size="sm"
-          colorScheme="teal"
-          variant="solid"
-          onClick={() => openForMode('signIn')}
-        >
-          Sign in / Sign up
-        </Button>
-      )}
+      <Button
+        size="sm"
+        colorScheme="teal"
+        variant="solid"
+        onClick={() => openForMode('signIn')}
+      >
+        Sign in / Sign up
+      </Button>
 
       <Modal isOpen={isOpen} onClose={handleClose} size="lg" isCentered>
         <ModalOverlay backdropFilter="blur(6px)" />

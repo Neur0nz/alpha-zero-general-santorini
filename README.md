@@ -96,9 +96,12 @@ if applicable) instead of serving static files directly.
 
 ## 🚢 Deployment
 
-1. `npm --prefix web run build` – generates the static site in `dist/`.
-2. Upload the `dist/` directory and the ONNX model to your static hosting
-   provider.
+The Vite build emits static assets, so you can host the site on any CDN or
+static provider. See [`DEPLOYMENT.md`](DEPLOYMENT.md) for:
+
+- an end-to-end GitHub Pages workflow that rebuilds on each push to `main`, and
+- instructions for publishing the bundle via Supabase Hosting or other
+  providers.
 
 ## 📝 License
 

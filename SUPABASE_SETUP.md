@@ -152,6 +152,18 @@ create policy "Participants can record moves"
 > **Tip:** You can expose completed games for spectators by adjusting the `select` policies to allow everyone to read rows where `status = 'completed'`.
 
 ## 5. Enable Realtime on the tables
+Supabase needs to broadcast changes from `matches` and `match_moves` so the lobby and the clocks update instantly. Depending on
+your project, the Replication UI may not be available, so follow whichever path you see in the dashboard:
+
+- **If you have the Realtime UI:** go to **Database → Replication → Realtime** and add `public.matches` and
+  `public.match_moves` to the enabled tables.
+- **If the Replication menu is missing:** open the SQL editor and run the commands below to attach both tables to the
+  `supabase_realtime` publication manually.
+
+  ```sql
+  alter publication supabase_realtime add table public.matches;
+  alter publication supabase_realtime add table public.match_moves;
+  ```
 1. Navigate to **Database → Replication → Realtime**.
 2. Add `public.matches` and `public.match_moves` to the enabled tables. The lobby and in-game updates depend on these realtime streams.
 
