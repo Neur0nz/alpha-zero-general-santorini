@@ -32,6 +32,58 @@ const depthOptions = [
   { label: 'Boosted (3200)', value: '3200' },
 ];
 
+function EvaluationBar({ value }: { value: number }) {
+  const safeValue = Number.isFinite(value) ? Math.max(-1, Math.min(1, value)) : 0;
+  const positiveWidth = safeValue > 0 ? safeValue * 50 : 0;
+  const negativeWidth = safeValue < 0 ? Math.abs(safeValue) * 50 : 0;
+
+  return (
+    <Box
+      position="relative"
+      height="12px"
+      borderRadius="full"
+      overflow="hidden"
+      bg="whiteAlpha.300"
+    >
+      <Box
+        position="absolute"
+        top={0}
+        bottom={0}
+        left="50%"
+        width="1px"
+        bg="whiteAlpha.600"
+        opacity={0.6}
+      />
+      {negativeWidth > 0 && (
+        <Box
+          position="absolute"
+          top={0}
+          bottom={0}
+          right="50%"
+          width={`${negativeWidth}%`}
+          bgGradient="linear(to-l, red.400, red.500)"
+          borderTopLeftRadius="full"
+          borderBottomLeftRadius="full"
+          transition="width 0.3s ease"
+        />
+      )}
+      {positiveWidth > 0 && (
+        <Box
+          position="absolute"
+          top={0}
+          bottom={0}
+          left="50%"
+          width={`${positiveWidth}%`}
+          bgGradient="linear(to-r, green.400, green.500)"
+          borderTopRightRadius="full"
+          borderBottomRightRadius="full"
+          transition="width 0.3s ease"
+        />
+      )}
+    </Box>
+  );
+}
+
 function EvaluationPanel({
   loading,
   evaluation,
@@ -74,12 +126,7 @@ function EvaluationPanel({
             <Text fontSize="sm" color="whiteAlpha.700" mb={2}>
               Advantage: {evaluation.advantage}
             </Text>
-            <Progress
-              value={((evaluation.value + 1) / 2) * 100}
-              colorScheme={evaluation.value >= 0 ? 'green' : 'red'}
-              borderRadius="full"
-              height="10px"
-            />
+            <EvaluationBar value={evaluation.value} />
             <Text mt={2} fontSize="2xl" fontWeight="bold">
               {evaluation.label}
             </Text>
