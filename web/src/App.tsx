@@ -40,8 +40,8 @@ function App() {
     calcOptionsBusy,
   } = useSantorini();
   const { isOpen: isHistoryOpen, onOpen: openHistory, onClose: closeHistory } = useDisclosure();
-  const tabOrder: AppTab[] = ['play', 'practice', 'analyze'];
-  const [activeTab, setActiveTab] = useState<AppTab>('play');
+  const tabOrder: AppTab[] = ['practice', 'play', 'analyze'];
+  const [activeTab, setActiveTab] = useState<AppTab>('practice');
   const activeIndex = tabOrder.indexOf(activeTab);
 
   useEffect(() => {
@@ -100,9 +100,6 @@ function App() {
         <Flex flex="1" py={{ base: 6, md: 8 }}>
           <Container maxW="7xl" flex="1">
             <TabPanels flex="1">
-              <TabPanel px={0}>
-                <PlayWorkspace />
-              </TabPanel>
               <TabPanel px={0}>
                 <Flex direction="column" gap={{ base: 6, md: 8 }}>
                   <PracticeToolbar
@@ -171,6 +168,9 @@ function App() {
                     </Box>
                   </Flex>
                 </Flex>
+              </TabPanel>
+              <TabPanel px={0}>
+                <PlayWorkspace />
               </TabPanel>
               <TabPanel px={0}>
                 <AnalyzeWorkspace />
