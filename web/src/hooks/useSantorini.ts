@@ -6,16 +6,16 @@ import { renderCellSvg, type CellState } from '@game/svg';
 import { GAME_CONSTANTS } from '@game/constants';
 
 const PY_FILES: Array<[string, string]> = [
-  ['santorini/Game.py', 'Game.py'],
-  ['santorini/proxy.py', 'proxy.py'],
-  ['santorini/MCTS.py', 'MCTS.py'],
-  ['santorini/SantoriniDisplay.py', 'SantoriniDisplay.py'],
-  ['santorini/SantoriniGame.py', 'SantoriniGame.py'],
-  ['santorini/SantoriniLogicNumba.py', 'SantoriniLogicNumba.py'],
-  ['santorini/SantoriniConstants.py', 'SantoriniConstants.py'],
+  [`${import.meta.env.BASE_URL || '/'}santorini/Game.py`, 'Game.py'],
+  [`${import.meta.env.BASE_URL || '/'}santorini/proxy.py`, 'proxy.py'],
+  [`${import.meta.env.BASE_URL || '/'}santorini/MCTS.py`, 'MCTS.py'],
+  [`${import.meta.env.BASE_URL || '/'}santorini/SantoriniDisplay.py`, 'SantoriniDisplay.py'],
+  [`${import.meta.env.BASE_URL || '/'}santorini/SantoriniGame.py`, 'SantoriniGame.py'],
+  [`${import.meta.env.BASE_URL || '/'}santorini/SantoriniLogicNumba.py`, 'SantoriniLogicNumba.py'],
+  [`${import.meta.env.BASE_URL || '/'}santorini/SantoriniConstants.py`, 'SantoriniConstants.py'],
 ];
 
-const MODEL_FILENAME = '/santorini/model_no_god.onnx';
+const MODEL_FILENAME = `${import.meta.env.BASE_URL || '/'}santorini/model_no_god.onnx`;
 const SIZE_CB = [1, 25, 3];
 const ONNX_OUTPUT_SIZE = 162;
 

@@ -48,29 +48,13 @@ jobs:
             https://github.com/cestpasphoto/alpha-zero-general-santorini/releases/latest/download/model_no_god.onnx
 
       - name: Build static site
-        run: |
-          echo "Building with environment variables:"
-          echo "VITE_SUPABASE_URL: $VITE_SUPABASE_URL"
-          echo "VITE_SUPABASE_ANON_KEY: $VITE_SUPABASE_ANON_KEY"
-          echo "VITE_PUBLIC_BASE_PATH: '$VITE_PUBLIC_BASE_PATH'"
-          echo "VITE_PYODIDE_URL: $VITE_PYODIDE_URL"
-          echo "VITE_ONNX_URL: $VITE_ONNX_URL"
-          echo "PUBLIC_BASE_PATH from vars: '${{ vars.PUBLIC_BASE_PATH }}'"
-          npm run build || (echo "Build failed!" && exit 1)
-          echo "Build completed successfully"
+        run: npm run build
         working-directory: web
 
       - name: Verify build output
         run: |
-          echo "Current directory:"
-          pwd
-          echo "Contents of current directory:"
-          ls -la
-          echo "Looking for dist directory:"
-          ls -la dist || echo "dist directory not found"
-          echo "Checking built HTML file:"
-          cat dist/index.html | head -20
           echo "Build completed successfully"
+          ls -la dist
         working-directory: web
 
       - name: Upload GitHub Pages artifact
