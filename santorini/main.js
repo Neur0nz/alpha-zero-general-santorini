@@ -533,6 +533,13 @@ function refreshButtons(loading=false) {
       } else {
         undoBtn.classList.remove('disabled');
       }
+      if (typeof redoBtn !== 'undefined' && redoBtn) {
+        if (!Array.isArray(redoStack) || redoStack.length === 0) {
+          redoBtn.classList.add('disabled');
+        } else {
+          redoBtn.classList.remove('disabled');
+        }
+      }
     }
 
     // Power buttons removed from UI; skip updating their state
@@ -692,53 +699,64 @@ async function redo_last() {
     console.warn('Redo failed: Python game not initialized');
     return;
   }
-  
+
+  if (!Array.isArray(redoStack)) {
+    redoStack = Array.from(redoStack || []);
+  }
+
+  if (redoStack.length === 0) {
+    console.log('Redo failed: no action available to redo');
+    redoStack = [];
+    refreshButtons();
+    return;
+  }
+
   // Prevent rapid redo actions that cause cycling
   if (isRedoInProgress) {
     console.log('Redo already in progress, ignoring request');
     return;
   }
-  
+
+  const rawAction = redoStack.pop();
+  const actionValue = typeof rawAction === 'number' ? rawAction : Number(rawAction);
+
+  if (Number.isNaN(actionValue)) {
+    console.log('Redo failed: invalid action retrieved from stack');
+    redoStack = [];
+    refreshButtons();
+    return;
+  }
+
   try {
     isRedoInProgress = true;
-    
-    // Get the last action from Python history
-    const lastAction = game.py.get_last_action();
-    if (lastAction === null) {
-      console.log('Redo failed: no action available to redo');
-      return;
-    }
-    
-    const actionValue = lastAction.toJs ? lastAction.toJs({create_proxies: false}) : lastAction;
-    
+
     // Check if this action is valid in current state
     if (!game.validMoves[actionValue]) {
       console.log('Redo failed: action not valid in current state');
+      redoStack = [];
+      refreshButtons();
       return;
     }
-    
+
     console.log('Redoing action:', actionValue);
-    
+
     // Use the Python backend to handle the redo properly
     try {
       const result = game.py.getNextState(actionValue).toJs({create_proxies: false});
       const [nextPlayer, gameEnded, validMoves] = result;
-      
+
       // Update game state
       game.nextPlayer = nextPlayer;
       game.gameEnded = gameEnded;
       game.validMoves = validMoves;
-      
-      // Clear redo stack when new moves are made
-      redoStack = [];
-      
+
       move_sel.reset();
       move_sel._select_relevant_cells(); // Update selectable cells
       refreshBoard();
       refreshButtons();
-      
-      // Only trigger AI if next player is not human
-      if (!game.is_human_player(game.nextPlayer)) {
+
+      // Only trigger AI if next player is not human and there are no more stored redos
+      if (redoStack.length === 0 && !game.is_human_player(game.nextPlayer)) {
         ai_play_if_needed();
       }
       // Always refresh evaluation after any move
@@ -748,21 +766,28 @@ async function redo_last() {
     } catch (pyError) {
       console.error('Python redo failed:', pyError);
       // Fallback to JavaScript move
-      game.move(actionValue, true);
-      move_sel.reset();
-      move_sel._select_relevant_cells();
-      refreshBoard();
-      refreshButtons();
-      
-      if (!game.is_human_player(game.nextPlayer)) {
-        ai_play_if_needed();
-      }
-      if (typeof refreshEvaluation === 'function') {
-        await refreshEvaluation();
+      redoStack = [];
+      try {
+        game.move(actionValue, true);
+        move_sel.reset();
+        move_sel._select_relevant_cells();
+        refreshBoard();
+        refreshButtons();
+
+        if (!game.is_human_player(game.nextPlayer)) {
+          ai_play_if_needed();
+        }
+        if (typeof refreshEvaluation === 'function') {
+          await refreshEvaluation();
+        }
+      } catch (fallbackError) {
+        console.error('Redo fallback failed:', fallbackError);
       }
     }
   } catch (error) {
     console.error('Redo failed:', error);
+    redoStack = [];
+    refreshButtons();
   } finally {
     // Add small delay to prevent rapid clicking
     setTimeout(() => {
