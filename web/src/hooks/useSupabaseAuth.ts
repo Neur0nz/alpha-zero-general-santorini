@@ -159,18 +159,6 @@ export function useSupabaseAuth() {
     await loadSessionProfile(session);
   }, [loadSessionProfile]);
 
-  const signInWithMagicLink = useCallback(async (email: string) => {
-    const client = supabase;
-    if (!client) {
-      throw new Error('Supabase is not configured.');
-    }
-    const { error } = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
-    if (error) {
-      console.error('Failed to request magic link', error);
-      throw error;
-    }
-  }, []);
-
   const signInWithGoogle = useCallback(async () => {
     const client = supabase;
     if (!client) {
@@ -244,9 +232,10 @@ export function useSupabaseAuth() {
     error: state.error,
     isConfigured,
     refreshProfile,
-    signInWithMagicLink,
     signInWithGoogle,
     signOut,
     updateDisplayName,
   };
 }
+
+export type SupabaseAuthState = ReturnType<typeof useSupabaseAuth>;
