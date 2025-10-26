@@ -1,4 +1,5 @@
 import {
+  AspectRatio,
   Box,
   Button,
   Flex,
@@ -34,36 +35,67 @@ function GameBoard({
   const selectableBg = useColorModeValue('teal.100', 'teal.700');
 
   return (
-    <Flex direction="column" gap={4} maxW="420px">
+    <Flex direction="column" gap={5} maxW={{ base: '100%', md: '480px' }}>
       <Box>
-        <Grid templateColumns="repeat(5, 1fr)" gap={1} bg="blackAlpha.500" p={2} borderRadius="lg">
+        <Grid
+          templateColumns="repeat(5, minmax(0, 1fr))"
+          gap={2}
+          bg="blackAlpha.500"
+          p={3}
+          borderRadius="lg"
+          boxShadow="xl"
+        >
           {board.map((row, y) =>
             row.map((cell, x) => {
               const isSelectable = selectable[y]?.[x];
               const highlight = cell.highlight;
               return (
                 <GridItem key={`${y}-${x}`}>
-                  <Box
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Cell ${y},${x}`}
-                    onClick={() => onCellClick(y, x)}
-                    onMouseEnter={() => onCellHover(y, x)}
-                    onMouseLeave={() => onCellLeave(y, x)}
-                    cursor={isSelectable ? 'pointer' : 'default'}
-                    borderRadius="md"
-                    borderWidth={highlight ? '2px' : '1px'}
-                    borderColor={highlight ? 'yellow.300' : 'whiteAlpha.300'}
-                    bg={isSelectable ? selectableBg : cellBg}
-                    minH="70px"
-                    display="flex"
-                    alignItems="center"
-                    justifyContent="center"
-                    transition="all 0.2s ease"
-                    _hover={{ boxShadow: isSelectable ? 'xl' : undefined }}
-                  >
-                    <Box dangerouslySetInnerHTML={{ __html: cell.svg }} transform="scale(0.18)" transformOrigin="center" />
-                  </Box>
+                  <AspectRatio ratio={1} w="100%">
+                    <Box
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Cell ${y},${x}`}
+                      onClick={() => onCellClick(y, x)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          onCellClick(y, x);
+                        }
+                      }}
+                      onMouseEnter={() => onCellHover(y, x)}
+                      onMouseLeave={() => onCellLeave(y, x)}
+                      cursor={isSelectable ? 'pointer' : 'default'}
+                      borderRadius="lg"
+                      borderWidth={highlight ? '3px' : '1px'}
+                      borderColor={highlight ? 'yellow.300' : 'whiteAlpha.300'}
+                      bg={isSelectable ? selectableBg : cellBg}
+                      display="flex"
+                      alignItems="center"
+                      justifyContent="center"
+                      transition="all 0.2s ease"
+                      position="relative"
+                      _hover={{ boxShadow: isSelectable ? 'dark-lg' : undefined }}
+                    >
+                      <Box
+                        pointerEvents="none"
+                        display="flex"
+                        alignItems="center"
+                        justifyContent="center"
+                        w="100%"
+                        h="100%"
+                        sx={{
+                          '& svg': {
+                            width: '78%',
+                            height: '78%',
+                            maxWidth: '78%',
+                            maxHeight: '78%',
+                          },
+                        }}
+                        dangerouslySetInnerHTML={{ __html: cell.svg }}
+                      />
+                    </Box>
+                  </AspectRatio>
                 </GridItem>
               );
             }),

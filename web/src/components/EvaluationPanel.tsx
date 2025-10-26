@@ -11,6 +11,7 @@ import {
   Text,
   useDisclosure,
 } from '@chakra-ui/react';
+import { ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons';
 import type { EvaluationState, TopMove } from '@hooks/useSantorini';
 
 interface EvaluationPanelProps {
@@ -41,15 +42,17 @@ function EvaluationPanel({
   updateDepth,
 }: EvaluationPanelProps) {
   const disclosure = useDisclosure({ defaultIsOpen: true });
+  const movesDisclosure = useDisclosure({ defaultIsOpen: true });
 
   return (
     <Box
       borderRadius="lg"
       borderWidth="1px"
       borderColor="whiteAlpha.200"
-      bg="blackAlpha.500"
-      p={6}
+      bgGradient="linear(to-br, blackAlpha.500, blackAlpha.400)"
+      p={{ base: 5, md: 6 }}
       minH="360px"
+      boxShadow="dark-lg"
     >
       <Flex justify="space-between" align="center" mb={4}>
         <Heading size="md">AI Evaluation</Heading>
@@ -79,9 +82,17 @@ function EvaluationPanel({
             </Text>
           </Box>
           <Box>
-            <Flex justify="space-between" align="center" mb={2}>
-              <Heading size="sm">Top moves</Heading>
-              <HStack spacing={3}>
+            <Flex justify="space-between" align={{ base: 'flex-start', sm: 'center' }} mb={2} wrap="wrap" gap={2}>
+              <Heading size="sm">Best moves</Heading>
+              <HStack spacing={2} align="center">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={movesDisclosure.onToggle}
+                  leftIcon={movesDisclosure.isOpen ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                >
+                  {movesDisclosure.isOpen ? 'Hide list' : 'Show list'}
+                </Button>
                 <Select
                   size="sm"
                   maxW="180px"
@@ -107,46 +118,47 @@ function EvaluationPanel({
                 </Button>
               </HStack>
             </Flex>
-            <Stack spacing={3}>
-              {topMoves.length === 0 && (
-                <Text fontSize="sm" color="whiteAlpha.600">
-                  Run a calculation to see detailed options.
-                </Text>
-              )}
-              {topMoves.map((move) => (
-                <Box
-                  key={move.action}
-                  borderWidth="1px"
-                  borderRadius="md"
-                  borderColor="whiteAlpha.200"
-                  p={3}
-                  bg="whiteAlpha.100"
-                >
-                  <Text fontWeight="medium">{move.text}</Text>
-                  <Flex align="center" justify="space-between" mt={2}>
-                    <Progress
-                      value={move.prob * 100}
-                      colorScheme="teal"
-                      borderRadius="full"
-                      flex="1"
-                      mr={3}
-                      height="6px"
-                    />
-                    <Text fontSize="sm" color="whiteAlpha.800">
-                      {(move.prob * 100).toFixed(0)}%
-                    </Text>
-                  </Flex>
-                  {typeof move.eval === 'number' && (
-                    <Text fontSize="sm" color="whiteAlpha.700" mt={2}>
-                      Eval: {move.eval >= 0 ? `+${move.eval.toFixed(2)}` : move.eval.toFixed(2)}
-                      {typeof move.delta === 'number' && Math.abs(move.delta) >= 0.005
-                        ? ` (Δ ${move.delta >= 0 ? '+' : ''}${move.delta.toFixed(2)})`
-                        : ''}
-                    </Text>
-                  )}
-                </Box>
-              ))}
-            </Stack>
+            <Collapse in={movesDisclosure.isOpen} animateOpacity>
+              <Stack spacing={3} mt={2}>
+                {topMoves.length === 0 && (
+                  <Text fontSize="sm" color="whiteAlpha.600">
+                    Run a calculation to see detailed options.
+                  </Text>
+                )}
+                {topMoves.map((move) => (
+                  <Box
+                    key={move.action}
+                    borderWidth="1px"
+                    borderRadius="md"
+                    borderColor="whiteAlpha.200"
+                    p={3}
+                    bg="whiteAlpha.100"
+                  >
+                    <Text fontWeight="medium">{move.text}</Text>
+                    <Flex align="center" justify="space-between" mt={2} gap={3}>
+                      <Progress
+                        value={move.prob * 100}
+                        colorScheme="teal"
+                        borderRadius="full"
+                        flex="1"
+                        height="6px"
+                      />
+                      <Text fontSize="sm" color="whiteAlpha.800" minW="48px" textAlign="right">
+                        {(move.prob * 100).toFixed(0)}%
+                      </Text>
+                    </Flex>
+                    {typeof move.eval === 'number' && (
+                      <Text fontSize="sm" color="whiteAlpha.700" mt={2}>
+                        Eval: {move.eval >= 0 ? `+${move.eval.toFixed(2)}` : move.eval.toFixed(2)}
+                        {typeof move.delta === 'number' && Math.abs(move.delta) >= 0.005
+                          ? ` (Δ ${move.delta >= 0 ? '+' : ''}${move.delta.toFixed(2)})`
+                          : ''}
+                      </Text>
+                    )}
+                  </Box>
+                ))}
+              </Stack>
+            </Collapse>
           </Box>
         </Stack>
       </Collapse>
