@@ -24,3 +24,7 @@ web-ui/.gitignore
 venv/
 __pycache__/
 
+# Vite build artifacts
+dist/
+web/node_modules/
+
