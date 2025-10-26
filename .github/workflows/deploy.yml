@@ -16,16 +16,15 @@ concurrency:
   group: "pages"
   cancel-in-progress: true
 
-env:
-  VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-  VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-  VITE_PUBLIC_BASE_PATH: ${{ vars.PUBLIC_BASE_PATH || '/alpha-zero-general-santorini/' }}
-  VITE_PYODIDE_URL: https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js
-  VITE_ONNX_URL: https://cdn.jsdelivr.net/npm/onnxruntime-web@1.16.3/dist/ort.min.js
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      VITE_PUBLIC_BASE_PATH: ${{ vars.PUBLIC_BASE_PATH || '/alpha-zero-general-santorini/' }}
+      VITE_PYODIDE_URL: https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js
+      VITE_ONNX_URL: https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.1/dist/ort.min.js
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -49,6 +48,8 @@ jobs:
           echo "Model file copied. Checking size..."
           ls -la web/public/santorini/model_no_god.onnx
           echo "Model file size: $(wc -c < web/public/santorini/model_no_god.onnx) bytes"
+          echo "Checking if model file is valid ONNX format..."
+          file web/public/santorini/model_no_god.onnx
 
       - name: Build static site
         run: |
@@ -63,6 +64,9 @@ jobs:
         run: |
           echo "Build completed successfully"
           ls -la dist
+          echo "Checking model file in build output:"
+          ls -la dist/santorini/model_no_god.onnx
+          echo "Model file size: $(wc -c < dist/santorini/model_no_god.onnx) bytes"
         working-directory: web
 
       - name: Upload GitHub Pages artifact
