@@ -18,7 +18,7 @@ concurrency:
 env:
   VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
   VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-  VITE_PUBLIC_BASE_PATH: ${{ vars.PUBLIC_BASE_PATH != '' && vars.PUBLIC_BASE_PATH || format('/{0}/', github.event.repository.name) }}
+  VITE_PUBLIC_BASE_PATH: ${{ vars.PUBLIC_BASE_PATH || '/' }}
 
 jobs:
   build:
