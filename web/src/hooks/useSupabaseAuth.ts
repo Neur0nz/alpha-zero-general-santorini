@@ -158,10 +158,14 @@ export function useSupabaseAuth() {
     if (!client) {
       throw new Error('Supabase is not configured.');
     }
+    
+    // Determine the correct redirect URL based on environment
+    const redirectTo = window.location.origin + window.location.pathname;
+    
     const { error } = await client.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin,
+        redirectTo,
         queryParams: { prompt: 'select_account' },
       },
     });
