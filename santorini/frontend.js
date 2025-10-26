@@ -100,8 +100,15 @@ class AbstractGame {
   async ready_to_guess() {}
 
   revert_to_previous_human_move() {
-    const player = this.who_is_human();
-    const data_tuple = this.py.revert_to_previous_move(player).toJs({ create_proxies: false });
+    let data_tuple;
+
+    if (this.gameMode === 'Human') {
+      data_tuple = this.py.revert_last_move().toJs({ create_proxies: false });
+    } else {
+      const player = this.who_is_human();
+      data_tuple = this.py.revert_to_previous_move(player).toJs({ create_proxies: false });
+    }
+
     const [nextPlayer, gameEnded, validMoves, removedActions = []] = data_tuple;
     this.nextPlayer = nextPlayer;
     this.gameEnded = gameEnded;
@@ -244,19 +251,12 @@ function reset() {
 }
 
 async function cancel_and_undo() {
-  let undoneActions = [];
   if (move_sel.stage === 0) {
     const reverted = game.revert_to_previous_human_move();
-    undoneActions = Array.isArray(reverted) ? reverted : Array.from(reverted || []);
   }
 
-  if (typeof redoStack !== 'undefined' && undoneActions && undoneActions.length > 0) {
-    undoneActions.forEach((action) => {
-      const numericAction = typeof action === 'number' ? action : Number(action);
-      if (!Number.isNaN(numericAction)) {
-        redoStack.push(numericAction);
-      }
-    });
+  if (typeof syncRedoStackFromPython === 'function') {
+    syncRedoStackFromPython();
   }
   move_sel.resetAndStart();
 

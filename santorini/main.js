@@ -195,8 +195,8 @@ class Santorini extends AbstractGame {
     
     if (editMode === 0) {
       try {
-        const data_tuple = this.py.update_after_edit().toJs({create_proxies: false});
-      [this.nextPlayer, this.gameEnded, this.validMoves] = data_tuple;
+        const data_tuple = this.py.update_after_edit().toJs({ create_proxies: false });
+        [this.nextPlayer, this.gameEnded, this.validMoves] = data_tuple;
       } catch (error) {
         console.error('Error updating after edit:', error);
       }
@@ -564,6 +564,43 @@ function refreshPlayersText() {
 let redoStack = [];
 let isRedoInProgress = false;
 
+/**
+ * Synchronize the local redo stack with the Python backend's redo history.
+ */
+function syncRedoStackFromPython() {
+  if (!game || !game.py || typeof game.py.get_redo_actions !== 'function') {
+    redoStack = [];
+    return;
+  }
+
+  try {
+    const actionsProxy = game.py.get_redo_actions();
+    let actionsList = [];
+    if (actionsProxy && typeof actionsProxy.toJs === 'function') {
+      actionsList = actionsProxy.toJs({ create_proxies: false });
+    } else if (Array.isArray(actionsProxy)) {
+      actionsList = actionsProxy;
+    }
+
+    if (!Array.isArray(actionsList)) {
+      redoStack = [];
+      return;
+    }
+
+    const normalized = actionsList
+      .map((action) => {
+        const numeric = typeof action === 'number' ? action : Number(action);
+        return Number.isNaN(numeric) ? null : numeric;
+      })
+      .filter((value) => value !== null);
+
+    redoStack = normalized.reverse();
+  } catch (error) {
+    console.error('Failed to sync redo stack from Python:', error);
+    redoStack = [];
+  }
+}
+
 // History modal data
 function historyModal() {
   return {
@@ -581,67 +618,92 @@ function historyModal() {
         const evalData = window.evalBar._x_dataStack[0];
         this.gameHistory = evalData.history || [];
         this.currentMove = this.gameHistory.length - 1;
-  } else {
+      } else {
         this.gameHistory = [];
         this.currentMove = 0;
       }
-      
+
       // Also get actual game moves from the Python backend
       this.updateGameMoves();
     },
-    
+
     updateGameMoves() {
-      if (game && game.py) {
-        try {
-          // Get the Python history - it's stored in reverse order (newest first)
-          const pyHistory = game.py.history || [];
-          
-          // Reverse to get chronological order
-          const chronologicalHistory = [...pyHistory].reverse();
-          
-          // Create moves array with proper indexing
-          this.gameMoves = chronologicalHistory.map((state, index) => ({
-            move: index + 1,
-            player: state[0],
-            board: state[1],
-            action: state[2],
-            description: `Move ${index + 1} - Player ${state[0]}`,
-            evaluation: this.gameHistory[index] ? this.gameHistory[index].eval : 0
-          }));
-          
-          // Update current move to be the last move in the history
-          this.currentMove = Math.max(0, this.gameMoves.length - 1);
-        } catch (error) {
-          console.error('Error updating game moves:', error);
-          this.gameMoves = [];
-          this.currentMove = 0;
+      if (!game || !game.py || typeof game.py.get_history_snapshot !== 'function') {
+        this.gameMoves = [];
+        this.currentMove = 0;
+        return;
+      }
+
+      try {
+        const snapshotProxy = game.py.get_history_snapshot();
+        let snapshot = [];
+
+        if (snapshotProxy) {
+          if (typeof snapshotProxy.toJs === 'function') {
+            snapshot = snapshotProxy.toJs({ create_proxies: false });
+          } else if (Array.isArray(snapshotProxy)) {
+            snapshot = snapshotProxy;
+          }
+
+          if (typeof snapshotProxy.destroy === 'function') {
+            snapshotProxy.destroy();
+          }
         }
+
+        if (!Array.isArray(snapshot)) {
+          snapshot = [];
+        }
+
+        this.gameMoves = snapshot.map((entry, index) => ({
+          move: index + 1,
+          player: entry.player,
+          action: entry.action,
+          description: entry.description || `Move ${index + 1} - Player ${entry.player}`,
+          evaluation: this.gameHistory[index] ? this.gameHistory[index].eval : 0
+        }));
+
+        this.currentMove = Math.max(0, this.gameMoves.length - 1);
+      } catch (error) {
+        console.error('Error updating game moves:', error);
+        this.gameMoves = [];
+        this.currentMove = 0;
       }
     },
-    
+
     async jumpToMove(moveIndex) {
       if (moveIndex < 0 || moveIndex >= this.gameMoves.length) return;
-      
+
       console.log('Jumping to move:', moveIndex);
       this.currentMove = moveIndex;
-      
+
       try {
         // Use Python backend to jump to the desired state
         if (game && game.py) {
           // Convert from chronological index to reverse history index
           const reverseIndex = this.gameMoves.length - 1 - moveIndex;
-          const result = game.py.jump_to_move_index(reverseIndex);
-          if (result) {
+          const resultProxy = game.py.jump_to_move_index(reverseIndex);
+          let result = null;
+          if (resultProxy && typeof resultProxy.toJs === 'function') {
+            result = resultProxy.toJs({ create_proxies: false });
+            if (typeof resultProxy.destroy === 'function') {
+              resultProxy.destroy();
+            }
+          } else if (Array.isArray(resultProxy)) {
+            result = resultProxy;
+          }
+
+          if (Array.isArray(result) && result.length >= 3) {
             const [nextPlayer, gameEnded, validMoves] = result;
-            
+
             // Update game state
             game.nextPlayer = nextPlayer;
             game.gameEnded = gameEnded;
             game.validMoves = validMoves;
-            
+
             // Clear redo stack when jumping to history
             redoStack = [];
-            
+            syncRedoStackFromPython();
+
             // Update UI
             move_sel.reset();
             move_sel._select_relevant_cells();
@@ -652,7 +714,7 @@ function historyModal() {
             if (typeof refreshEvaluation === 'function') {
               await refreshEvaluation();
             }
-            
+
             // Update the history modal data after jumping
             this.updateHistory();
           }
@@ -700,96 +762,81 @@ async function redo_last() {
     return;
   }
 
+  syncRedoStackFromPython();
+
   if (!Array.isArray(redoStack)) {
     redoStack = Array.from(redoStack || []);
   }
 
   if (redoStack.length === 0) {
     console.log('Redo failed: no action available to redo');
-    redoStack = [];
     refreshButtons();
     return;
   }
 
-  // Prevent rapid redo actions that cause cycling
   if (isRedoInProgress) {
     console.log('Redo already in progress, ignoring request');
-    return;
-  }
-
-  const rawAction = redoStack.pop();
-  const actionValue = typeof rawAction === 'number' ? rawAction : Number(rawAction);
-
-  if (Number.isNaN(actionValue)) {
-    console.log('Redo failed: invalid action retrieved from stack');
-    redoStack = [];
-    refreshButtons();
     return;
   }
 
   try {
     isRedoInProgress = true;
 
-    // Check if this action is valid in current state
-    if (!game.validMoves[actionValue]) {
-      console.log('Redo failed: action not valid in current state');
-      redoStack = [];
+    const redoResultProxy = game.py.redo_next_move();
+    if (!redoResultProxy || typeof redoResultProxy.toJs !== 'function') {
+      console.log('Redo failed: backend did not return data');
+      syncRedoStackFromPython();
       refreshButtons();
       return;
     }
 
-    console.log('Redoing action:', actionValue);
-
-    // Use the Python backend to handle the redo properly
-    try {
-      const result = game.py.getNextState(actionValue).toJs({create_proxies: false});
-      const [nextPlayer, gameEnded, validMoves] = result;
-
-      // Update game state
-      game.nextPlayer = nextPlayer;
-      game.gameEnded = gameEnded;
-      game.validMoves = validMoves;
-
-      move_sel.reset();
-      move_sel._select_relevant_cells(); // Update selectable cells
-      refreshBoard();
+    const redoResult = redoResultProxy.toJs({ create_proxies: false });
+    if (!Array.isArray(redoResult) || redoResult.length < 4) {
+      console.log('Redo failed: unexpected backend response');
+      syncRedoStackFromPython();
       refreshButtons();
+      return;
+    }
 
-      // Only trigger AI if next player is not human and there are no more stored redos
-      if (redoStack.length === 0 && !game.is_human_player(game.nextPlayer)) {
-        ai_play_if_needed();
-      }
-      // Always refresh evaluation after any move
-      if (typeof refreshEvaluation === 'function') {
-        await refreshEvaluation();
-      }
-    } catch (pyError) {
-      console.error('Python redo failed:', pyError);
-      // Fallback to JavaScript move
-      redoStack = [];
-      try {
-        game.move(actionValue, true);
-        move_sel.reset();
-        move_sel._select_relevant_cells();
-        refreshBoard();
-        refreshButtons();
+    const [nextPlayer, gameEnded, validMoves, actionValue, remainingCount = 0] = redoResult;
+    if (typeof actionValue !== 'number' || Number.isNaN(actionValue)) {
+      console.log('Redo failed: backend returned invalid action');
+      syncRedoStackFromPython();
+      refreshButtons();
+      return;
+    }
 
-        if (!game.is_human_player(game.nextPlayer)) {
-          ai_play_if_needed();
-        }
-        if (typeof refreshEvaluation === 'function') {
-          await refreshEvaluation();
-        }
-      } catch (fallbackError) {
-        console.error('Redo fallback failed:', fallbackError);
+    // Remove the expected action from the local stack to keep UI in sync
+    if (redoStack.length > 0) {
+      const expectedAction = redoStack.pop();
+      if (typeof expectedAction !== 'undefined' && Number(expectedAction) !== actionValue) {
+        console.warn('Redo stack out of sync, resynchronizing');
+        syncRedoStackFromPython();
       }
+    }
+
+    game.nextPlayer = nextPlayer;
+    game.gameEnded = gameEnded;
+    game.validMoves = validMoves;
+
+    move_sel.reset();
+    move_sel._select_relevant_cells();
+    refreshBoard();
+    refreshButtons();
+
+    if ((remainingCount === 0 || !remainingCount) && !game.is_human_player(game.nextPlayer)) {
+      ai_play_if_needed();
+    }
+
+    if (typeof refreshEvaluation === 'function') {
+      await refreshEvaluation();
     }
   } catch (error) {
     console.error('Redo failed:', error);
     redoStack = [];
-    refreshButtons();
   } finally {
-    // Add small delay to prevent rapid clicking
+    syncRedoStackFromPython();
+    refreshButtons();
     setTimeout(() => {
       isRedoInProgress = false;
     }, 300);
@@ -1302,6 +1349,12 @@ function start_guided_setup() {
   // Enter edit workers mode
   move_sel._select_none();
   move_sel.editMode = 2;
+  if (typeof redoStack !== 'undefined') {
+    redoStack = [];
+    if (typeof syncRedoStackFromPython === 'function') {
+      syncRedoStackFromPython();
+    }
+  }
   // Inform backend to clear history so setup becomes baseline
   try { if (game.py && game.py.begin_setup) game.py.begin_setup(); } catch(e) {}
 
@@ -1332,8 +1385,8 @@ function start_guided_setup() {
       }
     }
   }
-    refreshBoard();
-    refreshButtons();
+  refreshBoard();
+  refreshButtons();
   updateSetupStatus();
 }
 
@@ -1346,10 +1399,13 @@ async function finalize_guided_setup() {
   // Tell backend to finalize setup and refresh state triplet
   try {
     if (game.py && game.py.end_setup) {
-      const data_tuple = game.py.end_setup().toJs({create_proxies: false});
+      const data_tuple = game.py.end_setup().toJs({ create_proxies: false });
       [game.nextPlayer, game.gameEnded, game.validMoves] = data_tuple;
     }
   } catch(e) {}
+  if (typeof syncRedoStackFromPython === 'function') {
+    syncRedoStackFromPython();
+  }
   refreshBoard();
   refreshButtons();
   changeMoveText('', 'reset');
