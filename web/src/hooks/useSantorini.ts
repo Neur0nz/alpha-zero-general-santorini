@@ -5,6 +5,10 @@ import { MoveSelector } from '@game/moveSelector';
 import { renderCellSvg, type CellState } from '@game/svg';
 import { GAME_CONSTANTS } from '@game/constants';
 
+export interface UseSantoriniOptions {
+  evaluationEnabled?: boolean;
+}
+
 const PY_FILES: Array<[string, string]> = [
   [`${import.meta.env.BASE_URL || '/'}santorini/Game.py`, 'Game.py'],
   [`${import.meta.env.BASE_URL || '/'}santorini/proxy.py`, 'proxy.py'],
@@ -117,7 +121,8 @@ const normalizeTopMoves = (rawMoves: unknown): TopMove[] => {
   });
 };
 
-export function useSantorini() {
+export function useSantorini(options: UseSantoriniOptions = {}) {
+  const { evaluationEnabled = true } = options;
   const [loading, setLoading] = useState(true);
   const [board, setBoard] = useState<BoardCell[][]>(INITIAL_BOARD);
   const [selectable, setSelectable] = useState<boolean[][]>(INITIAL_SELECTABLE);
@@ -133,6 +138,7 @@ export function useSantorini() {
   const [evaluation, setEvaluation] = useState<EvaluationState>({ value: 0, advantage: 'Balanced', label: '0.00' });
   const [topMoves, setTopMoves] = useState<TopMove[]>([]);
   const [history, setHistory] = useState<MoveSummary[]>([]);
+  const [nextPlayer, setNextPlayer] = useState(0);
   const [calcOptionsBusy, setCalcOptionsBusy] = useState(false);
   const [calcDepthOverride, setCalcDepthOverride] = useState<number | null>(null);
 
@@ -208,14 +214,21 @@ export function useSantorini() {
   const loadPyodideRuntime = useCallback(async () => {
     try {
       const pyodideUrl = import.meta.env.VITE_PYODIDE_URL as string;
-      const onnxUrl = import.meta.env.VITE_ONNX_URL as string;
-      
-      
-      if (!pyodideUrl || !onnxUrl) {
-        throw new Error('Missing required environment variables: VITE_PYODIDE_URL and VITE_ONNX_URL');
+      const onnxUrl = import.meta.env.VITE_ONNX_URL as string | undefined;
+
+      if (!pyodideUrl) {
+        throw new Error('Missing required environment variable: VITE_PYODIDE_URL');
       }
-      
-      await Promise.all([loadScript(pyodideUrl), loadScript(onnxUrl)]);
+
+      const scriptPromises: Promise<unknown>[] = [loadScript(pyodideUrl)];
+      if (evaluationEnabled) {
+        if (!onnxUrl) {
+          throw new Error('Missing required environment variable: VITE_ONNX_URL');
+        }
+        scriptPromises.push(loadScript(onnxUrl));
+      }
+
+      await Promise.all(scriptPromises);
       
       // Wait a bit for the script to initialize
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -240,12 +253,14 @@ export function useSantorini() {
       game.setBackend(pyodide);
       gameRef.current = game;
       selectorRef.current = new MoveSelector(game);
-      await initOnnxSession();
+      if (evaluationEnabled) {
+        await initOnnxSession();
+      }
     } catch (error) {
       console.error('Failed to load Pyodide runtime:', error);
       throw error;
     }
-  }, [initOnnxSession]);
+  }, [evaluationEnabled, initOnnxSession]);
 
   const readBoard = useCallback(() => {
     const game = gameRef.current;
@@ -302,6 +317,7 @@ export function useSantorini() {
       editMode: selector.editMode,
       status,
     }));
+    setNextPlayer(typeof game.nextPlayer === 'number' ? game.nextPlayer : 0);
   }, []);
 
   const refreshHistory = useCallback(() => {
@@ -316,6 +332,11 @@ export function useSantorini() {
   }, []);
 
   const refreshEvaluation = useCallback(async () => {
+    if (!evaluationEnabled) {
+      setEvaluation({ value: 0, advantage: 'Balanced', label: '0.00' });
+      setTopMoves([]);
+      return;
+    }
     const game = gameRef.current;
     if (!game || !game.py) return;
     
@@ -343,9 +364,13 @@ export function useSantorini() {
       setEvaluation({ value: 0, advantage: 'Error', label: '0.00' });
       setTopMoves([]);
     }
-  }, []);
+  }, [evaluationEnabled]);
 
   const calculateOptions = useCallback(async () => {
+    if (!evaluationEnabled) {
+      setTopMoves([]);
+      return;
+    }
     const game = gameRef.current;
     if (!game || !game.py || !game.py.list_current_moves_with_adv) return;
     setCalcOptionsBusy(true);
@@ -359,7 +384,7 @@ export function useSantorini() {
     } finally {
       setCalcOptionsBusy(false);
     }
-  }, [calcDepthOverride]);
+  }, [calcDepthOverride, evaluationEnabled]);
 
   const syncUi = useCallback(async (loadingState = false) => {
     readBoard();
@@ -409,6 +434,9 @@ export function useSantorini() {
   }, [loadPyodideRuntime, refreshEvaluation, syncUi]);
 
   const aiPlayIfNeeded = useCallback(async () => {
+    if (!evaluationEnabled) {
+      return;
+    }
     const game = gameRef.current;
     const selector = selectorRef.current;
     if (!game || !selector) return;
@@ -423,7 +451,7 @@ export function useSantorini() {
       refreshHistory();
     }
     await updateButtons(false);
-  }, [readBoard, refreshEvaluation, refreshHistory, updateButtons, updateSelectable]);
+  }, [evaluationEnabled, readBoard, refreshEvaluation, refreshHistory, updateButtons, updateSelectable]);
 
   const ensureAiIdle = useCallback(() => aiPromiseRef.current, []);
 
@@ -441,6 +469,7 @@ export function useSantorini() {
         const data_tuple = game.py.end_setup().toJs({ create_proxies: false });
         if (Array.isArray(data_tuple) && data_tuple.length >= 3) {
           [game.nextPlayer, game.gameEnded, game.validMoves] = data_tuple;
+          setNextPlayer(typeof game.nextPlayer === 'number' ? game.nextPlayer : 0);
         }
       }
 
@@ -765,5 +794,6 @@ export function useSantorini() {
     undo,
     redo,
     calcOptionsBusy,
+    nextPlayer,
   };
 }

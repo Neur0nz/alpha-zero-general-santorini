@@ -25,9 +25,9 @@ export interface LobbyMatch extends MatchRecord {
 }
 
 export interface UseMatchLobbyState {
-  matches: LobbyMatch[];
+  matches: MatchRecord[];
   loading: boolean;
-  activeMatch: LobbyMatch | null;
+  activeMatch: MatchRecord | null;
   moves: MatchMoveRecord<MatchAction>[];
   joinCode: string | null;
 }
@@ -59,8 +59,117 @@ function generateJoinCode() {
 export function useMatchLobby(profile: PlayerProfile | null) {
   const [state, setState] = useState<UseMatchLobbyState>(INITIAL_STATE);
   const channelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
+  const playersRef = useRef<Record<string, PlayerProfile>>({});
+  const [playersVersion, setPlayersVersion] = useState(0);
 
   const matchId = state.activeMatch?.id ?? null;
+
+  const mergePlayers = useCallback((records: PlayerProfile[]): void => {
+    if (!records.length) return;
+    const next = { ...playersRef.current };
+    let changed = false;
+    records.forEach((record) => {
+      if (!record?.id) return;
+      const existing = next[record.id];
+      if (!existing || existing.updated_at !== record.updated_at || existing.display_name !== record.display_name) {
+        next[record.id] = record;
+        changed = true;
+      }
+    });
+    if (changed) {
+      playersRef.current = next;
+      setPlayersVersion((prev) => prev + 1);
+    }
+  }, []);
+
+  const ensurePlayersLoaded = useCallback(
+    async (ids: Array<string | null | undefined>): Promise<void> => {
+      const client = supabase;
+      if (!client) return;
+      const missing = Array.from(
+        new Set(
+          ids
+            .filter((id): id is string => typeof id === 'string' && id.length > 0)
+            .filter((id) => !playersRef.current[id]),
+        ),
+      );
+      if (!missing.length) return;
+      const { data, error } = await client.from('players').select('*').in('id', missing);
+      if (error) {
+        console.error('Failed to load player profiles', error);
+        return;
+      }
+      mergePlayers((data ?? []) as PlayerProfile[]);
+    },
+    [mergePlayers],
+  );
+
+  const attachProfiles = useCallback(
+    (match: MatchRecord | null): LobbyMatch | null => {
+      if (!match) return null;
+      return {
+        ...match,
+        creator: match.creator_id ? playersRef.current[match.creator_id] ?? null : null,
+        opponent: match.opponent_id ? playersRef.current[match.opponent_id] ?? null : null,
+      };
+    },
+    [playersVersion],
+  );
+
+  useEffect(() => {
+    if (profile) {
+      mergePlayers([profile]);
+    }
+  }, [mergePlayers, profile]);
+
+  useEffect(() => {
+    const client = supabase;
+    if (!client) return undefined;
+
+    const channel = client
+      .channel('public:players')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'players' }, (payload) => {
+        const record = payload.new as PlayerProfile | null;
+        if (record) {
+          mergePlayers([record]);
+        }
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'players' }, (payload) => {
+        const record = payload.new as PlayerProfile | null;
+        if (record) {
+          mergePlayers([record]);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      client.removeChannel(channel);
+    };
+  }, [mergePlayers]);
+
+  useEffect(() => {
+    const client = supabase;
+    if (!client || !profile) return undefined;
+
+    const cleanup = async () => {
+      const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { error } = await client
+        .from('matches')
+        .update({ status: 'abandoned' })
+        .eq('creator_id', profile.id)
+        .eq('status', 'waiting_for_opponent')
+        .lt('created_at', cutoff);
+      if (error) {
+        console.error('Failed to clean stale matches', error);
+      }
+    };
+
+    cleanup();
+    const timer = setInterval(cleanup, 5 * 60 * 1000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [profile]);
 
   useEffect(() => {
     const client = supabase;
@@ -80,7 +189,11 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         return;
       }
 
-      setState((prev) => ({ ...prev, loading: false, matches: (data ?? []) as LobbyMatch[] }));
+      const records = (data ?? []) as MatchRecord[];
+      setState((prev) => ({ ...prev, loading: false, matches: records }));
+      void ensurePlayersLoaded(
+        records.flatMap((match) => [match.creator_id, match.opponent_id ?? undefined]),
+      );
     };
 
     fetchMatches();
@@ -90,16 +203,17 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'matches' },
-        (payload: RealtimePostgresChangesPayload<LobbyMatch>) => {
+        (payload: RealtimePostgresChangesPayload<MatchRecord>) => {
           setState((prev) => {
             const matches = [...prev.matches];
             if (payload.eventType === 'INSERT') {
-              const record = payload.new as LobbyMatch;
+              const record = payload.new as MatchRecord;
               if (record.status === 'waiting_for_opponent') {
                 matches.unshift(record);
               }
+              void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
             } else if (payload.eventType === 'UPDATE') {
-              const updated = payload.new as LobbyMatch;
+              const updated = payload.new as MatchRecord;
               const index = matches.findIndex((m) => m.id === updated.id);
               if (index >= 0) {
                 matches[index] = updated;
@@ -109,6 +223,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
               if (updated.status !== 'waiting_for_opponent') {
                 return { ...prev, matches: matches.filter((m) => m.id !== updated.id) };
               }
+              void ensurePlayersLoaded([updated.creator_id, updated.opponent_id ?? undefined]);
             } else if (payload.eventType === 'DELETE') {
               return { ...prev, matches: matches.filter((m) => m.id !== (payload.old as MatchRecord).id) };
             }
@@ -146,7 +261,11 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         return;
       }
 
-      setState((prev) => ({ ...prev, activeMatch: (data ?? null) as LobbyMatch | null }));
+      const record = (data ?? null) as MatchRecord | null;
+      setState((prev) => ({ ...prev, activeMatch: record }));
+      if (record) {
+        void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
+      }
     };
 
     const fetchMoves = async () => {
@@ -178,8 +297,10 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` },
-        (payload: RealtimePostgresChangesPayload<LobbyMatch>) => {
-          setState((prev) => ({ ...prev, activeMatch: payload.new as LobbyMatch }));
+        (payload: RealtimePostgresChangesPayload<MatchRecord>) => {
+          const updated = payload.new as MatchRecord;
+          setState((prev) => ({ ...prev, activeMatch: updated }));
+          void ensurePlayersLoaded([updated.creator_id, updated.opponent_id ?? undefined]);
         },
       )
       .on(
@@ -211,7 +332,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       client.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [matchId]);
+  }, [ensurePlayersLoaded, matchId]);
 
   const createMatch = useCallback(
     async (payload: CreateMatchPayload) => {
@@ -237,10 +358,13 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         throw error;
       }
 
-      setState((prev) => ({ ...prev, activeMatch: data as LobbyMatch, joinCode }));
-      return data as LobbyMatch;
+      const record = data as MatchRecord;
+      setState((prev) => ({ ...prev, activeMatch: record, joinCode, moves: [] }));
+      void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
+      const enriched = attachProfiles(record);
+      return enriched ?? { ...record, creator: null, opponent: null };
     },
-    [profile],
+    [attachProfiles, ensurePlayersLoaded, profile],
   );
 
   const joinMatch = useCallback(
@@ -251,7 +375,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       }
 
       const isCode = idOrCode.length <= 8;
-      let targetMatch: LobbyMatch | null = null;
+      let targetMatch: MatchRecord | null = null;
 
       if (isCode) {
         const { data, error } = await client
@@ -263,7 +387,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
           console.error('Failed to find match by code', error);
           throw error;
         }
-        targetMatch = (data ?? null) as LobbyMatch | null;
+        targetMatch = (data ?? null) as MatchRecord | null;
       } else {
         const { data, error } = await client
           .from('matches')
@@ -274,16 +398,22 @@ export function useMatchLobby(profile: PlayerProfile | null) {
           console.error('Failed to find match by id', error);
           throw error;
         }
-        targetMatch = (data ?? null) as LobbyMatch | null;
+        targetMatch = (data ?? null) as MatchRecord | null;
       }
 
       if (!targetMatch) {
         throw new Error('Match not found.');
       }
 
+      if (targetMatch.status !== 'waiting_for_opponent') {
+        throw new Error('Match is no longer accepting players.');
+      }
+
       if (targetMatch.creator_id === profile.id) {
-        setState((prev) => ({ ...prev, activeMatch: targetMatch, joinCode: targetMatch.private_join_code }));
-        return targetMatch;
+        setState((prev) => ({ ...prev, activeMatch: targetMatch, joinCode: targetMatch.private_join_code, moves: [] }));
+        void ensurePlayersLoaded([targetMatch.creator_id, targetMatch.opponent_id ?? undefined]);
+        const enriched = attachProfiles(targetMatch);
+        return enriched ?? { ...targetMatch, creator: null, opponent: null };
       }
 
       const { data, error } = await client
@@ -299,15 +429,33 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         throw error;
       }
 
-      setState((prev) => ({ ...prev, activeMatch: data as LobbyMatch, joinCode: targetMatch.private_join_code }));
-      return data as LobbyMatch;
+      const joined = data as MatchRecord;
+      setState((prev) => ({ ...prev, activeMatch: joined, joinCode: targetMatch.private_join_code, moves: [] }));
+      void ensurePlayersLoaded([joined.creator_id, joined.opponent_id ?? undefined]);
+      const enriched = attachProfiles(joined);
+      return enriched ?? { ...joined, creator: null, opponent: null };
     },
-    [profile],
+    [attachProfiles, ensurePlayersLoaded, profile],
   );
 
   const leaveMatch = useCallback(async () => {
+    const client = supabase;
+    const active = state.activeMatch;
+    if (client && active && profile) {
+      const updates: Partial<MatchRecord> = { status: 'abandoned' };
+      if (active.status === 'in_progress') {
+        const opponentId = profile.id === active.creator_id ? active.opponent_id : active.creator_id;
+        if (opponentId) {
+          updates.winner_id = opponentId;
+        }
+      }
+      const { error } = await client.from('matches').update(updates).eq('id', active.id);
+      if (error) {
+        console.error('Failed to mark match as abandoned', error);
+      }
+    }
     setState((prev) => ({ ...prev, activeMatch: null, moves: [], joinCode: null }));
-  }, []);
+  }, [profile, state.activeMatch]);
 
   const submitMove = useCallback(
     async (match: LobbyMatch, moveIndex: number, movePayload: SantoriniMoveAction) => {
@@ -361,9 +509,13 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         console.error('Failed to create rematch', error);
         throw error;
       }
-      return data as LobbyMatch;
+      const record = data as MatchRecord;
+      setState((prev) => ({ ...prev, activeMatch: record, moves: [], joinCode: record.private_join_code }));
+      void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
+      const enriched = attachProfiles(record);
+      return enriched ?? { ...record, creator: null, opponent: null };
     },
-    [profile, state.activeMatch],
+    [attachProfiles, ensurePlayersLoaded, profile, state.activeMatch],
   );
 
   const activeRole = useMemo<'creator' | 'opponent' | null>(() => {
@@ -373,8 +525,23 @@ export function useMatchLobby(profile: PlayerProfile | null) {
     return null;
   }, [profile, state.activeMatch]);
 
+  const matchesWithProfiles = useMemo(
+    () =>
+      state.matches.map((match) => {
+        const enriched = attachProfiles(match);
+        return enriched ?? { ...match, creator: null, opponent: null };
+      }),
+    [attachProfiles, state.matches],
+  );
+
+  const activeMatchWithProfiles = useMemo(() => attachProfiles(state.activeMatch), [attachProfiles, state.activeMatch]);
+
   return {
-    ...state,
+    matches: matchesWithProfiles,
+    loading: state.loading,
+    activeMatch: activeMatchWithProfiles,
+    moves: state.moves,
+    joinCode: state.joinCode,
     activeRole,
     createMatch,
     joinMatch,
