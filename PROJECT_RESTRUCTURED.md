@@ -24,15 +24,10 @@ alpha-zero-general-santorini/
 ### After (Web UI Only) ✅
 ```
 alpha-zero-general-santorini/
-├── santorini/           # Santorini web game
-├── splendor/            # Splendor web game
-├── smallworld/          # Small World web game
-├── minivilles/          # Minivilles web game
-├── thelittleprince/     # The Little Prince web game
-├── common/              # Shared framework
-├── *.html               # Game pages
+├── santorini/           # Santorini web client (no-god variant)
+├── index.html           # Redirect entry point
 ├── serve.sh             # Simple server script
-└── README.md            # Updated documentation
+└── README.md            # Project documentation
 ```
 
 ## 🗑️ What Was Removed
@@ -66,7 +61,7 @@ alpha-zero-general-santorini/
 ## ✅ What Remains
 
 ### Complete Web UI
-- ✅ All games with pre-trained ONNX models
+- ✅ Santorini with pre-trained ONNX model (no god powers)
 - ✅ Python game logic (runs via Pyodide)
 - ✅ JavaScript UI code
 - ✅ **NEW: AI Evaluation Display**
@@ -194,7 +189,7 @@ git push origin main
 ./serve.sh
 
 # 2. Open browser
-# http://localhost:8000/santorini_with_gods.html
+# http://localhost:8000/santorini/index.html
 
 # 3. Edit files and refresh
 # Changes appear immediately!
@@ -203,7 +198,7 @@ git push origin main
 ## 🎉 Summary
 
 ✅ **Removed** 1GB+ of backend training infrastructure  
-✅ **Kept** complete web UI with all games  
+✅ **Kept** the Santorini web UI
 ✅ **Added** AI evaluation display  
 ✅ **Simplified** deployment and development  
 ✅ **Reduced** disk space by 93%  
@@ -216,9 +211,4 @@ git push origin main
 **Server is running at: http://localhost:8000**
 
 Try it now:
-- 🎮 [Santorini with Gods](http://localhost:8000/santorini_with_gods.html)
-- 💎 [Splendor](http://localhost:8000/splendor.html)
-- 🗺️ [Small World](http://localhost:8000/smallworld.html)
-
-
-
+- 🎮 [Santorini](http://localhost:8000/santorini/index.html)

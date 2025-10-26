@@ -1,7 +1,6 @@
 from MCTS import MCTS
 from SantoriniGame import SantoriniGame as Game
 from SantoriniDisplay import move_to_str
-from SantoriniLogicNumba import NB_GODS
 import numpy as np
 
 g, board, mcts, player = None, None, None, 0
@@ -275,12 +274,7 @@ def editCell(clicked_y, clicked_x, editMode):
 	else:
 		print('Dont know what to do in editMode', editMode)
 
-def editGod(player, current_power):
-	new_power = (current_power + 1) % NB_GODS
-	g.board.gods_power.flat[player*NB_GODS + current_power] = 0
-	g.board.gods_power.flat[player*NB_GODS + new_power    ] = 64
-
 def update_after_edit():
-	end = g.getGameEnded(board, player)
-	valids = g.getValidMoves(board, player)
-	return player, end, valids
+        end = g.getGameEnded(board, player)
+        valids = g.getValidMoves(board, player)
+        return player, end, valids
