@@ -186,24 +186,77 @@ async def list_current_moves_with_adv(limit: int = 5, numMCTSSims: int | None = 
 	finally:
 		mcts.args.numMCTSSims = prev_sims
 
+def _finalize_revert(removed_states):
+        """Helper to apply a list of removed states and update bookkeeping."""
+        global g, board, player, history, future_history
+
+        if not removed_states:
+                end = g.getGameEnded(board, player)
+                valids = g.getValidMoves(board, player)
+                return player, end, valids, []
+
+        # The last element corresponds to the board state we are restoring
+        target_state = removed_states[-1]
+        player = int(target_state[0])
+        board = target_state[1]
+
+        # Drop the reverted states from the history and prepend them to the redo stack
+        history = history[len(removed_states):]
+        future_history = removed_states[::-1] + future_history
+
+        removed_actions = [int(state[2]) for state in removed_states]
+
+        end = g.getGameEnded(board, player)
+        valids = g.getValidMoves(board, player)
+        return player, end, valids, removed_actions
+
+
+def revert_last_move():
+        """Undo only the most recent move, regardless of the player."""
+        global history
+
+        if len(history) == 0:
+                return _finalize_revert([])
+
+        removed_states = history[:1]
+        return _finalize_revert(removed_states)
+
+
 def revert_to_previous_move(player_asking_revert):
         global g, board, mcts, player, history, future_history
 
-        removed_actions = []
+        removed_states = []
 
         if len(history) > 0:
-                # Revert to the previous 0 before a 1, or first 0 from game
-                for index, state in enumerate(history):
-                        if (state[0] == player_asking_revert) and (index+1 == len(history) or history[index+1][0] != player_asking_revert):
-                                break
-                print(f'index={index} / {len(history)}');
+                if player_asking_revert is None:
+                        removed_states = history[:1]
+                else:
+                        # Revert to the previous 0 before a 1, or first 0 from game
+                        for index, state in enumerate(history):
+                                if (state[0] == player_asking_revert) and (index+1 == len(history) or history[index+1][0] != player_asking_revert):
+                                        removed_states = history[:index+1]
+                                        break
+                        if removed_states:
+                                print(f'index={len(removed_states)-1} / {len(history)}');
 
-                removed_states = history[:index+1]
+        return _finalize_revert(removed_states)
 
-                # Actually revert, and update history
-                # print(f'Board to revert: {state[1]}')
-                player, board = state[0], state[1]
-                history = history[index+1:]
+def jump_to_move_index(move_index):
+        """Jump to a specific move index in the history (0-based)"""
+        global g, board, mcts, player, history, future_history
+        if move_index < 0 or move_index >= len(history):
+                print(f'Invalid move index: {move_index}, history length: {len(history)}')
+                return None
+
+        # Get the state at the specified index
+        state = history[move_index]
+        player, board = state[0], state[1]
+
+        # Clear redo information when jumping arbitrarily in history
+        future_history = []
+
+        # Don't truncate history - just set the current state
+        # This allows the modal to remain populated
 
                 # Store removed states for redo support, oldest first
                 future_history = removed_states[::-1] + future_history
@@ -212,7 +265,7 @@ def revert_to_previous_move(player_asking_revert):
 
         end = g.getGameEnded(board, player)
         valids = g.getValidMoves(board, player)
-        return player, end, valids, removed_actions
+        return player, end, valids
 
 def jump_to_move_index(move_index):
         """Jump to a specific move index in the history (0-based)"""
