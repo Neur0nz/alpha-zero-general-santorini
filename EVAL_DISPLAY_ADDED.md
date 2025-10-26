@@ -63,7 +63,7 @@ async function refreshEvaluation() {
 }
 ```
 
-### 3. Common Game Framework (`common/game.js`)
+### 3. Frontend Harness (`santorini/frontend.js`)
 **Changes:**
 - Modified `ai_play_if_needed_async()` to call `refreshEvaluation()` after AI moves
 - Made evaluation display game-agnostic (only calls if function exists)
@@ -76,10 +76,9 @@ if (typeof refreshEvaluation === 'function') {
 }
 ```
 
-### 4. HTML Pages
-**Changed Files:**
-- `santorini_with_gods.html` - Added evaluation container
-- `santorini.html` - Added evaluation container
+### 4. HTML Page
+**Changed File:**
+- `santorini/index.html` - Added evaluation container
 
 **Key Addition:**
 ```html
@@ -92,11 +91,11 @@ if (typeof refreshEvaluation === 'function') {
 ### Option 1: Test Locally
 
 ```bash
-# From the monorepo root
-./serve_web_ui.sh
+# From the project root
+./serve.sh
 
 # Open in browser:
-# http://localhost:8000/santorini_with_gods.html
+# http://localhost:8000/santorini/index.html
 ```
 
 ### Option 2: Deploy to GitHub Pages
@@ -106,8 +105,7 @@ The changes are ready to be deployed. Simply push the `web-ui/` folder to a GitH
 ### Option 3: Play Online
 
 If these changes are merged to the live site:
-- https://cestpasphoto.github.io/santorini_with_gods.html
-- https://cestpasphoto.github.io/santorini.html
+- https://cestpasphoto.github.io/santorini/index.html
 
 ## 🎮 User Experience
 

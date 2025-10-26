@@ -1,11 +1,8 @@
-// Import common/game.js before this file
-
 /* =================== */
 /* =====  CONST  ===== */
 /* =================== */
 
-// Here are common constants between nogod and god modes.
-// Check also constants_*.js
+// Constants for the (no-god) Santorini configuration.
 
 const directions_char = ['↖', '↑', '↗', '←', 'Ø', '→', '↙', '↓', '↘'];
 
