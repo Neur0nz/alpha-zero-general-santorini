@@ -36,6 +36,7 @@ function App() {
         controls={controls}
         onReset={controls.reset}
         onShowHistory={historyDisclosure.onOpen}
+        buttons={buttons}
       />
       <Flex flex="1" py={{ base: 6, md: 8 }}>
         <Container maxW="7xl" flex="1">

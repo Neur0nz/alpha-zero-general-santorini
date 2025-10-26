@@ -33,6 +33,7 @@ function GameBoard({
 }: GameBoardProps) {
   const cellBg = useColorModeValue('gray.50', 'gray.700');
   const selectableBg = useColorModeValue('teal.100', 'teal.700');
+  const setupSelectableBg = useColorModeValue('blue.100', 'blue.700');
 
   return (
     <Flex direction="column" gap={5} w="500px" maxW="500px" minW="500px">
@@ -50,7 +51,9 @@ function GameBoard({
           {board.map((row, y) =>
             row.map((cell, x) => {
               const isSelectable = selectable[y]?.[x];
+              const isSetupSelectable = buttons.setupMode && cell.worker === 0; // Empty cells during setup
               const highlight = cell.highlight;
+              const canClick = isSelectable || isSetupSelectable;
               return (
                 <GridItem key={`${y}-${x}`}>
                   <AspectRatio ratio={1} w="100%">
@@ -67,17 +70,23 @@ function GameBoard({
                       }}
                       onMouseEnter={() => onCellHover(y, x)}
                       onMouseLeave={() => onCellLeave(y, x)}
-                      cursor={isSelectable ? 'pointer' : 'default'}
+                      cursor={canClick ? 'pointer' : 'default'}
                       borderRadius="lg"
                       borderWidth={highlight ? '3px' : '1px'}
                       borderColor={highlight ? 'yellow.300' : 'whiteAlpha.300'}
-                      bg={isSelectable ? selectableBg : cellBg}
+                      bg={
+                        isSetupSelectable 
+                          ? setupSelectableBg 
+                          : isSelectable 
+                            ? selectableBg 
+                            : cellBg
+                      }
                       display="flex"
                       alignItems="center"
                       justifyContent="center"
                       transition="all 0.2s ease"
                       position="relative"
-                      _hover={{ boxShadow: isSelectable ? 'dark-lg' : undefined }}
+                      _hover={{ boxShadow: canClick ? 'dark-lg' : undefined }}
                     >
                       <Box
                         pointerEvents="none"
@@ -116,9 +125,9 @@ function GameBoard({
         px={4}
         py={3}
         borderRadius="md"
-        bg="blackAlpha.500"
+        bg={buttons.setupMode ? "blue.500" : "blackAlpha.500"}
         borderWidth="1px"
-        borderColor="whiteAlpha.200"
+        borderColor={buttons.setupMode ? "blue.300" : "whiteAlpha.200"}
       >
         <Text fontSize="sm" color="whiteAlpha.800">
           {buttons.status}
@@ -126,6 +135,11 @@ function GameBoard({
         {buttons.loading && (
           <Text mt={2} fontSize="sm" color="teal.200">
             AI thinking...
+          </Text>
+        )}
+        {buttons.setupMode && (
+          <Text mt={2} fontSize="sm" color="blue.200">
+            Setup Mode: Click empty cells to place workers
           </Text>
         )}
       </Box>

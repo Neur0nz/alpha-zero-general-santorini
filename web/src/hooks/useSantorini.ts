@@ -30,6 +30,8 @@ export type ButtonsState = {
   canRedo: boolean;
   editMode: number;
   status: string;
+  setupMode: boolean;
+  setupTurn: number;
 };
 
 export type EvaluationState = {
@@ -62,6 +64,8 @@ export type Controls = {
   calculateOptions: () => Promise<void>;
   updateCalcDepth: (depth: number | null) => void;
   jumpToMove: (index: number) => Promise<void>;
+  startGuidedSetup: () => Promise<void>;
+  finalizeGuidedSetup: () => Promise<void>;
 };
 
 const INITIAL_BOARD: BoardCell[][] = Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () =>
@@ -81,7 +85,9 @@ export function useSantorini() {
     canRedo: false,
     canUndo: false,
     editMode: 0,
-    status: 'Loading engine...'
+    status: 'Loading engine...',
+    setupMode: false,
+    setupTurn: 0
   });
   const [evaluation, setEvaluation] = useState<EvaluationState>({ value: 0, advantage: 'Balanced', label: '0.00' });
   const [topMoves, setTopMoves] = useState<TopMove[]>([]);
@@ -103,12 +109,6 @@ export function useSantorini() {
       (window as any).predict = async (canonicalBoard: any, valids: any) => {
         const boardArray = Array.from(canonicalBoard) as number[];
         const validsArray = Array.from(valids) as number[];
-        console.log('Tensor shapes:', {
-          boardArray: boardArray.length,
-          validsArray: validsArray.length,
-          sizeCB: SIZE_CB,
-          sizeValid: [1, ONNX_OUTPUT_SIZE]
-        });
         const tensorBoard = new window.ort.Tensor('float32', Float32Array.from(boardArray), SIZE_CB);
         const tensorValid = new window.ort.Tensor('bool', new Uint8Array(validsArray), [1, ONNX_OUTPUT_SIZE]);
         const results = await session.run({
@@ -215,13 +215,14 @@ export function useSantorini() {
     } else {
       status = 'Confirming build.';
     }
-    setButtons({
+    setButtons(prev => ({
+      ...prev,
       loading: loadingState,
       canUndo,
       canRedo,
       editMode: selector.editMode,
       status,
-    });
+    }));
   }, []);
 
   const refreshHistory = useCallback(() => {
@@ -321,11 +322,93 @@ export function useSantorini() {
 
   const ensureAiIdle = useCallback(() => aiPromiseRef.current, []);
 
+  const finalizeGuidedSetup = useCallback(async () => {
+    const game = gameRef.current;
+    const selector = selectorRef.current;
+    if (!game || !selector) return;
+    
+    try {
+      // Normalize worker IDs and exit edit mode
+      game.editCell(-1, -1, 0);
+      selector.selectRelevantCells();
+      
+      // Tell backend to finalize setup and refresh state triplet
+      if (game.py && game.py.end_setup) {
+        const data_tuple = game.py.end_setup().toJs({ create_proxies: false });
+        if (Array.isArray(data_tuple) && data_tuple.length >= 3) {
+          [game.nextPlayer, game.gameEnded, game.validMoves] = data_tuple;
+        }
+      }
+      
+      // Exit setup mode
+      setButtons(prev => ({
+        ...prev,
+        setupMode: false,
+        setupTurn: 0,
+        editMode: 0,
+        status: 'Setup complete. Ready to play!'
+      }));
+      
+      // Refresh UI
+      readBoard();
+      updateSelectable();
+      await refreshEvaluation();
+      refreshHistory();
+    } catch (error) {
+      console.error('Failed to finalize setup:', error);
+    }
+  }, [readBoard, updateSelectable, refreshEvaluation, refreshHistory]);
+
+  const placeWorkerForSetup = useCallback((y: number, x: number) => {
+    const game = gameRef.current;
+    if (!game || !game.py) return;
+    
+    const current = game.py._read_worker(y, x);
+    if (current !== 0) {
+      // Only allow placing on empty cells during setup
+      return;
+    }
+    
+    const setupTurn = buttons.setupTurn;
+    const placingGreen = (setupTurn === 0 || setupTurn === 1);
+    
+    // editCell mode 2 cycles: 0 -> +1 -> -1 -> 0 ...
+    if (placingGreen) {
+      game.editCell(y, x, 2); // 0 -> +1
+    } else {
+      game.editCell(y, x, 2); // 0 -> +1
+      game.editCell(y, x, 2); // +1 -> -1
+    }
+    
+    const newSetupTurn = setupTurn + 1;
+    const steps = ['Place Green piece 1', 'Place Green piece 2', 'Place Red piece 1', 'Place Red piece 2'];
+    const status = newSetupTurn < steps.length ? steps[newSetupTurn] : 'Setup complete';
+    
+    setButtons(prev => ({
+      ...prev,
+      setupTurn: newSetupTurn,
+      status
+    }));
+    
+    readBoard();
+    
+    if (newSetupTurn >= 4) {
+      finalizeGuidedSetup();
+    }
+  }, [buttons.setupTurn, readBoard, finalizeGuidedSetup]);
+
   const onCellClick = useCallback(
     async (y: number, x: number) => {
       const game = gameRef.current;
       const selector = selectorRef.current;
       if (!game || !selector) return;
+      
+      // Handle setup mode
+      if (buttons.setupMode) {
+        placeWorkerForSetup(y, x);
+        return;
+      }
+      
       selector.click(y, x);
       updateSelectable();
       const move = selector.getMove();
@@ -340,7 +423,7 @@ export function useSantorini() {
         updateButtons(false);
       }
     },
-    [aiPlayIfNeeded, ensureAiIdle, refreshEvaluation, syncUi, updateButtons, updateSelectable],
+    [aiPlayIfNeeded, ensureAiIdle, refreshEvaluation, syncUi, updateButtons, updateSelectable, buttons.setupMode, placeWorkerForSetup],
   );
 
   const onCellHover = useCallback((_y: number, _x: number) => {
@@ -451,6 +534,63 @@ export function useSantorini() {
     setCalcDepthOverride(depth);
   }, []);
 
+  const startGuidedSetup = useCallback(async () => {
+    const game = gameRef.current;
+    const selector = selectorRef.current;
+    if (!game || !selector) return;
+    
+    // Enter setup mode
+    setButtons(prev => ({
+      ...prev,
+      setupMode: true,
+      setupTurn: 0,
+      editMode: 2, // Edit workers mode
+      status: 'Place Green piece 1'
+    }));
+    
+    // Clear all workers from the board
+    if (game.py) {
+      try {
+        // Inform backend to clear history so setup becomes baseline
+        if (game.py.begin_setup) {
+          game.py.begin_setup();
+        }
+        
+        // Clear all workers and levels from the board
+        for (let y = 0; y < GAME_CONSTANTS.BOARD_SIZE; y++) {
+          for (let x = 0; x < GAME_CONSTANTS.BOARD_SIZE; x++) {
+            // Clear levels (buildings) back to 0
+            let lvl = game.py._read_level(y, x);
+            let guard = 0;
+            while (lvl !== 0 && guard < 6) {
+              game.editCell(y, x, 1);
+              lvl = game.py._read_level(y, x);
+              guard++;
+            }
+
+            const w = game.py._read_worker(y, x);
+            if (w > 0) {
+              // >0 -> -1
+              game.editCell(y, x, 2);
+              // -1 -> 0
+              game.editCell(y, x, 2);
+            } else if (w < 0) {
+              // <0 -> 0
+              game.editCell(y, x, 2);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to clear board for setup:', error);
+      }
+    }
+    
+    // Clear selectable cells and refresh board
+    selector.selectNone();
+    readBoard();
+    updateSelectable();
+  }, [readBoard, updateSelectable]);
+
   const controls: Controls = useMemo(
     () => ({
       reset,
@@ -462,8 +602,10 @@ export function useSantorini() {
       calculateOptions,
       updateCalcDepth,
       jumpToMove,
+      startGuidedSetup,
+      finalizeGuidedSetup,
     }),
-    [calculateOptions, changeDifficulty, jumpToMove, refreshEvaluation, reset, setEditMode, setGameMode, toggleEdit, updateCalcDepth],
+    [calculateOptions, changeDifficulty, jumpToMove, refreshEvaluation, reset, setEditMode, setGameMode, toggleEdit, updateCalcDepth, startGuidedSetup, finalizeGuidedSetup],
   );
 
   return {

@@ -13,7 +13,7 @@ import {
   useColorModeValue,
 } from '@chakra-ui/react';
 import { RepeatIcon, SunIcon, MoonIcon, TimeIcon } from '@chakra-ui/icons';
-import type { Controls } from '@hooks/useSantorini';
+import type { Controls, ButtonsState } from '@hooks/useSantorini';
 
 const difficultyPresets: Array<{ label: string; value: number }> = [
   { label: 'God-like (12800)', value: 12800 },
@@ -36,9 +36,10 @@ interface HeaderBarProps {
   controls: Controls;
   onReset: () => Promise<void>;
   onShowHistory: () => void;
+  buttons: ButtonsState;
 }
 
-function HeaderBar({ controls, onReset, onShowHistory }: HeaderBarProps) {
+function HeaderBar({ controls, onReset, onShowHistory, buttons }: HeaderBarProps) {
   const { colorMode, toggleColorMode } = useColorMode();
   const bg = useColorModeValue('whiteAlpha.200', 'gray.800');
   const selectBg = useColorModeValue('white', 'gray.700');
@@ -68,6 +69,15 @@ function HeaderBar({ controls, onReset, onShowHistory }: HeaderBarProps) {
         <HStack spacing={3} flexWrap="wrap">
           <Button colorScheme="teal" size="sm" onClick={onReset} leftIcon={<RepeatIcon />}>
             New game
+          </Button>
+          <Button 
+            colorScheme="blue" 
+            size="sm" 
+            onClick={controls.startGuidedSetup}
+            isDisabled={buttons.setupMode}
+            title="Guided setup: place pieces then start"
+          >
+            Setup
           </Button>
           <Button colorScheme="orange" size="sm" onClick={controls.toggleEdit}>
             Toggle edit
