@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     envDir,
+    base: env.VITE_PUBLIC_BASE_PATH ?? '/',
     resolve: {
       alias: {
         '@': path.resolve(__dirname, 'src'),
