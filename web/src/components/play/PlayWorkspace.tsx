@@ -4,6 +4,7 @@ import {
   AlertDescription,
   AlertIcon,
   AlertTitle,
+  Avatar,
   Badge,
   Box,
   Button,
@@ -37,11 +38,12 @@ import {
   useToast,
 } from '@chakra-ui/react';
 import { AddIcon } from '@chakra-ui/icons';
-import { useSupabaseAuth } from '@hooks/useSupabaseAuth';
+import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import { useMatchLobby, type CreateMatchPayload, type LobbyMatch } from '@hooks/useMatchLobby';
 import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
 import GameBoard from '@components/GameBoard';
 import EvaluationPanel from '@components/EvaluationPanel';
+import GoogleIcon from '@components/auth/GoogleIcon';
 import type { SantoriniMoveAction } from '@/types/match';
 import { generateDisplayName, validateDisplayName } from '@/utils/generateDisplayName';
 
@@ -464,24 +466,21 @@ function ActiveMatchPanel({
   );
 }
 
-type AuthState = ReturnType<typeof useSupabaseAuth>;
-
-function AuthGate({ auth }: { auth: AuthState }) {
+function AuthGate({ auth }: { auth: SupabaseAuthState }) {
   const {
     profile,
     session,
     loading,
     error,
     isConfigured,
-    signInWithMagicLink,
     signInWithGoogle,
     signOut,
     updateDisplayName,
     refreshProfile,
   } = auth;
-  const [email, setEmail] = useState('');
-  const [sent, setSent] = useBoolean(false);
   const [savingName, setSavingName] = useBoolean(false);
+  const [startingGoogle, setStartingGoogle] = useBoolean(false);
+  const [signingOut, setSigningOut] = useBoolean(false);
   const [retrying, setRetrying] = useBoolean(false);
   const [displayNameValue, setDisplayNameValue] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
@@ -497,28 +496,9 @@ function AuthGate({ auth }: { auth: AuthState }) {
     }
   }, [profile]);
 
-  const handleRequestLink = async () => {
-    try {
-      const trimmedEmail = email.trim();
-      if (!trimmedEmail) {
-        setEmail('');
-        return;
-      }
-      await signInWithMagicLink(trimmedEmail);
-      setEmail(trimmedEmail);
-      setSent.on();
-      toast({ title: 'Check your email', description: 'Click the magic link to return here.', status: 'success' });
-    } catch (linkError) {
-      toast({
-        title: 'Sign-in failed',
-        status: 'error',
-        description: linkError instanceof Error ? linkError.message : 'Unable to send magic link.',
-      });
-    }
-  };
-
   const handleGoogleSignIn = async () => {
     try {
+      setStartingGoogle.on();
       await signInWithGoogle();
       toast({ title: 'Redirecting to Google', status: 'info' });
     } catch (oauthError) {
@@ -527,6 +507,8 @@ function AuthGate({ auth }: { auth: AuthState }) {
         status: 'error',
         description: oauthError instanceof Error ? oauthError.message : 'Unable to start Google sign-in.',
       });
+    } finally {
+      setStartingGoogle.off();
     }
   };
 
@@ -572,10 +554,9 @@ function AuthGate({ auth }: { auth: AuthState }) {
   };
 
   const handleSignOut = async () => {
+    setSigningOut.on();
     try {
       await signOut();
-      setEmail('');
-      setSent.off();
       toast({ title: 'Signed out', status: 'info' });
     } catch (signOutError) {
       toast({
@@ -583,6 +564,8 @@ function AuthGate({ auth }: { auth: AuthState }) {
         status: 'error',
         description: signOutError instanceof Error ? signOutError.message : 'Unable to sign out right now.',
       });
+    } finally {
+      setSigningOut.off();
     }
   };
 
@@ -634,42 +617,40 @@ function AuthGate({ auth }: { auth: AuthState }) {
   if (!profile) {
     return (
       <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200" w="100%">
-        <CardHeader>
-          <Heading size="md">Sign in to play</Heading>
-        </CardHeader>
-        <CardBody as={Stack} spacing={5}>
-          <Text color="whiteAlpha.800">
-            Keep your rating, match history, and preferences synced across devices by signing in.
-          </Text>
-          <Stack spacing={3}>
-            <FormControl>
-              <FormLabel>Email address</FormLabel>
-              <Input
-                type="email"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-              />
-            </FormControl>
-            <Button colorScheme="teal" onClick={handleRequestLink} isDisabled={!email.trim()}>
-              Send magic link
-            </Button>
-            {sent && (
-              <Alert status="success" borderRadius="md">
-                <AlertIcon />
-                <AlertDescription>Magic link sent! Check your inbox and return once authenticated.</AlertDescription>
-              </Alert>
-            )}
-          </Stack>
-          <Divider borderColor="whiteAlpha.300" />
-          <Stack spacing={3}>
-            <Text fontSize="sm" color="whiteAlpha.700">
-              Prefer using Google instead?
+        <CardBody as={Stack} spacing={6} align="center" textAlign="center" py={{ base: 8, md: 10 }}>
+          <Stack spacing={2} maxW="lg">
+            <Heading size="md">Sign in with Google to play online</Heading>
+            <Text color="whiteAlpha.800">
+              Challenge real opponents, protect your rating, and sync your Santorini journey across every device.
             </Text>
-            <Button variant="outline" onClick={handleGoogleSignIn}>
-              Continue with Google
-            </Button>
           </Stack>
+          <HStack spacing={2} flexWrap="wrap" justify="center">
+            <Badge colorScheme="teal" px={3} py={1} borderRadius="full">
+              Keep your rating
+            </Badge>
+            <Badge colorScheme="purple" px={3} py={1} borderRadius="full">
+              Save match history
+            </Badge>
+            <Badge colorScheme="orange" px={3} py={1} borderRadius="full">
+              Challenge friends
+            </Badge>
+          </HStack>
+          <Button
+            size="lg"
+            bg="white"
+            color="gray.800"
+            leftIcon={<GoogleIcon boxSize={5} />}
+            onClick={handleGoogleSignIn}
+            isLoading={startingGoogle}
+            isDisabled={startingGoogle}
+            _hover={{ bg: 'whiteAlpha.900', transform: 'translateY(-1px)', boxShadow: '2xl' }}
+            _active={{ bg: 'whiteAlpha.800' }}
+          >
+            Continue with Google
+          </Button>
+          <Text fontSize="sm" color="whiteAlpha.700" maxW="md">
+            After connecting, you&rsquo;ll be able to choose a unique display name that other players will see.
+          </Text>
         </CardBody>
       </Card>
     );
@@ -679,23 +660,47 @@ function AuthGate({ auth }: { auth: AuthState }) {
 
   return (
     <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200" w="100%">
-      <CardBody as={Stack} spacing={5}>
+      <CardBody as={Stack} spacing={6}>
         <Flex
           justify="space-between"
           align={{ base: 'stretch', md: 'center' }}
           direction={{ base: 'column', md: 'row' }}
-          gap={{ base: 4, md: 0 }}
+          gap={{ base: 4, md: 6 }}
         >
-          <Box>
-            <Heading size="sm">Signed in as {profile.display_name}</Heading>
-            <Text fontSize="sm" color="whiteAlpha.700">
-              {session?.user.email ? `Email: ${session.user.email}` : 'Magic link sign-in'}
-            </Text>
-            <Text fontSize="sm" color="whiteAlpha.700">
-              Rating: {profile.rating} · Games played: {profile.games_played}
-            </Text>
-          </Box>
-          <Button variant="outline" size="sm" alignSelf={{ base: 'flex-start', md: 'auto' }} onClick={handleSignOut}>
+          <HStack spacing={4} align="center">
+            <Avatar
+              size="lg"
+              name={profile.display_name}
+              src={typeof session?.user.user_metadata?.avatar_url === 'string' ? session.user.user_metadata.avatar_url : undefined}
+            />
+            <Box>
+              <Heading size="sm">{profile.display_name}</Heading>
+              {session?.user.email && (
+                <Text fontSize="sm" color="whiteAlpha.700">
+                  {session.user.email}
+                </Text>
+              )}
+              <Text fontSize="sm" color="whiteAlpha.700">
+                Connected with Google
+              </Text>
+              <HStack spacing={2} mt={3} flexWrap="wrap">
+                <Badge colorScheme="teal" variant="subtle" px={2} py={1} borderRadius="md">
+                  Rating: {profile.rating}
+                </Badge>
+                <Badge colorScheme="blue" variant="subtle" px={2} py={1} borderRadius="md">
+                  Games: {profile.games_played}
+                </Badge>
+              </HStack>
+            </Box>
+          </HStack>
+          <Button
+            variant="outline"
+            size="sm"
+            alignSelf={{ base: 'flex-start', md: 'auto' }}
+            onClick={handleSignOut}
+            isLoading={signingOut}
+            isDisabled={signingOut}
+          >
             Sign out
           </Button>
         </Flex>
@@ -738,8 +743,7 @@ function AuthGate({ auth }: { auth: AuthState }) {
   );
 }
 
-function PlayWorkspace() {
-  const auth = useSupabaseAuth();
+function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   const lobby = useMatchLobby(auth.profile);
   const [joiningCode, setJoiningCode] = useState('');
   const toast = useToast();

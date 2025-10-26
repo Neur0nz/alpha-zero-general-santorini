@@ -15,15 +15,17 @@ import {
 } from '@chakra-ui/react';
 import { MoonIcon, SunIcon } from '@chakra-ui/icons';
 import AuthJourney from '@components/auth/AuthJourney';
+import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 
 export type AppTab = 'practice' | 'play' | 'analyze';
 
 interface HeaderBarProps {
   activeTab: AppTab;
   actions?: ReactNode;
+  auth: SupabaseAuthState;
 }
 
-function HeaderBar({ activeTab, actions }: HeaderBarProps) {
+function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
   const { colorMode, toggleColorMode } = useColorMode();
   const bg = useColorModeValue('whiteAlpha.200', 'gray.800');
   const headingColor = useColorModeValue('whiteAlpha.900', 'white');
@@ -42,7 +44,7 @@ function HeaderBar({ activeTab, actions }: HeaderBarProps) {
           <Spacer display={{ base: 'none', md: 'block' }} />
           <HStack spacing={2} align="center" w={{ base: '100%', md: 'auto' }} justify={{ base: 'flex-end', md: 'flex-end' }}>
             {actions && <Box display={{ base: 'flex', md: 'none' }}>{actions}</Box>}
-            <AuthJourney />
+            <AuthJourney auth={auth} />
             <Tooltip label="Toggle color mode" hasArrow>
               <IconButton
                 aria-label="Toggle color mode"

@@ -13,6 +13,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { TimeIcon, SmallAddIcon, SearchIcon } from '@chakra-ui/icons';
 import { useSantorini } from '@hooks/useSantorini';
+import { useSupabaseAuth } from '@hooks/useSupabaseAuth';
 import HeaderBar, { type AppTab } from '@components/HeaderBar';
 import GameBoard from '@components/GameBoard';
 import EvaluationPanel from '@components/EvaluationPanel';
@@ -43,6 +44,7 @@ function App() {
   const tabOrder: AppTab[] = ['practice', 'play', 'analyze'];
   const [activeTab, setActiveTab] = useState<AppTab>('practice');
   const activeIndex = tabOrder.indexOf(activeTab);
+  const auth = useSupabaseAuth();
 
   useEffect(() => {
     initialize();
@@ -96,7 +98,7 @@ function App() {
       minH="100vh"
     >
       <Flex direction="column" flex="1" minH="100vh" bgGradient="linear(to-br, gray.900, gray.800)" color="whiteAlpha.900">
-        <HeaderBar activeTab={activeTab} actions={tabActions} />
+        <HeaderBar activeTab={activeTab} actions={tabActions} auth={auth} />
         <Flex flex="1" py={{ base: 6, md: 8 }}>
           <Container maxW="7xl" flex="1">
             <TabPanels flex="1">
@@ -170,7 +172,7 @@ function App() {
                 </Flex>
               </TabPanel>
               <TabPanel px={0}>
-                <PlayWorkspace />
+                <PlayWorkspace auth={auth} />
               </TabPanel>
               <TabPanel px={0}>
                 <AnalyzeWorkspace />
