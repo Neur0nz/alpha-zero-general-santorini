@@ -81,6 +81,42 @@ const INITIAL_SELECTABLE = Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () 
   Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () => false),
 );
 
+const normalizeTopMoves = (rawMoves: unknown): TopMove[] => {
+  if (!Array.isArray(rawMoves)) {
+    return [];
+  }
+
+  return rawMoves.map((entry) => {
+    const move = entry as Record<string, unknown>;
+
+    const actionValue = Number(move.action);
+    const probValue = Number(move.prob);
+    const textValue = move.text;
+
+    const normalized: TopMove = {
+      action: Number.isFinite(actionValue) ? actionValue : -1,
+      prob: Number.isFinite(probValue) ? Math.min(Math.max(probValue, 0), 1) : 0,
+      text: typeof textValue === 'string' ? textValue : textValue != null ? String(textValue) : '',
+    };
+
+    if (move.eval !== undefined) {
+      const evalValue = Number(move.eval);
+      if (Number.isFinite(evalValue)) {
+        normalized.eval = evalValue;
+      }
+    }
+
+    if (move.delta !== undefined) {
+      const deltaValue = Number(move.delta);
+      if (Number.isFinite(deltaValue)) {
+        normalized.delta = deltaValue;
+      }
+    }
+
+    return normalized;
+  });
+};
+
 export function useSantorini() {
   const [loading, setLoading] = useState(true);
   const [board, setBoard] = useState<BoardCell[][]>(INITIAL_BOARD);
@@ -298,8 +334,8 @@ export function useSantorini() {
       }
       if (game.py.list_current_moves) {
         const movesProxy = game.py.list_current_moves(10);
-        const moves = movesProxy.toJs({ create_proxies: false }) as TopMove[];
-        setTopMoves(moves ?? []);
+        const moves = movesProxy.toJs({ create_proxies: false });
+        setTopMoves(normalizeTopMoves(moves));
       }
     } catch (error) {
       console.error('Failed to refresh evaluation:', error);
@@ -315,8 +351,8 @@ export function useSantorini() {
     setCalcOptionsBusy(true);
     try {
       const resultProxy = await game.py.list_current_moves_with_adv(6, calcDepthOverride ?? undefined);
-      const result = resultProxy.toJs({ create_proxies: false }) as TopMove[];
-      setTopMoves(result ?? []);
+      const result = resultProxy.toJs({ create_proxies: false });
+      setTopMoves(normalizeTopMoves(result));
     } catch (error) {
       console.error('Failed to calculate options:', error);
       setTopMoves([]);
@@ -475,6 +511,14 @@ export function useSantorini() {
         return;
       }
 
+      if (selector.editMode === 1 || selector.editMode === 2) {
+        game.editCell(y, x, selector.editMode);
+        readBoard();
+        updateSelectable();
+        await updateButtons(false);
+        return;
+      }
+
       selector.click(y, x);
       updateSelectable();
       const move = selector.getMove();
@@ -484,7 +528,7 @@ export function useSantorini() {
         updateButtons(false);
       }
     },
-    [applyMove, updateButtons, updateSelectable, buttons.setupMode, placeWorkerForSetup],
+    [applyMove, updateButtons, updateSelectable, buttons.setupMode, placeWorkerForSetup, readBoard],
   );
 
   const onCellHover = useCallback((_y: number, _x: number) => {
