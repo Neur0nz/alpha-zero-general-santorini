@@ -431,12 +431,11 @@ export function useSantorini() {
     const game = gameRef.current;
     const selector = selectorRef.current;
     if (!game || !selector) return;
-    
+
     try {
-      // Normalize worker IDs and exit edit mode
-      game.editCell(-1, -1, 0);
-      selector.selectRelevantCells();
-      
+      // Exit edit mode and normalize worker IDs
+      selector.setEditMode(0);
+
       // Tell backend to finalize setup and refresh state triplet
       if (game.py && game.py.end_setup) {
         const data_tuple = game.py.end_setup().toJs({ create_proxies: false });
@@ -444,30 +443,30 @@ export function useSantorini() {
           [game.nextPlayer, game.gameEnded, game.validMoves] = data_tuple;
         }
       }
-      
-      // Exit setup mode
+
+      // Reset selector so normal move selection can resume
+      selector.resetAndStart();
+
+      // Refresh UI state from the finalized setup
+      await syncUi();
+      await refreshEvaluation();
+
+      // Exit setup mode and show completion message
       setButtons(prev => ({
         ...prev,
         setupMode: false,
         setupTurn: 0,
-        editMode: 0,
         status: 'Setup complete. Ready to play!'
       }));
-      
-      // Refresh UI
-      readBoard();
-      updateSelectable();
-      await refreshEvaluation();
-      refreshHistory();
     } catch (error) {
       console.error('Failed to finalize setup:', error);
     }
-  }, [readBoard, updateSelectable, refreshEvaluation, refreshHistory]);
+  }, [refreshEvaluation, syncUi]);
 
-  const placeWorkerForSetup = useCallback((y: number, x: number) => {
+  const placeWorkerForSetup = useCallback(async (y: number, x: number) => {
     const game = gameRef.current;
     if (!game || !game.py) return;
-    
+
     const current = game.py._read_worker(y, x);
     if (current !== 0) {
       // Only allow placing on empty cells during setup
@@ -496,9 +495,9 @@ export function useSantorini() {
     }));
     
     readBoard();
-    
+
     if (newSetupTurn >= 4) {
-      finalizeGuidedSetup();
+      await finalizeGuidedSetup();
     }
   }, [buttons.setupTurn, readBoard, finalizeGuidedSetup]);
 
@@ -533,7 +532,7 @@ export function useSantorini() {
 
       // Handle setup mode
       if (buttons.setupMode) {
-        placeWorkerForSetup(y, x);
+        await placeWorkerForSetup(y, x);
         return;
       }
 
@@ -669,16 +668,28 @@ export function useSantorini() {
     const game = gameRef.current;
     const selector = selectorRef.current;
     if (!game || !selector) return;
-    
+
     // Enter setup mode
     setButtons(prev => ({
       ...prev,
       setupMode: true,
       setupTurn: 0,
       editMode: 2, // Edit workers mode
+      canUndo: false,
+      canRedo: false,
       status: 'Place Green piece 1'
     }));
-    
+
+    // Ensure selector is in worker edit mode and clear existing highlights/history
+    selector.setEditMode(2);
+    selector.selectNone();
+    setSelectable(
+      Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () =>
+        Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () => false),
+      ),
+    );
+    setHistory([]);
+
     // Clear all workers from the board
     if (game.py) {
       try {
@@ -715,12 +726,10 @@ export function useSantorini() {
         console.error('Failed to clear board for setup:', error);
       }
     }
-    
+
     // Clear selectable cells and refresh board
-    selector.selectNone();
     readBoard();
-    updateSelectable();
-  }, [readBoard, updateSelectable]);
+  }, [readBoard]);
 
   const controls: Controls = useMemo(
     () => ({
