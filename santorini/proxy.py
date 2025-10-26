@@ -302,41 +302,29 @@ def revert_to_previous_move(player_asking_revert):
         return _finalize_revert(removed_states)
 
 def jump_to_move_index(move_index):
-        """Jump to a specific move index in the history (0-based)"""
-        global g, board, mcts, player, history, future_history
-        if move_index < 0 or move_index >= len(history):
-                print(f'Invalid move index: {move_index}, history length: {len(history)}')
-                return None
-
-        # Get the state at the specified index
-        state = history[move_index]
-        player, board = state[0], state[1]
-
-        # Clear redo information when jumping arbitrarily in history
-        future_history = []
-
-        # Don't truncate history - just set the current state
-        # This allows the modal to remain populated
-
-                # Store removed states for redo support, oldest first
-                future_history = removed_states[::-1] + future_history
-
-def jump_to_move_index(move_index):
-    """Jump to a specific move index in the history (0-based)"""
+    """Jump to a specific move index in the history (0-based)."""
     global g, board, mcts, player, history, future_history
+
     if move_index < 0 or move_index >= len(history):
         print(f"Invalid move index: {move_index}, history length: {len(history)}")
         return None
 
-    # Get the state at the specified index
-    state = history[move_index]
-    player, board = state[0], state[1]
+    # Split history into the states more recent than the target, the target itself,
+    # and the states older than the target.
+    recent_states = history[:move_index]
+    target_state = history[move_index]
+    older_states = history[move_index + 1 :]
 
-    # Clear redo information when jumping arbitrarily in history
-    future_history = []
+    # Restore the board/player from the target snapshot.
+    player = int(target_state[0])
+    board = np.copy(target_state[1])
 
-    # Don't truncate history - just set the current state
-    # This allows the modal to remain populated
+    # Jumping behaves like undoing moves up to the chosen point. The states that were
+    # "undone" (the target state and any newer ones) should populate the redo stack in
+    # chronological order so redo_next_move can reapply them. The remaining, older
+    # entries stay in history for further undos.
+    history = older_states
+    future_history = [target_state] + recent_states
 
     print(f"Jumped to move {move_index}: player={player}")
 
@@ -352,57 +340,25 @@ def redo_next_move():
     if len(future_history) == 0:
         end = g.getGameEnded(board, player)
         valids = g.getValidMoves(board, player)
-        return player, end, valids
+        return player, end, valids, None, 0
 
-def jump_to_move_index(move_index):
-        """Jump to a specific move index in the history (0-based)"""
-        global g, board, mcts, player, history, future_history
-        if move_index < 0 or move_index >= len(history):
-                print(f'Invalid move index: {move_index}, history length: {len(history)}')
-                return None
+    next_state = future_history.pop(0)
+    state_player = int(next_state[0])
+    state_board = np.copy(next_state[1])
+    action = int(next_state[2])
 
-        # Get the state at the specified index
-        state = history[move_index]
-        player, board = state[0], state[1]
+    # Restore to the state before the move
+    player = state_player
+    board = state_board
 
-        # Clear redo information when jumping arbitrarily in history
-        future_history = []
+    # Record this state in the history again before applying the move
+    history.insert(0, [player, np.copy(board), action])
 
-        # Don't truncate history - just set the current state
-        # This allows the modal to remain populated
+    board, player = g.getNextState(board, player, action)
+    end = g.getGameEnded(board, player)
+    valids = g.getValidMoves(board, player)
 
-        print(f'Jumped to move {move_index}: player={player}')
-
-        end = g.getGameEnded(board, player)
-        valids = g.getValidMoves(board, player)
-        return player, end, valids
-
-def redo_next_move():
-        """Reapply the next available move from the redo history."""
-        global g, board, mcts, player, history, future_history
-
-        if len(future_history) == 0:
-                end = g.getGameEnded(board, player)
-                valids = g.getValidMoves(board, player)
-                return player, end, valids, None, 0
-
-        next_state = future_history.pop(0)
-        state_player = int(next_state[0])
-        state_board = np.copy(next_state[1])
-        action = int(next_state[2])
-
-        # Restore to the state before the move
-        player = state_player
-        board = state_board
-
-        # Record this state in the history again before applying the move
-        history.insert(0, [player, np.copy(board), action])
-
-        board, player = g.getNextState(board, player, action)
-        end = g.getGameEnded(board, player)
-        valids = g.getValidMoves(board, player)
-
-        return player, end, valids, action, len(future_history)
+    return player, end, valids, action, len(future_history)
 
 def get_redo_actions():
         """Return the list of actions currently available for redo (oldest first)."""
