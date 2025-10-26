@@ -195,8 +195,8 @@ class Santorini extends AbstractGame {
     
     if (editMode === 0) {
       try {
-        const data_tuple = this.py.update_after_edit().toJs({create_proxies: false});
-      [this.nextPlayer, this.gameEnded, this.validMoves] = data_tuple;
+        const data_tuple = this.py.update_after_edit().toJs({ create_proxies: false });
+        [this.nextPlayer, this.gameEnded, this.validMoves] = data_tuple;
       } catch (error) {
         console.error('Error updating after edit:', error);
       }
@@ -618,67 +618,92 @@ function historyModal() {
         const evalData = window.evalBar._x_dataStack[0];
         this.gameHistory = evalData.history || [];
         this.currentMove = this.gameHistory.length - 1;
-  } else {
+      } else {
         this.gameHistory = [];
         this.currentMove = 0;
       }
-      
+
       // Also get actual game moves from the Python backend
       this.updateGameMoves();
     },
-    
+
     updateGameMoves() {
-      if (game && game.py) {
-        try {
-          // Get the Python history - it's stored in reverse order (newest first)
-          const pyHistory = game.py.history || [];
-          
-          // Reverse to get chronological order
-          const chronologicalHistory = [...pyHistory].reverse();
-          
-          // Create moves array with proper indexing
-          this.gameMoves = chronologicalHistory.map((state, index) => ({
-            move: index + 1,
-            player: state[0],
-            board: state[1],
-            action: state[2],
-            description: `Move ${index + 1} - Player ${state[0]}`,
-            evaluation: this.gameHistory[index] ? this.gameHistory[index].eval : 0
-          }));
-          
-          // Update current move to be the last move in the history
-          this.currentMove = Math.max(0, this.gameMoves.length - 1);
-        } catch (error) {
-          console.error('Error updating game moves:', error);
-          this.gameMoves = [];
-          this.currentMove = 0;
+      if (!game || !game.py || typeof game.py.get_history_snapshot !== 'function') {
+        this.gameMoves = [];
+        this.currentMove = 0;
+        return;
+      }
+
+      try {
+        const snapshotProxy = game.py.get_history_snapshot();
+        let snapshot = [];
+
+        if (snapshotProxy) {
+          if (typeof snapshotProxy.toJs === 'function') {
+            snapshot = snapshotProxy.toJs({ create_proxies: false });
+          } else if (Array.isArray(snapshotProxy)) {
+            snapshot = snapshotProxy;
+          }
+
+          if (typeof snapshotProxy.destroy === 'function') {
+            snapshotProxy.destroy();
+          }
         }
+
+        if (!Array.isArray(snapshot)) {
+          snapshot = [];
+        }
+
+        this.gameMoves = snapshot.map((entry, index) => ({
+          move: index + 1,
+          player: entry.player,
+          action: entry.action,
+          description: entry.description || `Move ${index + 1} - Player ${entry.player}`,
+          evaluation: this.gameHistory[index] ? this.gameHistory[index].eval : 0
+        }));
+
+        this.currentMove = Math.max(0, this.gameMoves.length - 1);
+      } catch (error) {
+        console.error('Error updating game moves:', error);
+        this.gameMoves = [];
+        this.currentMove = 0;
       }
     },
-    
+
     async jumpToMove(moveIndex) {
       if (moveIndex < 0 || moveIndex >= this.gameMoves.length) return;
-      
+
       console.log('Jumping to move:', moveIndex);
       this.currentMove = moveIndex;
-      
+
       try {
         // Use Python backend to jump to the desired state
         if (game && game.py) {
           // Convert from chronological index to reverse history index
           const reverseIndex = this.gameMoves.length - 1 - moveIndex;
-          const result = game.py.jump_to_move_index(reverseIndex);
-          if (result) {
+          const resultProxy = game.py.jump_to_move_index(reverseIndex);
+          let result = null;
+          if (resultProxy && typeof resultProxy.toJs === 'function') {
+            result = resultProxy.toJs({ create_proxies: false });
+            if (typeof resultProxy.destroy === 'function') {
+              resultProxy.destroy();
+            }
+          } else if (Array.isArray(resultProxy)) {
+            result = resultProxy;
+          }
+
+          if (Array.isArray(result) && result.length >= 3) {
             const [nextPlayer, gameEnded, validMoves] = result;
-            
+
             // Update game state
             game.nextPlayer = nextPlayer;
             game.gameEnded = gameEnded;
             game.validMoves = validMoves;
-            
+
             // Clear redo stack when jumping to history
             redoStack = [];
-            
+            syncRedoStackFromPython();
+
             // Update UI
             move_sel.reset();
             move_sel._select_relevant_cells();
@@ -689,7 +714,7 @@ function historyModal() {
             if (typeof refreshEvaluation === 'function') {
               await refreshEvaluation();
             }
-            
+
             // Update the history modal data after jumping
             this.updateHistory();
           }
@@ -1324,6 +1349,12 @@ function start_guided_setup() {
   // Enter edit workers mode
   move_sel._select_none();
   move_sel.editMode = 2;
+  if (typeof redoStack !== 'undefined') {
+    redoStack = [];
+    if (typeof syncRedoStackFromPython === 'function') {
+      syncRedoStackFromPython();
+    }
+  }
   // Inform backend to clear history so setup becomes baseline
   try { if (game.py && game.py.begin_setup) game.py.begin_setup(); } catch(e) {}
 
@@ -1354,8 +1385,8 @@ function start_guided_setup() {
       }
     }
   }
-    refreshBoard();
-    refreshButtons();
+  refreshBoard();
+  refreshButtons();
   updateSetupStatus();
 }
 
@@ -1368,10 +1399,13 @@ async function finalize_guided_setup() {
   // Tell backend to finalize setup and refresh state triplet
   try {
     if (game.py && game.py.end_setup) {
-      const data_tuple = game.py.end_setup().toJs({create_proxies: false});
+      const data_tuple = game.py.end_setup().toJs({ create_proxies: false });
       [game.nextPlayer, game.gameEnded, game.validMoves] = data_tuple;
     }
   } catch(e) {}
+  if (typeof syncRedoStackFromPython === 'function') {
+    syncRedoStackFromPython();
+  }
   refreshBoard();
   refreshButtons();
   changeMoveText('', 'reset');
