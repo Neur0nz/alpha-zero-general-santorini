@@ -110,12 +110,26 @@ export function useSantorini() {
     }
     try {
       // Load the model file as a binary blob to avoid content-type issues
+      console.log('Loading ONNX model from:', MODEL_FILENAME);
       const response = await fetch(MODEL_FILENAME);
       if (!response.ok) {
         throw new Error(`Failed to load model: ${response.status} ${response.statusText}`);
       }
+      console.log('Model response headers:', Object.fromEntries(response.headers.entries()));
       const modelBuffer = await response.arrayBuffer();
-      const session = await window.ort.InferenceSession.create(modelBuffer);
+      console.log('Model buffer size:', modelBuffer.byteLength);
+      
+      // Try creating session with buffer
+      let session;
+      try {
+        session = await window.ort.InferenceSession.create(modelBuffer);
+        console.log('ONNX session created successfully with buffer');
+      } catch (bufferError) {
+        console.warn('Failed to create session with buffer, trying URL approach:', bufferError);
+        // Fallback: try loading directly from URL
+        session = await window.ort.InferenceSession.create(MODEL_FILENAME);
+        console.log('ONNX session created successfully with URL');
+      }
       (window as any).onnxSession = session;
       (window as any).predict = async (canonicalBoard: any, valids: any) => {
         const boardArray = Array.from(canonicalBoard) as number[];
