@@ -1,28 +1,39 @@
-import { useCallback, useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
-import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { supabase, type SupabaseClient } from '@/lib/supabaseClient';
+import type { AuthChangeEvent, PostgrestError, Session, User } from '@supabase/supabase-js';
 import type { PlayerProfile } from '@/types/match';
+import { generateDisplayName, validateDisplayName } from '@/utils/generateDisplayName';
 
 interface AuthState {
+  session: Session | null;
   profile: PlayerProfile | null;
   loading: boolean;
   error: string | null;
 }
 
 const DEFAULT_STATE: AuthState = {
+  session: null,
   profile: null,
   loading: true,
   error: null,
 };
 
-async function fetchOrCreateProfile(userId: string, email: string | null): Promise<PlayerProfile | null> {
-  const client = supabase;
-  if (!client) return null;
+function getDisplayNameSeed(user: User): string | undefined {
+  const metadataName = typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name : undefined;
+  if (metadataName && metadataName.trim().length > 0) {
+    return metadataName;
+  }
+  if (user.email) {
+    return user.email.split('@')[0];
+  }
+  return undefined;
+}
 
+async function ensureProfile(client: SupabaseClient, user: User): Promise<PlayerProfile> {
   const { data, error } = await client
     .from('players')
     .select('*')
-    .eq('auth_user_id', userId)
+    .eq('auth_user_id', user.id)
     .maybeSingle();
 
   if (error) {
@@ -34,33 +45,79 @@ async function fetchOrCreateProfile(userId: string, email: string | null): Promi
     return data as PlayerProfile;
   }
 
-  const displayName = email?.split('@')[0] ?? 'Player';
-  const { data: insertData, error: insertError } = await client
-    .from('players')
-    .insert({ auth_user_id: userId, display_name: displayName })
-    .select('*')
-    .single();
+  const seed = getDisplayNameSeed(user);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = generateDisplayName(seed);
+    const { data: insertData, error: insertError } = await client
+      .from('players')
+      .insert({ auth_user_id: user.id, display_name: candidate })
+      .select('*')
+      .single();
 
-  if (insertError) {
-    console.error('Failed to create player profile', insertError);
-    throw insertError;
+    if (!insertError && insertData) {
+      return insertData as PlayerProfile;
+    }
+
+    if ((insertError as PostgrestError | null)?.code !== '23505') {
+      console.error('Failed to create player profile', insertError);
+      throw insertError;
+    }
   }
 
-  return insertData as PlayerProfile;
+  throw new Error('Unable to generate a unique display name. Please try again.');
 }
 
 export function useSupabaseAuth() {
   const [state, setState] = useState<AuthState>(DEFAULT_STATE);
+  const isMounted = useRef(true);
+  const isConfigured = Boolean(supabase);
+
+  useEffect(() => () => {
+    isMounted.current = false;
+  }, []);
+
+  const loadSessionProfile = useCallback(async (session: Session | null) => {
+    const client = supabase;
+    if (!client) {
+      if (!isMounted.current) return;
+      setState({ session: null, profile: null, loading: false, error: 'Supabase is not configured.' });
+      return;
+    }
+
+    if (!session) {
+      if (!isMounted.current) return;
+      setState({ session: null, profile: null, loading: false, error: null });
+      return;
+    }
+
+    if (isMounted.current) {
+      setState((prev) => ({
+        ...prev,
+        session,
+        loading: prev.profile?.auth_user_id !== session.user.id,
+        error: null,
+      }));
+    }
+
+    try {
+      const profile = await ensureProfile(client, session.user);
+      if (!isMounted.current) return;
+      setState({ session, profile, loading: false, error: null });
+    } catch (profileError) {
+      console.error('Failed to load player profile', profileError);
+      if (!isMounted.current) return;
+      setState({ session, profile: null, loading: false, error: 'Failed to load player profile. Please try again.' });
+    }
+  }, []);
 
   useEffect(() => {
     const client = supabase;
     if (!client) {
-      setState({ profile: null, loading: false, error: 'Supabase is not configured.' });
+      setState({ session: null, profile: null, loading: false, error: 'Supabase is not configured.' });
       return;
     }
 
     const init = async () => {
-      setState((prev) => ({ ...prev, loading: true, error: null }));
       const {
         data: { session },
         error,
@@ -68,44 +125,41 @@ export function useSupabaseAuth() {
 
       if (error) {
         console.error('Failed to load Supabase session', error);
-        setState({ profile: null, loading: false, error: 'Unable to load authentication session.' });
+        setState({ session: null, profile: null, loading: false, error: 'Unable to load authentication session. Please refresh and try again.' });
         return;
       }
 
-      if (!session) {
-        setState({ profile: null, loading: false, error: null });
-        return;
-      }
-
-      try {
-        const profile = await fetchOrCreateProfile(session.user.id, session.user.email ?? null);
-        setState({ profile, loading: false, error: null });
-      } catch (profileError) {
-        setState({ profile: null, loading: false, error: 'Failed to load player profile.' });
-      }
+      await loadSessionProfile(session);
     };
 
     init();
 
     const { data: listener } = client.auth.onAuthStateChange(async (_event: AuthChangeEvent, session: Session | null) => {
-      if (!session) {
-        setState({ profile: null, loading: false, error: null });
-        return;
-      }
-      try {
-        const profile = await fetchOrCreateProfile(session.user.id, session.user.email ?? null);
-        setState({ profile, loading: false, error: null });
-      } catch (profileError) {
-        setState({ profile: null, loading: false, error: 'Failed to load player profile.' });
-      }
+      await loadSessionProfile(session);
     });
 
     return () => {
       listener.subscription.unsubscribe();
     };
-  }, []);
+  }, [loadSessionProfile]);
 
-  const requestMagicLink = useCallback(async (email: string) => {
+  const refreshProfile = useCallback(async () => {
+    const client = supabase;
+    if (!client) {
+      throw new Error('Supabase is not configured.');
+    }
+    const {
+      data: { session },
+      error,
+    } = await client.auth.getSession();
+    if (error) {
+      console.error('Failed to refresh Supabase session', error);
+      throw error;
+    }
+    await loadSessionProfile(session);
+  }, [loadSessionProfile]);
+
+  const signInWithMagicLink = useCallback(async (email: string) => {
     const client = supabase;
     if (!client) {
       throw new Error('Supabase is not configured.');
@@ -113,6 +167,24 @@ export function useSupabaseAuth() {
     const { error } = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
     if (error) {
       console.error('Failed to request magic link', error);
+      throw error;
+    }
+  }, []);
+
+  const signInWithGoogle = useCallback(async () => {
+    const client = supabase;
+    if (!client) {
+      throw new Error('Supabase is not configured.');
+    }
+    const { error } = await client.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+        queryParams: { prompt: 'select_account' },
+      },
+    });
+    if (error) {
+      console.error('Failed to start Google sign-in', error);
       throw error;
     }
   }, []);
@@ -127,11 +199,54 @@ export function useSupabaseAuth() {
     }
   }, []);
 
+  const userId = state.session?.user.id ?? null;
+
+  const updateDisplayName = useCallback(
+    async (displayName: string) => {
+      const client = supabase;
+      if (!client) {
+        throw new Error('Supabase is not configured.');
+      }
+      if (!userId) {
+        throw new Error('You must be signed in to update your display name.');
+      }
+
+      const validationError = validateDisplayName(displayName);
+      if (validationError) {
+        throw new Error(validationError);
+      }
+
+      const normalized = displayName.trim();
+      const { data, error } = await client
+        .from('players')
+        .update({ display_name: normalized })
+        .eq('auth_user_id', userId)
+        .select('*')
+        .single();
+
+      if (error) {
+        if ((error as PostgrestError | null)?.code === '23505') {
+          throw new Error('That display name is already taken. Try another one.');
+        }
+        console.error('Failed to update display name', error);
+        throw error;
+      }
+
+      setState((prev) => ({ ...prev, profile: data as PlayerProfile }));
+    },
+    [userId]
+  );
+
   return {
+    session: state.session,
     profile: state.profile,
     loading: state.loading,
     error: state.error,
-    requestMagicLink,
+    isConfigured,
+    refreshProfile,
+    signInWithMagicLink,
+    signInWithGoogle,
     signOut,
+    updateDisplayName,
   };
 }
