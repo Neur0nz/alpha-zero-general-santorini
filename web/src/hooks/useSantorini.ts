@@ -109,7 +109,13 @@ export function useSantorini() {
       throw new Error('ONNX runtime not available');
     }
     try {
-      const session = await window.ort.InferenceSession.create(MODEL_FILENAME);
+      // Load the model file as a binary blob to avoid content-type issues
+      const response = await fetch(MODEL_FILENAME);
+      if (!response.ok) {
+        throw new Error(`Failed to load model: ${response.status} ${response.statusText}`);
+      }
+      const modelBuffer = await response.arrayBuffer();
+      const session = await window.ort.InferenceSession.create(modelBuffer);
       (window as any).onnxSession = session;
       (window as any).predict = async (canonicalBoard: any, valids: any) => {
         const boardArray = Array.from(canonicalBoard) as number[];
