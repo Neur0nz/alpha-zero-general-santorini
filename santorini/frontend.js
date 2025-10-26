@@ -244,19 +244,12 @@ function reset() {
 }
 
 async function cancel_and_undo() {
-  let undoneActions = [];
   if (move_sel.stage === 0) {
     const reverted = game.revert_to_previous_human_move();
-    undoneActions = Array.isArray(reverted) ? reverted : Array.from(reverted || []);
   }
 
-  if (typeof redoStack !== 'undefined' && undoneActions && undoneActions.length > 0) {
-    undoneActions.forEach((action) => {
-      const numericAction = typeof action === 'number' ? action : Number(action);
-      if (!Number.isNaN(numericAction)) {
-        redoStack.push(numericAction);
-      }
-    });
+  if (typeof syncRedoStackFromPython === 'function') {
+    syncRedoStackFromPython();
   }
   move_sel.resetAndStart();
 

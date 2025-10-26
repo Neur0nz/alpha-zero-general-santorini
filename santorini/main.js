@@ -564,6 +564,43 @@ function refreshPlayersText() {
 let redoStack = [];
 let isRedoInProgress = false;
 
+/**
+ * Synchronize the local redo stack with the Python backend's redo history.
+ */
+function syncRedoStackFromPython() {
+  if (!game || !game.py || typeof game.py.get_redo_actions !== 'function') {
+    redoStack = [];
+    return;
+  }
+
+  try {
+    const actionsProxy = game.py.get_redo_actions();
+    let actionsList = [];
+    if (actionsProxy && typeof actionsProxy.toJs === 'function') {
+      actionsList = actionsProxy.toJs({ create_proxies: false });
+    } else if (Array.isArray(actionsProxy)) {
+      actionsList = actionsProxy;
+    }
+
+    if (!Array.isArray(actionsList)) {
+      redoStack = [];
+      return;
+    }
+
+    const normalized = actionsList
+      .map((action) => {
+        const numeric = typeof action === 'number' ? action : Number(action);
+        return Number.isNaN(numeric) ? null : numeric;
+      })
+      .filter((value) => value !== null);
+
+    redoStack = normalized.reverse();
+  } catch (error) {
+    console.error('Failed to sync redo stack from Python:', error);
+    redoStack = [];
+  }
+}
+
 // History modal data
 function historyModal() {
   return {
@@ -700,96 +737,81 @@ async function redo_last() {
     return;
   }
 
+  syncRedoStackFromPython();
+
   if (!Array.isArray(redoStack)) {
     redoStack = Array.from(redoStack || []);
   }
 
   if (redoStack.length === 0) {
     console.log('Redo failed: no action available to redo');
-    redoStack = [];
     refreshButtons();
     return;
   }
 
-  // Prevent rapid redo actions that cause cycling
   if (isRedoInProgress) {
     console.log('Redo already in progress, ignoring request');
-    return;
-  }
-
-  const rawAction = redoStack.pop();
-  const actionValue = typeof rawAction === 'number' ? rawAction : Number(rawAction);
-
-  if (Number.isNaN(actionValue)) {
-    console.log('Redo failed: invalid action retrieved from stack');
-    redoStack = [];
-    refreshButtons();
     return;
   }
 
   try {
     isRedoInProgress = true;
 
-    // Check if this action is valid in current state
-    if (!game.validMoves[actionValue]) {
-      console.log('Redo failed: action not valid in current state');
-      redoStack = [];
+    const redoResultProxy = game.py.redo_next_move();
+    if (!redoResultProxy || typeof redoResultProxy.toJs !== 'function') {
+      console.log('Redo failed: backend did not return data');
+      syncRedoStackFromPython();
       refreshButtons();
       return;
     }
 
-    console.log('Redoing action:', actionValue);
-
-    // Use the Python backend to handle the redo properly
-    try {
-      const result = game.py.getNextState(actionValue).toJs({create_proxies: false});
-      const [nextPlayer, gameEnded, validMoves] = result;
-
-      // Update game state
-      game.nextPlayer = nextPlayer;
-      game.gameEnded = gameEnded;
-      game.validMoves = validMoves;
-
-      move_sel.reset();
-      move_sel._select_relevant_cells(); // Update selectable cells
-      refreshBoard();
+    const redoResult = redoResultProxy.toJs({ create_proxies: false });
+    if (!Array.isArray(redoResult) || redoResult.length < 4) {
+      console.log('Redo failed: unexpected backend response');
+      syncRedoStackFromPython();
       refreshButtons();
+      return;
+    }
 
-      // Only trigger AI if next player is not human and there are no more stored redos
-      if (redoStack.length === 0 && !game.is_human_player(game.nextPlayer)) {
-        ai_play_if_needed();
-      }
-      // Always refresh evaluation after any move
-      if (typeof refreshEvaluation === 'function') {
-        await refreshEvaluation();
-      }
-    } catch (pyError) {
-      console.error('Python redo failed:', pyError);
-      // Fallback to JavaScript move
-      redoStack = [];
-      try {
-        game.move(actionValue, true);
-        move_sel.reset();
-        move_sel._select_relevant_cells();
-        refreshBoard();
-        refreshButtons();
+    const [nextPlayer, gameEnded, validMoves, actionValue, remainingCount = 0] = redoResult;
+    if (typeof actionValue !== 'number' || Number.isNaN(actionValue)) {
+      console.log('Redo failed: backend returned invalid action');
+      syncRedoStackFromPython();
+      refreshButtons();
+      return;
+    }
 
-        if (!game.is_human_player(game.nextPlayer)) {
-          ai_play_if_needed();
-        }
-        if (typeof refreshEvaluation === 'function') {
-          await refreshEvaluation();
-        }
-      } catch (fallbackError) {
-        console.error('Redo fallback failed:', fallbackError);
+    // Remove the expected action from the local stack to keep UI in sync
+    if (redoStack.length > 0) {
+      const expectedAction = redoStack.pop();
+      if (typeof expectedAction !== 'undefined' && Number(expectedAction) !== actionValue) {
+        console.warn('Redo stack out of sync, resynchronizing');
+        syncRedoStackFromPython();
       }
+    }
+
+    game.nextPlayer = nextPlayer;
+    game.gameEnded = gameEnded;
+    game.validMoves = validMoves;
+
+    move_sel.reset();
+    move_sel._select_relevant_cells();
+    refreshBoard();
+    refreshButtons();
+
+    if ((remainingCount === 0 || !remainingCount) && !game.is_human_player(game.nextPlayer)) {
+      ai_play_if_needed();
+    }
+
+    if (typeof refreshEvaluation === 'function') {
+      await refreshEvaluation();
     }
   } catch (error) {
     console.error('Redo failed:', error);
     redoStack = [];
-    refreshButtons();
   } finally {
-    // Add small delay to prevent rapid clicking
+    syncRedoStackFromPython();
+    refreshButtons();
     setTimeout(() => {
       isRedoInProgress = false;
     }, 300);
