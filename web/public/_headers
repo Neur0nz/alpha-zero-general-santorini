@@ -1,0 +1,10 @@
+# GitHub Pages headers configuration
+# Enable cross-origin isolation for SharedArrayBuffer support (required for ONNX runtime)
+
+/*
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Opener-Policy: same-origin
+
+# Ensure proper content type for ONNX files
+/*.onnx
+  Content-Type: application/octet-stream

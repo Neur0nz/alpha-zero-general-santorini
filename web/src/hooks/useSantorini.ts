@@ -122,12 +122,30 @@ export function useSantorini() {
       // Try creating session with buffer
       let session;
       try {
-        session = await window.ort.InferenceSession.create(modelBuffer);
+        // Configure ONNX runtime for single-threaded mode to avoid SharedArrayBuffer issues
+        const sessionOptions = {
+          executionProviders: ['wasm'],
+          graphOptimizationLevel: 'all',
+          enableCpuMemArena: false,
+          enableMemPattern: false,
+          enableProfiling: false,
+          logLevel: 'warning'
+        };
+        
+        session = await window.ort.InferenceSession.create(modelBuffer, sessionOptions);
         console.log('ONNX session created successfully with buffer');
       } catch (bufferError) {
         console.warn('Failed to create session with buffer, trying URL approach:', bufferError);
-        // Fallback: try loading directly from URL
-        session = await window.ort.InferenceSession.create(MODEL_FILENAME);
+        // Fallback: try loading directly from URL with same options
+        const sessionOptions = {
+          executionProviders: ['wasm'],
+          graphOptimizationLevel: 'all',
+          enableCpuMemArena: false,
+          enableMemPattern: false,
+          enableProfiling: false,
+          logLevel: 'warning'
+        };
+        session = await window.ort.InferenceSession.create(MODEL_FILENAME, sessionOptions);
         console.log('ONNX session created successfully with URL');
       }
       (window as any).onnxSession = session;
