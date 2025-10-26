@@ -11,7 +11,7 @@ import {
   useDisclosure,
 } from '@chakra-ui/react';
 import { useEffect, useMemo, useState } from 'react';
-import { TimeIcon, SmallAddIcon, SearchIcon } from '@chakra-ui/icons';
+import { TimeIcon, SearchIcon } from '@chakra-ui/icons';
 import { useSantorini } from '@hooks/useSantorini';
 import { useSupabaseAuth } from '@hooks/useSupabaseAuth';
 import HeaderBar, { type AppTab } from '@components/HeaderBar';
@@ -41,8 +41,8 @@ function App() {
     calcOptionsBusy,
   } = useSantorini();
   const { isOpen: isHistoryOpen, onOpen: openHistory, onClose: closeHistory } = useDisclosure();
-  const tabOrder: AppTab[] = ['practice', 'play', 'analyze'];
-  const [activeTab, setActiveTab] = useState<AppTab>('practice');
+  const tabOrder: AppTab[] = ['play', 'practice', 'analyze'];
+  const [activeTab, setActiveTab] = useState<AppTab>('play');
   const activeIndex = tabOrder.indexOf(activeTab);
   const auth = useSupabaseAuth();
 
@@ -66,11 +66,7 @@ function App() {
           </Tooltip>
         );
       case 'play':
-        return (
-          <Tooltip label="Create a new match (coming soon)" hasArrow>
-            <IconButton aria-label="Create match" icon={<SmallAddIcon />} size="sm" variant="outline" isDisabled />
-          </Tooltip>
-        );
+        return null;
       case 'analyze':
         return (
           <Tooltip label="Search saved games (coming soon)" hasArrow>
@@ -102,6 +98,9 @@ function App() {
         <Flex flex="1" py={{ base: 6, md: 8 }}>
           <Container maxW="7xl" flex="1">
             <TabPanels flex="1">
+              <TabPanel px={0}>
+                <PlayWorkspace auth={auth} />
+              </TabPanel>
               <TabPanel px={0}>
                 <Flex direction="column" gap={{ base: 6, md: 8 }}>
                   <PracticeToolbar
@@ -170,9 +169,6 @@ function App() {
                     </Box>
                   </Flex>
                 </Flex>
-              </TabPanel>
-              <TabPanel px={0}>
-                <PlayWorkspace auth={auth} />
               </TabPanel>
               <TabPanel px={0}>
                 <AnalyzeWorkspace />

@@ -69,14 +69,14 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
               px={{ base: 2, md: 3 }}
               py={{ base: 1, md: 2 }}
             >
-              Practice
+              Play
             </Tab>
             <Tab
               _selected={{ color: 'teal.300', boxShadow: 'inset 0 -2px 0 0 currentColor' }}
               px={{ base: 2, md: 3 }}
               py={{ base: 1, md: 2 }}
             >
-              Play
+              Practice
             </Tab>
             <Tab
               _selected={{ color: 'teal.300', boxShadow: 'inset 0 -2px 0 0 currentColor' }}

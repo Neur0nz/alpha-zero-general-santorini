@@ -28,7 +28,18 @@ function deriveInitialClocks(match: LobbyMatch | null): ClockState {
 
 export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const { match, moves, role, onSubmitMove } = options;
-  const base = useSantorini();
+  const base = useSantorini({ evaluationEnabled: false });
+  const lockedControls = useMemo(
+    () => ({
+      ...base.controls,
+      refreshEvaluation: async () => {},
+      calculateOptions: async () => {},
+      updateCalcDepth: (_depth: number | null) => {},
+      setGameMode: async (_mode: 'P0' | 'P1' | 'Human' | 'AI') => {},
+      changeDifficulty: (_sims: number) => {},
+    }),
+    [base.controls],
+  );
   const toast = useToast();
   const [clock, setClock] = useState<ClockState>(() => deriveInitialClocks(match));
   const [clockEnabled, setClockEnabled] = useState(match?.clock_initial_seconds ? match.clock_initial_seconds > 0 : false);
@@ -36,10 +47,10 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const appliedMovesRef = useRef(0);
   const pendingLocalMoveRef = useRef<{ expectedHistoryLength: number } | null>(null);
 
-  const currentTurn = useMemo(() => {
+  const currentTurn = useMemo<'creator' | 'opponent'>(() => {
     if (!match) return 'creator';
-    return moves.length % 2 === 0 ? 'creator' : 'opponent';
-  }, [match, moves.length]);
+    return base.nextPlayer === 0 ? 'creator' : 'opponent';
+  }, [base.nextPlayer, match?.id]);
 
   useEffect(() => {
     setClock(deriveInitialClocks(match));
@@ -90,7 +101,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       timerRef.current = null;
     }
 
-    const side = moves.length % 2 === 0 ? 'creator' : 'opponent';
+    const side = currentTurn;
     timerRef.current = setInterval(() => {
       setClock((prev) => {
         const next = { ...prev };
@@ -109,7 +120,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         timerRef.current = null;
       }
     };
-  }, [clockEnabled, match, moves.length]);
+  }, [clockEnabled, currentTurn, match]);
 
   useEffect(() => {
     return () => {
@@ -193,16 +204,20 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     setClock(deriveInitialClocks(match));
   }, [base.controls, match]);
 
-  const localPlayerClock = role === 'creator' ? clock.creatorMs : clock.opponentMs;
-  const remotePlayerClock = role === 'creator' ? clock.opponentMs : clock.creatorMs;
+  const localPlayerClock = role === 'opponent' ? clock.opponentMs : clock.creatorMs;
+  const remotePlayerClock = role === 'opponent' ? clock.creatorMs : clock.opponentMs;
 
   return {
     ...base,
+    controls: lockedControls,
     onCellClick,
     clockEnabled,
     formatClock,
     localPlayerClock,
     remotePlayerClock,
     resetMatch,
+    currentTurn,
+    creatorClockMs: clock.creatorMs,
+    opponentClockMs: clock.opponentMs,
   };
 }

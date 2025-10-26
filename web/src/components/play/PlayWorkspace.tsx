@@ -13,7 +13,6 @@ import {
   CardBody,
   CardHeader,
   Center,
-  Divider,
   Flex,
   FormControl,
   FormLabel,
@@ -42,7 +41,6 @@ import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import { useMatchLobby, type CreateMatchPayload, type LobbyMatch } from '@hooks/useMatchLobby';
 import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
 import GameBoard from '@components/GameBoard';
-import EvaluationPanel from '@components/EvaluationPanel';
 import GoogleIcon from '@components/auth/GoogleIcon';
 import type { SantoriniMoveAction } from '@/types/match';
 import { generateDisplayName, validateDisplayName } from '@/utils/generateDisplayName';
@@ -200,7 +198,7 @@ function PublicLobbies({
               >
                 <Box>
                   <HStack spacing={3} align="center">
-                    <Heading size="sm">{match.id.slice(0, 8)}</Heading>
+                    <Heading size="sm">{match.creator?.display_name ?? 'Unknown player'}</Heading>
                     <Badge colorScheme={match.rated ? 'purple' : 'gray'}>{match.rated ? 'Rated' : 'Casual'}</Badge>
                     {match.clock_initial_seconds > 0 && (
                       <Badge colorScheme="blue">
@@ -209,7 +207,9 @@ function PublicLobbies({
                     )}
                   </HStack>
                   <Text fontSize="sm" color="whiteAlpha.700">
-                    Created {formatDate(match.created_at)} · {match.visibility === 'public' ? 'Public' : 'Private'}
+                    {match.opponent ? `Facing ${match.opponent.display_name}` : 'Waiting for an opponent'} ·
+                    {' '}
+                    {match.visibility === 'public' ? 'Public lobby' : 'Private code'} · Created {formatDate(match.created_at)}
                   </Text>
                 </Box>
                 <Button
@@ -266,11 +266,12 @@ function ActiveMatchPanel({
     moves: typedMoves,
     onSubmitMove,
   });
-
-  const localClock = santorini.formatClock(santorini.localPlayerClock);
-  const remoteClock = santorini.formatClock(santorini.remotePlayerClock);
-  const currentTurn = moves.length % 2 === 0 ? 'creator' : 'opponent';
-  const isMyTurn = currentTurn === role;
+  const creatorName = lobbyMatch?.creator?.display_name ?? 'Player 1 (Blue)';
+  const opponentName = lobbyMatch?.opponent?.display_name ?? 'Player 2 (Red)';
+  const creatorClock = santorini.formatClock(santorini.creatorClockMs);
+  const opponentClock = santorini.formatClock(santorini.opponentClockMs);
+  const creatorTurnActive = santorini.currentTurn === 'creator';
+  const opponentTurnActive = santorini.currentTurn === 'opponent';
 
   const handleLeave = async () => {
     setLeaveBusy.on();
@@ -311,7 +312,14 @@ function ActiveMatchPanel({
     <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200" w="100%">
       <CardHeader>
         <Flex justify="space-between" align="center">
-          <Heading size="md">Active match</Heading>
+          <Stack spacing={1}>
+            <Heading size="md">Active match</Heading>
+            {lobbyMatch && (
+              <Text fontSize="sm" color="whiteAlpha.700">
+                {creatorName} vs {lobbyMatch.opponent ? opponentName : 'Waiting for opponent'}
+              </Text>
+            )}
+          </Stack>
           <HStack spacing={3}>
             {showJoinCode && (
               <Badge colorScheme="orange" fontSize="0.8rem">
@@ -361,19 +369,21 @@ function ActiveMatchPanel({
                 <HStack spacing={4} justify="space-between" w="100%">
                   <VStack spacing={1} align="flex-start">
                     <Text fontSize="sm" color="whiteAlpha.700">
-                      Your clock
+                      {role === 'creator' ? 'Your clock' : 'Player 1 (Blue)'}
                     </Text>
-                    <Heading size="lg" color={isMyTurn ? 'teal.200' : 'whiteAlpha.900'}>
-                      {localClock}
+                    <Heading size="lg" color={creatorTurnActive ? 'teal.200' : 'whiteAlpha.900'}>
+                      {creatorClock}
                     </Heading>
+                    <Text fontSize="xs" color="whiteAlpha.600">{creatorName}</Text>
                   </VStack>
                   <VStack spacing={1} align="flex-end">
-                    <Text fontSize="sm" color="whiteAlpha.700">
-                      Opponent
+                    <Text fontSize="sm" color="whiteAlpha.700" textAlign="right">
+                      {role === 'opponent' ? 'Your clock' : 'Player 2 (Red)'}
                     </Text>
-                    <Heading size="lg" color={isMyTurn ? 'whiteAlpha.900' : 'teal.200'}>
-                      {remoteClock}
+                    <Heading size="lg" color={opponentTurnActive ? 'teal.200' : 'whiteAlpha.900'}>
+                      {opponentClock}
                     </Heading>
+                    <Text fontSize="xs" color="whiteAlpha.600">{opponentName}</Text>
                   </VStack>
                 </HStack>
               </VStack>
@@ -385,10 +395,17 @@ function ActiveMatchPanel({
                     Match status
                   </Heading>
                   <Text fontSize="sm" color="whiteAlpha.800">
-                    {role ? `You are playing as ${role === 'creator' ? 'Player 1 (Blue)' : 'Player 2 (Red)'}` : 'Spectating'}
+                    {role === 'creator'
+                      ? 'You are playing as Player 1 (Blue)'
+                      : role === 'opponent'
+                      ? 'You are playing as Player 2 (Red)'
+                      : 'Spectating this match'}
                   </Text>
                   <Text fontSize="sm" color="whiteAlpha.600">
-                    {moves.length} moves played · Turn: {currentTurn === 'creator' ? 'Player 1' : 'Player 2'}
+                    {typedMoves.length} moves played · Turn:{' '}
+                    {santorini.currentTurn === 'creator'
+                      ? `Player 1 (Blue) – ${creatorName}`
+                      : `Player 2 (Red) – ${opponentName}`}
                   </Text>
                 </Box>
                 <Box>
@@ -426,7 +443,7 @@ function ActiveMatchPanel({
                       Leave match
                     </Button>
                     <Tooltip label="Offer a new game with the same settings" hasArrow>
-                      <Button colorScheme="teal" onClick={handleOfferRematch} isLoading={offerBusy}>
+                      <Button colorScheme="teal" onClick={handleOfferRematch} isLoading={offerBusy} isDisabled={!role || offerBusy}>
                         Offer rematch
                       </Button>
                     </Tooltip>
@@ -447,16 +464,6 @@ function ActiveMatchPanel({
                     </Tooltip>
                   </ButtonGroup>
                 </Box>
-                <Divider borderColor="whiteAlpha.300" />
-                <EvaluationPanel
-                  loading={santorini.loading}
-                  evaluation={santorini.evaluation}
-                  topMoves={santorini.topMoves}
-                  calcOptionsBusy={santorini.calcOptionsBusy}
-                  refreshEvaluation={santorini.controls.refreshEvaluation}
-                  calculateOptions={santorini.controls.calculateOptions}
-                  updateDepth={santorini.controls.updateCalcDepth}
-                />
               </Stack>
             </GridItem>
           </Grid>
