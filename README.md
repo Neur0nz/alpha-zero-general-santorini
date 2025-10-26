@@ -12,8 +12,7 @@ Play board games against powerful AlphaZero-based AI **entirely in your browser*
 
 ## 🎮 Supported Games
 
-- **Santorini** ([play](santorini_with_gods.html)) - With god powers
-- **Santorini** ([play](santorini.html)) - Classic version
+- **Santorini** ([play](santorini.html)) - Classic Santorini
 - **Splendor** ([2p](splendor.html), [3p](splendor_3pl.html), [4p](splendor_4pl.html))
 - **Small World** ([2p](smallworld.html), [3p](smallworld_3pl.html), [4p](smallworld_4pl.html))
 - **Minivilles/Machi Koro** ([play](minivilles.html))
@@ -34,7 +33,7 @@ Visit the live version:
 python3 -m http.server 8000
 
 # Open in browser
-# http://localhost:8000/santorini_with_gods.html
+# http://localhost:8000/santorini.html
 ```
 
 Or use the provided script:
@@ -66,7 +65,7 @@ See [EVAL_DISPLAY_ADDED.md](EVAL_DISPLAY_ADDED.md) for technical details.
 
 ### Santorini Example
 
-1. **Open** `santorini_with_gods.html` in your browser
+1. **Open** `santorini.html` in your browser
 2. **Wait** 10-20 seconds for AI to load (first time only)
 3. **Select difficulty** from dropdown menu
 4. **Click** highlighted cells to:
@@ -122,8 +121,7 @@ See [EVAL_DISPLAY_ADDED.md](EVAL_DISPLAY_ADDED.md) for technical details.
 ├── smallworld/             # Small World game files
 ├── common/                 # Shared game framework
 │   └── game.js             # Abstract game class
-├── santorini.html          # Santorini (no gods)
-├── santorini_with_gods.html # Santorini (with gods)
+├── santorini.html          # Santorini
 └── index.html              # Landing page
 ```
 

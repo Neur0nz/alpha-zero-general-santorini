@@ -59,7 +59,7 @@ class AbstractGame {
     this.nextPlayer = 0;
     this.previousPlayer = null;
     this.gameEnded = [0, 0];
-    this.gameMode = 'P0';
+    // Don't reset gameMode - preserve the current mode
     this.validMoves.fill(false);
     
     // Python init
@@ -128,9 +128,8 @@ class AbstractGame {
     if (this.gameMode == 'AI') {
       return false;
     } else if (this.gameMode == 'Human') {
-      return true;
+      return true; // Both players are human in "No AI" mode
     }
-
 
     if (player == 'next') {
       player = this.nextPlayer;
@@ -204,6 +203,10 @@ async function ai_play_one_move() {
 async function ai_play_if_needed_async() {
   let did_ai_played = false;
   while (game.gameEnded.every(x => !x) && !game.is_human_player('next')) {
+    // Deselect all cells during AI thinking
+    move_sel._select_none();
+    refreshBoard();
+    
     await ai_play_one_move();
     
     did_ai_played = true;
@@ -233,7 +236,10 @@ async function changeGameMode(mode) {
   game.gameMode = mode;
   await ai_play_promise;
   move_sel.resetAndStart();
-  await ai_play_if_needed();
+  // Only trigger AI if the current player is not human
+  if (!game.is_human_player(game.nextPlayer)) {
+    await ai_play_if_needed();
+  }
 }
 
 
@@ -246,7 +252,16 @@ function reset() {
   refreshButtons();
   changeMoveText();
   
-  // Show evaluation bar (starts at 0.0)
+  // Clear and reset evaluation bar
+  const evalContainer = window.evalBar;
+  if (evalContainer && evalContainer._x_dataStack) {
+    const alpineData = evalContainer._x_dataStack[0];
+    if (alpineData) {
+      alpineData.clearHistory();
+      alpineData.value = 0.0;
+    }
+  }
+  
   if (typeof refreshEvaluation === 'function') {
     refreshEvaluation();
   }

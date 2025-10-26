@@ -7,6 +7,7 @@ import numpy as np
 g, board, mcts, player = None, None, None, 0
 history = [] # Previous states (new to old, not current). Each is an array with player and board and action
 current_eval = [0.0, 0.0] # Current evaluation values for [player0, player1]
+last_probs = None # Last computed policy vector for current position
 
 class dotdict(dict):
 	def __getattr__(self, name):
@@ -48,8 +49,17 @@ def changeDifficulty(numMCTSSims):
 	mcts.args.numMCTSSims = numMCTSSims
 	print('Difficulty changed to', mcts.args.numMCTSSims);
 
+def begin_setup():
+    """Clear move history so edits become the new start state."""
+    global history
+    history = []
+
+def end_setup():
+    """Finalize setup after edits and return new state."""
+    return update_after_edit()
+
 async def guessBestAction():
-	global g, board, mcts, player, history, current_eval
+	global g, board, mcts, player, history, current_eval, last_probs
 	probs, q, _ = await mcts.getActionProb(g.getCanonicalForm(board, player), force_full_search=True)
 	g.board.copy_state(board, True) # g.board was in canonical form, set it back to normal form
 	best_action = max(range(len(probs)), key=lambda x: probs[x])
@@ -60,6 +70,7 @@ async def guessBestAction():
 		current_eval = [float(q[0]), -float(q[0])]
 	else:
 		current_eval = [-float(q[0]), float(q[0])]
+	last_probs = probs
 	
 	print(f'AI Evaluation: Player 0: {current_eval[0]:+.3f}, Player 1: {current_eval[1]:+.3f} (current player: {player})')
 
@@ -79,7 +90,7 @@ def get_current_eval():
 
 async def calculate_eval_for_current_position():
 	"""Calculate evaluation for current position without making a move."""
-	global g, board, mcts, player, current_eval
+	global g, board, mcts, player, current_eval, last_probs
 	
 	if g is None or mcts is None:
 		print('Game not initialized yet')
@@ -96,10 +107,81 @@ async def calculate_eval_for_current_position():
 		current_eval = [float(q[0]), -float(q[0])]
 	else:
 		current_eval = [-float(q[0]), float(q[0])]
+	last_probs = probs
 	
 	print(f'🔄 Eval recalculated: Player 0: {current_eval[0]:+.3f}, Player 1: {current_eval[1]:+.3f} (current player: {player})')
 	
 	return current_eval
+
+def list_current_moves(limit: int = 10):
+	"""Return top moves with probabilities using last computed policy (fast, no extra search)."""
+	global g, board, mcts, player, last_probs
+	if g is None or mcts is None or last_probs is None:
+		return []
+	indexed = [(a, float(p)) for a, p in enumerate(last_probs)]
+	indexed.sort(key=lambda x: x[1], reverse=True)
+	result = []
+	for action, p in indexed:
+		if p <= 0.0:
+			continue
+		result.append({'action': int(action), 'prob': p, 'text': move_to_str(action, player)})
+		if len(result) >= limit:
+			break
+	return result
+
+async def list_current_moves_with_adv(limit: int = 5, numMCTSSims: int | None = None):
+	"""Return top moves with probabilities and resulting evaluation (Player 0 perspective).
+	Optionally use a temporary numMCTSSims for this calculation only.
+	"""
+	global g, board, mcts, player, current_eval, last_probs
+	if g is None or mcts is None:
+		return []
+
+	prev_sims = mcts.args.numMCTSSims
+	try:
+		if numMCTSSims is not None and numMCTSSims > 0:
+			mcts.args.numMCTSSims = numMCTSSims
+
+		# Ensure we have a fresh policy for current state
+		canonical_board = g.getCanonicalForm(board, player)
+		probs, q, _ = await mcts.getActionProb(canonical_board, force_full_search=True)
+		g.board.copy_state(board, True)
+		last_probs = probs
+
+		indexed = [(a, float(p)) for a, p in enumerate(probs)]
+		indexed.sort(key=lambda x: x[1], reverse=True)
+
+		results = []
+		checked = 0
+		for action, p in indexed:
+			if p <= 0.0:
+				continue
+			# Simulate the move on a copy, evaluate resulting position
+			next_board, next_player = g.getNextState(board, player, action)
+			next_canon = g.getCanonicalForm(next_board, next_player)
+			_, q_after, _ = await mcts.getActionProb(next_canon, force_full_search=True)
+			g.board.copy_state(board, True)
+
+			# Convert to Player 0 perspective
+			if next_player == 0:
+				eval_after = float(q_after[0])
+			else:
+				eval_after = -float(q_after[0])
+			# Current eval (Player 0 perspective)
+			cur_eval = current_eval[0]
+			results.append({
+				'action': int(action),
+				'prob': float(p),
+				'text': move_to_str(action, player),
+				'eval': eval_after,
+				'delta': float(eval_after - cur_eval)
+			})
+			checked += 1
+			if checked >= limit:
+				break
+		return results
+	finally:
+		mcts.args.numMCTSSims = prev_sims
 
 def revert_to_previous_move(player_asking_revert):
 	global g, board, mcts, player, history
@@ -119,12 +201,37 @@ def revert_to_previous_move(player_asking_revert):
 	valids = g.getValidMoves(board, player)
 	return player, end, valids
 
+def jump_to_move_index(move_index):
+	"""Jump to a specific move index in the history (0-based)"""
+	global g, board, mcts, player, history
+	if move_index < 0 or move_index >= len(history):
+		print(f'Invalid move index: {move_index}, history length: {len(history)}')
+		return None
+	
+	# Get the state at the specified index
+	state = history[move_index]
+	player, board = state[0], state[1]
+	
+	# Don't truncate history - just set the current state
+	# This allows the modal to remain populated
+	
+	print(f'Jumped to move {move_index}: player={player}')
+	
+	end = g.getGameEnded(board, player)
+	valids = g.getValidMoves(board, player)
+	return player, end, valids
+
 def get_last_action():
 	global g, board, mcts, player, history
 
 	if len(history) < 1:
 		return None
 	return history[0][2]
+
+def get_history_length():
+	"""Get the current length of the history"""
+	global history
+	return len(history)
 
 # -----------------------------------------------------------------------------
 
@@ -136,26 +243,6 @@ def  _findWorker(worker):
 		return [-1, -1]
 	return [lookup_result[0][0].item(), lookup_result[1][0].item()]
 
-def  _read_power():
-	lookup_result = np.flatnonzero(g.board.gods_power.flat[:2*NB_GODS] > 0)
-	if len(lookup_result) != 2:
-		raise Exception('error during _read_power()')
-
-	for p in range(2):
-		lookup_result[p] %= NB_GODS
-		print(f'Player {p} has power {lookup_result[p]}')
-	return [x.item() for x in lookup_result]
-
-def  _read_power_data():
-	lookup_result = np.flatnonzero(g.board.gods_power.flat[:2*NB_GODS] > 0)
-	if len(lookup_result) != 2:
-		raise Exception('error during _read_power()')
-
-	lookup_result = g.board.gods_power.ravel()[lookup_result]
-	for p, r in enumerate(lookup_result):
-		if r != 64:
-			print(f'Power data for player {p} is {r}')
-	return [x.item() for x in lookup_result]
 
 def _read_worker(y, x):
 	return g.board.workers[y][x].item()
