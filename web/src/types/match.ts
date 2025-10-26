@@ -1,0 +1,56 @@
+export type MatchVisibility = 'public' | 'private';
+export type MatchStatus = 'waiting_for_opponent' | 'in_progress' | 'completed' | 'abandoned';
+
+export interface PlayerProfile {
+  id: string;
+  auth_user_id: string | null;
+  display_name: string;
+  rating: number;
+  games_played: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MatchRecord {
+  id: string;
+  creator_id: string;
+  opponent_id: string | null;
+  visibility: MatchVisibility;
+  rated: boolean;
+  private_join_code: string | null;
+  clock_initial_seconds: number;
+  clock_increment_seconds: number;
+  status: MatchStatus;
+  winner_id: string | null;
+  rematch_parent_id: string | null;
+  created_at: string;
+}
+
+export interface MatchMoveRecord<TAction = unknown> {
+  id: string;
+  match_id: string;
+  move_index: number;
+  player_id: string;
+  action: TAction;
+  state_snapshot: unknown;
+  eval_snapshot: unknown;
+  created_at: string;
+}
+
+export type SantoriniMoveAction = {
+  kind: 'santorini.move';
+  move: number;
+  by: 'creator' | 'opponent';
+  clocks?: {
+    creatorMs: number;
+    opponentMs: number;
+  };
+};
+
+export type RematchOfferAction = {
+  kind: 'rematch.offer';
+  offeredBy: string;
+  newMatchId: string;
+};
+
+export type MatchAction = SantoriniMoveAction | RematchOfferAction | Record<string, unknown>;

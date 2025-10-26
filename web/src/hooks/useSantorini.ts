@@ -54,6 +54,11 @@ export type TopMove = {
   delta?: number;
 };
 
+export type ApplyMoveOptions = {
+  triggerAi?: boolean;
+  asHuman?: boolean;
+};
+
 export type Controls = {
   reset: () => Promise<void>;
   setGameMode: (mode: 'P0' | 'P1' | 'Human' | 'AI') => Promise<void>;
@@ -397,33 +402,51 @@ export function useSantorini() {
     }
   }, [buttons.setupTurn, readBoard, finalizeGuidedSetup]);
 
+  const applyMove = useCallback(
+    async (move: number, options: ApplyMoveOptions = {}) => {
+      const { triggerAi = true, asHuman = true } = options;
+      const game = gameRef.current;
+      const selector = selectorRef.current;
+      if (!game || !selector) return;
+      await ensureAiIdle();
+      game.move(move, asHuman);
+      if (selector.resetAndStart) {
+        selector.resetAndStart();
+      } else {
+        selector.reset();
+        selector.start();
+      }
+      await syncUi();
+      await refreshEvaluation();
+      if (triggerAi) {
+        aiPromiseRef.current = ensureAiIdle().then(() => aiPlayIfNeeded());
+      }
+    },
+    [aiPlayIfNeeded, ensureAiIdle, refreshEvaluation, syncUi],
+  );
+
   const onCellClick = useCallback(
     async (y: number, x: number) => {
       const game = gameRef.current;
       const selector = selectorRef.current;
       if (!game || !selector) return;
-      
+
       // Handle setup mode
       if (buttons.setupMode) {
         placeWorkerForSetup(y, x);
         return;
       }
-      
+
       selector.click(y, x);
       updateSelectable();
       const move = selector.getMove();
       if (move >= 0) {
-        game.move(move, true);
-        selector.reset();
-        selector.start();
-        await syncUi();
-        await refreshEvaluation();
-        aiPromiseRef.current = ensureAiIdle().then(() => aiPlayIfNeeded());
+        await applyMove(move);
       } else {
         updateButtons(false);
       }
     },
-    [aiPlayIfNeeded, ensureAiIdle, refreshEvaluation, syncUi, updateButtons, updateSelectable, buttons.setupMode, placeWorkerForSetup],
+    [applyMove, updateButtons, updateSelectable, buttons.setupMode, placeWorkerForSetup],
   );
 
   const onCellHover = useCallback((_y: number, _x: number) => {
@@ -614,6 +637,7 @@ export function useSantorini() {
     board,
     selectable,
     onCellClick,
+    applyMove,
     onCellHover,
     onCellLeave,
     buttons,
