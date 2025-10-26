@@ -4,13 +4,10 @@ from SantoriniDisplay import move_to_str
 import numpy as np
 
 g, board, mcts, player = None, None, None, 0
-history = (
-    []
-)  # Previous states (new to old, not current). Each is an array with player and board and action
-future_history = []  # States that were undone (oldest first) for redo support
-current_eval = [0.0, 0.0]  # Current evaluation values for [player0, player1]
-last_probs = None  # Last computed policy vector for current position
-
+history = [] # Previous states (new to old, not current). Each is an array with player and board and action
+future_history = [] # States that were undone (oldest first) for redo support
+current_eval = [0.0, 0.0] # Current evaluation values for [player0, player1]
+last_probs = None # Last computed policy vector for current position
 
 class dotdict(dict):
     def __getattr__(self, name):
@@ -18,41 +15,37 @@ class dotdict(dict):
 
 
 def init_game(numMCTSSims):
-    global g, board, mcts, player, history, future_history
+        global g, board, mcts, player, history, future_history
 
-    mcts_args = dotdict(
-        {
-            "numMCTSSims": numMCTSSims,
-            "fpu": 0.03,
-            "cpuct": 2.75,
-            "prob_fullMCTS": 1.0,
-            "forced_playouts": False,
-            "no_mem_optim": False,
-        }
-    )
+        mcts_args = dotdict({
+                'numMCTSSims'     : numMCTSSims,
+		'fpu'             : 0.03,
+		'cpuct'           : 2.75,
+		'prob_fullMCTS'   : 1.,
+		'forced_playouts' : False,
+		'no_mem_optim'    : False,
+	})
 
-    g = Game()
-    board = g.getInitBoard()
-    mcts = MCTS(g, None, mcts_args)
-    player = 0
-    history = []
-    future_history = []
-    valids = g.getValidMoves(board, player)
-    end = [0, 0]
+        g = Game()
+        board = g.getInitBoard()
+        mcts = MCTS(g, None, mcts_args)
+        player = 0
+        history = []
+        future_history = []
+        valids = g.getValidMoves(board, player)
+        end = [0,0]
 
-    return player, end, valids
-
+        return player, end, valids
 
 def getNextState(action):
-    global g, board, mcts, player, history, future_history
-    future_history = []
-    history.insert(0, [player, np.copy(board), action])
-    board, player = g.getNextState(board, player, action)
-    end = g.getGameEnded(board, player)
-    valids = g.getValidMoves(board, player)
+        global g, board, mcts, player, history, future_history
+        future_history = []
+        history.insert(0, [player, np.copy(board), action])
+        board, player = g.getNextState(board, player, action)
+        end = g.getGameEnded(board, player)
+        valids = g.getValidMoves(board, player)
 
-    return player, end, valids
-
+        return player, end, valids
 
 def changeDifficulty(numMCTSSims):
     global g, board, mcts, player, history
@@ -61,15 +54,14 @@ def changeDifficulty(numMCTSSims):
 
 
 def begin_setup():
-    """Clear move history so edits become the new start state."""
-    global history, future_history
-    history = []
-    future_history = []
-
+	"""Clear move history so edits become the new start state."""
+	global history, future_history
+	history = []
+	future_history = []
 
 def end_setup():
-    """Finalize setup after edits and return new state."""
-    return update_after_edit()
+	"""Finalize setup after edits and return new state."""
+	return update_after_edit()
 
 
 async def guessBestAction():
@@ -254,28 +246,80 @@ def revert_last_move():
     return _finalize_revert(removed_states)
 
 
+def _finalize_revert(removed_states):
+        """Helper to apply a list of removed states and update bookkeeping."""
+        global g, board, player, history, future_history
+
+        if not removed_states:
+                end = g.getGameEnded(board, player)
+                valids = g.getValidMoves(board, player)
+                return player, end, valids, []
+
+        # The last element corresponds to the board state we are restoring
+        target_state = removed_states[-1]
+        player = int(target_state[0])
+        board = target_state[1]
+
+        # Drop the reverted states from the history and prepend them to the redo stack
+        history = history[len(removed_states):]
+        future_history = removed_states[::-1] + future_history
+
+        removed_actions = [int(state[2]) for state in removed_states]
+
+        end = g.getGameEnded(board, player)
+        valids = g.getValidMoves(board, player)
+        return player, end, valids, removed_actions
+
+
+def revert_last_move():
+        """Undo only the most recent move, regardless of the player."""
+        global history
+
+        if len(history) == 0:
+                return _finalize_revert([])
+
+        removed_states = history[:1]
+        return _finalize_revert(removed_states)
+
+
 def revert_to_previous_move(player_asking_revert):
-    global g, board, mcts, player, history, future_history
+        global g, board, mcts, player, history, future_history
 
-    removed_states = []
+        removed_states = []
 
-    if len(history) > 0:
-        if player_asking_revert is None:
-            removed_states = history[:1]
-        else:
-            # Revert to the previous 0 before a 1, or first 0 from game
-            for index, state in enumerate(history):
-                if (state[0] == player_asking_revert) and (
-                    index + 1 == len(history)
-                    or history[index + 1][0] != player_asking_revert
-                ):
-                    removed_states = history[: index + 1]
-                    break
-            if removed_states:
-                print(f"index={len(removed_states)-1} / {len(history)}")
+        if len(history) > 0:
+                if player_asking_revert is None:
+                        removed_states = history[:1]
+                else:
+                        # Revert to the previous 0 before a 1, or first 0 from game
+                        for index, state in enumerate(history):
+                                if (state[0] == player_asking_revert) and (index+1 == len(history) or history[index+1][0] != player_asking_revert):
+                                        removed_states = history[:index+1]
+                                        break
+                        if removed_states:
+                                print(f'index={len(removed_states)-1} / {len(history)}');
 
-    return _finalize_revert(removed_states)
+        return _finalize_revert(removed_states)
 
+def jump_to_move_index(move_index):
+        """Jump to a specific move index in the history (0-based)"""
+        global g, board, mcts, player, history, future_history
+        if move_index < 0 or move_index >= len(history):
+                print(f'Invalid move index: {move_index}, history length: {len(history)}')
+                return None
+
+        # Get the state at the specified index
+        state = history[move_index]
+        player, board = state[0], state[1]
+
+        # Clear redo information when jumping arbitrarily in history
+        future_history = []
+
+        # Don't truncate history - just set the current state
+        # This allows the modal to remain populated
+
+                # Store removed states for redo support, oldest first
+                future_history = removed_states[::-1] + future_history
 
 def jump_to_move_index(move_index):
     """Jump to a specific move index in the history (0-based)"""
@@ -308,38 +352,67 @@ def redo_next_move():
     if len(future_history) == 0:
         end = g.getGameEnded(board, player)
         valids = g.getValidMoves(board, player)
-        return player, end, valids, None, 0
+        return player, end, valids
 
-    next_state = future_history.pop(0)
-    state_player = int(next_state[0])
-    state_board = np.copy(next_state[1])
-    action = int(next_state[2])
+def jump_to_move_index(move_index):
+        """Jump to a specific move index in the history (0-based)"""
+        global g, board, mcts, player, history, future_history
+        if move_index < 0 or move_index >= len(history):
+                print(f'Invalid move index: {move_index}, history length: {len(history)}')
+                return None
 
-    # Restore to the state before the move
-    player = state_player
-    board = state_board
+        # Get the state at the specified index
+        state = history[move_index]
+        player, board = state[0], state[1]
 
-    # Record this state in the history again before applying the move
-    history.insert(0, [player, np.copy(board), action])
+        # Clear redo information when jumping arbitrarily in history
+        future_history = []
 
-    board, player = g.getNextState(board, player, action)
-    end = g.getGameEnded(board, player)
-    valids = g.getValidMoves(board, player)
+        # Don't truncate history - just set the current state
+        # This allows the modal to remain populated
 
-    return player, end, valids, action, len(future_history)
+        print(f'Jumped to move {move_index}: player={player}')
 
+        end = g.getGameEnded(board, player)
+        valids = g.getValidMoves(board, player)
+        return player, end, valids
+
+def redo_next_move():
+        """Reapply the next available move from the redo history."""
+        global g, board, mcts, player, history, future_history
+
+        if len(future_history) == 0:
+                end = g.getGameEnded(board, player)
+                valids = g.getValidMoves(board, player)
+                return player, end, valids, None, 0
+
+        next_state = future_history.pop(0)
+        state_player = int(next_state[0])
+        state_board = np.copy(next_state[1])
+        action = int(next_state[2])
+
+        # Restore to the state before the move
+        player = state_player
+        board = state_board
+
+        # Record this state in the history again before applying the move
+        history.insert(0, [player, np.copy(board), action])
+
+        board, player = g.getNextState(board, player, action)
+        end = g.getGameEnded(board, player)
+        valids = g.getValidMoves(board, player)
+
+        return player, end, valids, action, len(future_history)
 
 def get_redo_actions():
-    """Return the list of actions currently available for redo (oldest first)."""
-    global future_history
-    return [int(state[2]) for state in future_history]
-
+        """Return the list of actions currently available for redo (oldest first)."""
+        global future_history
+        return [int(state[2]) for state in future_history]
 
 def get_redo_count():
-    """Get the number of available redo actions."""
-    global future_history
-    return len(future_history)
-
+        """Get the number of available redo actions."""
+        global future_history
+        return len(future_history)
 
 def get_last_action():
     global g, board, mcts, player, history
