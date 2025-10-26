@@ -19,9 +19,12 @@ import {
   TabPanels,
   Tabs,
   Text,
+  HStack,
   useDisclosure,
   useToast,
 } from '@chakra-ui/react';
+import { supabase } from '@/lib/supabaseClient';
+import { useSupabaseAuth } from '@hooks/useSupabaseAuth';
 
 interface SignInFormState {
   email: string;
@@ -54,7 +57,11 @@ function AuthJourney() {
   const [authMode, setAuthMode] = useState<AuthMode>('signIn');
   const [signInState, setSignInState] = useState<SignInFormState>(initialSignInState);
   const [signUpState, setSignUpState] = useState<SignUpFormState>(initialSignUpState);
+  const [signInBusy, setSignInBusy] = useState(false);
+  const [signUpBusy, setSignUpBusy] = useState(false);
+  const [signOutBusy, setSignOutBusy] = useState(false);
   const toast = useToast();
+  const { profile, loading, error, signOut } = useSupabaseAuth();
 
   const openForMode = (mode: AuthMode) => {
     setAuthMode(mode);
@@ -67,40 +74,141 @@ function AuthJourney() {
     onClose();
   };
 
-  const handleSignInSubmit: React.FormEventHandler<HTMLFormElement> = (event) => {
+  const handleSignInSubmit: React.FormEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
-    toast({
-      title: 'Signed in',
-      description: `Welcome back, ${signInState.email}!`,
-      status: 'success',
-      duration: 3000,
-      isClosable: true,
-    });
-    handleClose();
+    if (!supabase) {
+      toast({ title: 'Supabase not configured', status: 'error' });
+      return;
+    }
+
+    setSignInBusy(true);
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: signInState.email,
+        password: signInState.password,
+      });
+
+      if (signInError) {
+        throw signInError;
+      }
+
+      toast({
+        title: 'Signed in',
+        description: `Welcome back, ${signInState.email}!`,
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      });
+      handleClose();
+    } catch (signInError) {
+      toast({
+        title: 'Sign-in failed',
+        description:
+          signInError instanceof Error ? signInError.message : 'Unable to sign in with these credentials.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setSignInBusy(false);
+    }
   };
 
-  const handleSignUpSubmit: React.FormEventHandler<HTMLFormElement> = (event) => {
+  const handleSignUpSubmit: React.FormEventHandler<HTMLFormElement> = async (event) => {
     event.preventDefault();
-    toast({
-      title: 'Account created',
-      description: `Welcome to Ascent, ${signUpState.username || 'new strategist'}!`,
-      status: 'success',
-      duration: 3000,
-      isClosable: true,
-    });
-    handleClose();
+
+    if (signUpState.password !== signUpState.confirmPassword) {
+      toast({
+        title: 'Passwords do not match',
+        status: 'error',
+        duration: 4000,
+        isClosable: true,
+      });
+      return;
+    }
+
+    if (!supabase) {
+      toast({ title: 'Supabase not configured', status: 'error' });
+      return;
+    }
+
+    setSignUpBusy(true);
+    try {
+      const { error: signUpError } = await supabase.auth.signUp({
+        email: signUpState.email,
+        password: signUpState.password,
+        options: {
+          data: { display_name: signUpState.username },
+        },
+      });
+
+      if (signUpError) {
+        throw signUpError;
+      }
+
+      toast({
+        title: 'Account created',
+        description: `Welcome to Ascent, ${signUpState.username || 'new strategist'}! Check your email to confirm your account.`,
+        status: 'success',
+        duration: 4000,
+        isClosable: true,
+      });
+      handleClose();
+    } catch (signUpError) {
+      toast({
+        title: 'Sign-up failed',
+        description:
+          signUpError instanceof Error ? signUpError.message : 'Unable to create an account with these details.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setSignUpBusy(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setSignOutBusy(true);
+    try {
+      await signOut();
+      toast({ title: 'Signed out', status: 'success', duration: 3000, isClosable: true });
+    } catch (signOutError) {
+      toast({
+        title: 'Sign-out failed',
+        description: signOutError instanceof Error ? signOutError.message : 'Unable to sign out right now.',
+        status: 'error',
+        duration: 4000,
+        isClosable: true,
+      });
+    } finally {
+      setSignOutBusy(false);
+    }
   };
 
   return (
     <>
-      <Button
-        size="sm"
-        colorScheme="teal"
-        variant="solid"
-        onClick={() => openForMode('signIn')}
-      >
-        Sign in / Sign up
-      </Button>
+      {profile ? (
+        <HStack spacing={3}>
+          <Text fontSize="sm" color="whiteAlpha.800">
+            Signed in as <Text as="span" fontWeight="semibold">{profile.display_name}</Text>
+          </Text>
+          <Button size="sm" variant="outline" colorScheme="teal" onClick={handleSignOut} isLoading={signOutBusy}>
+            Log out
+          </Button>
+        </HStack>
+      ) : (
+        <Button
+          size="sm"
+          colorScheme="teal"
+          variant="solid"
+          onClick={() => openForMode('signIn')}
+          isLoading={loading}
+          isDisabled={Boolean(error)}
+        >
+          {error ? 'Supabase unavailable' : 'Sign in / Sign up'}
+        </Button>
+      )}
 
       <Modal isOpen={isOpen} onClose={handleClose} size="lg" isCentered>
         <ModalOverlay backdropFilter="blur(6px)" />
@@ -152,7 +260,7 @@ function AuthJourney() {
                     </Stack>
 
                     <ModalFooter px={0} pb={0} mt={6} display="flex" flexDirection="column" gap={3}>
-                      <Button type="submit" colorScheme="teal" w="full">
+                      <Button type="submit" colorScheme="teal" w="full" isLoading={signInBusy} isDisabled={signInBusy}>
                         Sign in
                       </Button>
                       <Button variant="ghost" w="full" onClick={() => setAuthMode('signUp')}>
@@ -211,7 +319,7 @@ function AuthJourney() {
                     </Stack>
 
                     <ModalFooter px={0} pb={0} mt={6} display="flex" flexDirection="column" gap={3}>
-                      <Button type="submit" colorScheme="teal" w="full">
+                      <Button type="submit" colorScheme="teal" w="full" isLoading={signUpBusy} isDisabled={signUpBusy}>
                         Create account
                       </Button>
                       <Button variant="ghost" w="full" onClick={() => setAuthMode('signIn')}>
