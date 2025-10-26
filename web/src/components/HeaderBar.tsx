@@ -36,7 +36,7 @@ function HeaderBar({ activeTab, actions }: HeaderBarProps) {
       <Flex direction="column" gap={{ base: 3, md: 4 }}>
         <Flex direction={{ base: 'column', md: 'row' }} align={{ base: 'flex-start', md: 'center' }} gap={{ base: 2, md: 3 }}>
           <Heading size={{ base: 'sm', md: 'md' }} letterSpacing="wide" color={headingColor}>
-            Santorini AlphaZero
+          Ascent, Competitive Santorini.
           </Heading>
           <Spacer display={{ base: 'none', md: 'block' }} />
           <HStack spacing={2} align="center" w={{ base: '100%', md: 'auto' }} justify={{ base: 'flex-end', md: 'flex-end' }}>

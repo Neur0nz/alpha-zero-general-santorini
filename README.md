@@ -1,4 +1,4 @@
-# 🏛️ Santorini AlphaZero Web Demo
+# 🏛️ Ascent Web Demo
 
 The Santorini client now runs on a modern [Vite](https://vitejs.dev/) +
 [React](https://react.dev/) stack with [Chakra UI](https://chakra-ui.com/) for
