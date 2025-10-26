@@ -133,7 +133,10 @@ class MCTS():
             # else:
             #     Ps, v = self.nnet.predict_client(canonicalBoard, Vs, self.batch_info)
             import js
-            nn_result = await js.predict(canonicalBoard.flat[:], Vs.flat[:])
+            # Convert numpy arrays to JavaScript arrays to avoid proxy destruction
+            canonical_board_js = canonicalBoard.flatten().tolist()
+            vs_js = Vs.flatten().tolist()
+            nn_result = await js.predict(canonical_board_js, vs_js)
             nn_result_py = nn_result.to_py()
             Ps, v = np.exp(np.array(nn_result_py['pi'], dtype=np.float32)), np.array(nn_result_py['v'], dtype=np.float32)
 

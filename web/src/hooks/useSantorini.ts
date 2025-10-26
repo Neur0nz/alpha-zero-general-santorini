@@ -97,43 +97,75 @@ export function useSantorini() {
     if (!window.ort) {
       throw new Error('ONNX runtime not available');
     }
-    const session = await window.ort.InferenceSession.create(MODEL_FILENAME);
-    (window as any).onnxSession = session;
-    (window as any).predict = async (canonicalBoard: any, valids: any) => {
-      const boardArray = Array.from(canonicalBoard) as number[];
-      const validsArray = Array.from(valids) as number[];
-      const tensorBoard = new window.ort.Tensor('float32', Float32Array.from(boardArray), SIZE_CB);
-      const tensorValid = new window.ort.Tensor('bool', Uint8Array.from(validsArray), [ONNX_OUTPUT_SIZE]);
-      const results = await session.run({
-        board: tensorBoard,
-        valid_actions: tensorValid,
-      });
-      return {
-        pi: Array.from(results.pi.data),
-        v: Array.from(results.v.data),
+    try {
+      const session = await window.ort.InferenceSession.create(MODEL_FILENAME);
+      (window as any).onnxSession = session;
+      (window as any).predict = async (canonicalBoard: any, valids: any) => {
+        const boardArray = Array.from(canonicalBoard) as number[];
+        const validsArray = Array.from(valids) as number[];
+        console.log('Tensor shapes:', {
+          boardArray: boardArray.length,
+          validsArray: validsArray.length,
+          sizeCB: SIZE_CB,
+          sizeValid: [1, ONNX_OUTPUT_SIZE]
+        });
+        const tensorBoard = new window.ort.Tensor('float32', Float32Array.from(boardArray), SIZE_CB);
+        const tensorValid = new window.ort.Tensor('bool', new Uint8Array(validsArray), [1, ONNX_OUTPUT_SIZE]);
+        const results = await session.run({
+          board: tensorBoard,
+          valid_actions: tensorValid,
+        });
+        return {
+          pi: Array.from(results.pi.data),
+          v: Array.from(results.v.data),
+        };
       };
-    };
+    } catch (error) {
+      console.error('Failed to initialize ONNX session:', error);
+      throw error;
+    }
   }, []);
 
   const loadPyodideRuntime = useCallback(async () => {
-    const pyodideUrl = import.meta.env.VITE_PYODIDE_URL as string;
-    const onnxUrl = import.meta.env.VITE_ONNX_URL as string;
-    await Promise.all([loadScript(pyodideUrl), loadScript(onnxUrl)]);
-    if (!window.loadPyodide) {
-      throw new Error('Pyodide runtime missing');
+    try {
+      const pyodideUrl = import.meta.env.VITE_PYODIDE_URL as string;
+      const onnxUrl = import.meta.env.VITE_ONNX_URL as string;
+      
+      
+      if (!pyodideUrl || !onnxUrl) {
+        throw new Error('Missing required environment variables: VITE_PYODIDE_URL and VITE_ONNX_URL');
+      }
+      
+      await Promise.all([loadScript(pyodideUrl), loadScript(onnxUrl)]);
+      
+      // Wait a bit for the script to initialize
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      if (!window.loadPyodide) {
+        throw new Error('Pyodide runtime missing - failed to load Pyodide script');
+      }
+      
+      const pyodide = await window.loadPyodide({ fullStdLib: false });
+      await pyodide.loadPackage('numpy');
+      
+      for (const [input, output] of PY_FILES) {
+        const response = await fetch(input);
+        if (!response.ok) {
+          throw new Error(`Failed to load Python file: ${input}`);
+        }
+        const data = await response.arrayBuffer();
+        pyodide.FS.writeFile(output, new Uint8Array(data));
+      }
+      
+      const game = new Santorini();
+      game.setBackend(pyodide);
+      gameRef.current = game;
+      selectorRef.current = new MoveSelector(game);
+      await initOnnxSession();
+    } catch (error) {
+      console.error('Failed to load Pyodide runtime:', error);
+      throw error;
     }
-    const pyodide = await window.loadPyodide({ fullStdLib: false });
-    await pyodide.loadPackage('numpy');
-    for (const [input, output] of PY_FILES) {
-      const response = await fetch(input);
-      const data = await response.arrayBuffer();
-      pyodide.FS.writeFile(output, new Uint8Array(data));
-    }
-    const game = new Santorini();
-    game.setBackend(pyodide);
-    gameRef.current = game;
-    selectorRef.current = new MoveSelector(game);
-    await initOnnxSession();
   }, [initOnnxSession]);
 
   const readBoard = useCallback(() => {
@@ -206,21 +238,30 @@ export function useSantorini() {
   const refreshEvaluation = useCallback(async () => {
     const game = gameRef.current;
     if (!game || !game.py) return;
-    if (game.py.calculate_eval_for_current_position) {
-      const resultProxy = await game.py.calculate_eval_for_current_position();
-      const result = Array.isArray(resultProxy)
-        ? resultProxy
-        : resultProxy.toJs({ create_proxies: false });
-      if (Array.isArray(result) && result.length >= 2) {
-        const value = Number(result[0]);
-        const label = value >= 0 ? `+${value.toFixed(3)}` : value.toFixed(3);
-        const advantage = value > 0 ? 'Player 0 ahead' : value < 0 ? 'Player 1 ahead' : 'Balanced';
-        setEvaluation({ value, label, advantage });
+    
+    try {
+      if (game.py.calculate_eval_for_current_position) {
+        const resultProxy = await game.py.calculate_eval_for_current_position();
+        const result = Array.isArray(resultProxy)
+          ? resultProxy
+          : resultProxy.toJs({ create_proxies: false });
+        if (Array.isArray(result) && result.length >= 2) {
+          const value = Number(result[0]);
+          const label = value >= 0 ? `+${value.toFixed(3)}` : value.toFixed(3);
+          const advantage = value > 0 ? 'Player 0 ahead' : value < 0 ? 'Player 1 ahead' : 'Balanced';
+          setEvaluation({ value, label, advantage });
+        }
       }
-    }
-    if (game.py.list_current_moves) {
-      const moves = game.py.list_current_moves(10).toJs({ create_proxies: false }) as TopMove[];
-      setTopMoves(moves ?? []);
+      if (game.py.list_current_moves) {
+        const movesProxy = game.py.list_current_moves(10);
+        const moves = movesProxy.toJs({ create_proxies: false }) as TopMove[];
+        setTopMoves(moves ?? []);
+      }
+    } catch (error) {
+      console.error('Failed to refresh evaluation:', error);
+      // Set default evaluation on error
+      setEvaluation({ value: 0, advantage: 'Error', label: '0.00' });
+      setTopMoves([]);
     }
   }, []);
 
@@ -232,6 +273,9 @@ export function useSantorini() {
       const resultProxy = await game.py.list_current_moves_with_adv(6, calcDepthOverride ?? undefined);
       const result = resultProxy.toJs({ create_proxies: false }) as TopMove[];
       setTopMoves(result ?? []);
+    } catch (error) {
+      console.error('Failed to calculate options:', error);
+      setTopMoves([]);
     } finally {
       setCalcOptionsBusy(false);
     }
