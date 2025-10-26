@@ -258,6 +258,32 @@ def jump_to_move_index(move_index):
         # Don't truncate history - just set the current state
         # This allows the modal to remain populated
 
+                # Store removed states for redo support, oldest first
+                future_history = removed_states[::-1] + future_history
+
+                removed_actions = [int(state[2]) for state in removed_states]
+
+        end = g.getGameEnded(board, player)
+        valids = g.getValidMoves(board, player)
+        return player, end, valids
+
+def jump_to_move_index(move_index):
+        """Jump to a specific move index in the history (0-based)"""
+        global g, board, mcts, player, history, future_history
+        if move_index < 0 or move_index >= len(history):
+                print(f'Invalid move index: {move_index}, history length: {len(history)}')
+                return None
+
+        # Get the state at the specified index
+        state = history[move_index]
+        player, board = state[0], state[1]
+
+        # Clear redo information when jumping arbitrarily in history
+        future_history = []
+
+        # Don't truncate history - just set the current state
+        # This allows the modal to remain populated
+
         print(f'Jumped to move {move_index}: player={player}')
 
         end = g.getGameEnded(board, player)
