@@ -69,43 +69,32 @@ async function ensureProfile(client: SupabaseClient, user: User): Promise<Player
 
 export function useSupabaseAuth() {
   const [state, setState] = useState<AuthState>(DEFAULT_STATE);
-  const isMounted = useRef(true);
   const isConfigured = Boolean(supabase);
-
-  useEffect(() => () => {
-    isMounted.current = false;
-  }, []);
 
   const loadSessionProfile = useCallback(async (session: Session | null) => {
     const client = supabase;
     if (!client) {
-      if (!isMounted.current) return;
       setState({ session: null, profile: null, loading: false, error: 'Supabase is not configured.' });
       return;
     }
 
     if (!session) {
-      if (!isMounted.current) return;
       setState({ session: null, profile: null, loading: false, error: null });
       return;
     }
 
-    if (isMounted.current) {
-      setState((prev) => ({
-        ...prev,
-        session,
-        loading: prev.profile?.auth_user_id !== session.user.id,
-        error: null,
-      }));
-    }
+    setState((prev) => ({
+      ...prev,
+      session,
+      loading: prev.profile?.auth_user_id !== session.user.id,
+      error: null,
+    }));
 
     try {
       const profile = await ensureProfile(client, session.user);
-      if (!isMounted.current) return;
       setState({ session, profile, loading: false, error: null });
     } catch (profileError) {
       console.error('Failed to load player profile', profileError);
-      if (!isMounted.current) return;
       setState({ session, profile: null, loading: false, error: 'Failed to load player profile. Please try again.' });
     }
   }, []);
@@ -118,18 +107,23 @@ export function useSupabaseAuth() {
     }
 
     const init = async () => {
-      const {
-        data: { session },
-        error,
-      } = await client.auth.getSession();
+      try {
+        const {
+          data: { session },
+          error,
+        } = await client.auth.getSession();
 
-      if (error) {
-        console.error('Failed to load Supabase session', error);
-        setState({ session: null, profile: null, loading: false, error: 'Unable to load authentication session. Please refresh and try again.' });
-        return;
+        if (error) {
+          console.error('Failed to load Supabase session', error);
+          setState({ session: null, profile: null, loading: false, error: 'Unable to load authentication session. Please refresh and try again.' });
+          return;
+        }
+
+        await loadSessionProfile(session);
+      } catch (err) {
+        console.error('Failed to initialize authentication', err);
+        setState({ session: null, profile: null, loading: false, error: 'Failed to initialize authentication.' });
       }
-
-      await loadSessionProfile(session);
     };
 
     init();
@@ -141,7 +135,7 @@ export function useSupabaseAuth() {
     return () => {
       listener.subscription.unsubscribe();
     };
-  }, [loadSessionProfile]);
+  }, []); // Remove loadSessionProfile from dependencies to prevent re-initialization
 
   const refreshProfile = useCallback(async () => {
     const client = supabase;
