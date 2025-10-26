@@ -11,6 +11,7 @@ This project uses Supabase for authentication, lobby management, and storing fin
 1. Go to **Authentication → Providers** and ensure **Email** is enabled.
 2. In the **Email** section, keep the default *Magic Link* sign-in mode (the app only requests magic links).
 3. Set **Site URL** under **Authentication → URL configuration** to your local dev URL (e.g. `http://localhost:5173`). Supabase will redirect users here after they click the magic link.
+4. *(Optional)* Enable Google sign-in by following the step-by-step instructions in `SUPABASE_GOOGLE_AUTH.md`. The frontend already includes a Google button once the provider is configured.
 
 ## 3. Apply the database schema
 1. Open **Database → SQL Editor**.

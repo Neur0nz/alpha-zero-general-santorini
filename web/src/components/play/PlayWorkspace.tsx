@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   AlertDescription,
@@ -16,6 +16,8 @@ import {
   Flex,
   FormControl,
   FormLabel,
+  FormErrorMessage,
+  FormHelperText,
   Grid,
   GridItem,
   Heading,
@@ -41,6 +43,7 @@ import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
 import GameBoard from '@components/GameBoard';
 import EvaluationPanel from '@components/EvaluationPanel';
 import type { SantoriniMoveAction } from '@/types/match';
+import { generateDisplayName, validateDisplayName } from '@/utils/generateDisplayName';
 
 function formatDate(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -464,14 +467,45 @@ function ActiveMatchPanel({
 type AuthState = ReturnType<typeof useSupabaseAuth>;
 
 function AuthGate({ auth }: { auth: AuthState }) {
-  const { profile, loading, error, requestMagicLink, signOut } = auth;
+  const {
+    profile,
+    session,
+    loading,
+    error,
+    isConfigured,
+    signInWithMagicLink,
+    signInWithGoogle,
+    signOut,
+    updateDisplayName,
+    refreshProfile,
+  } = auth;
   const [email, setEmail] = useState('');
-  const [sent, setSent] = useBoolean();
+  const [sent, setSent] = useBoolean(false);
+  const [savingName, setSavingName] = useBoolean(false);
+  const [retrying, setRetrying] = useBoolean(false);
+  const [displayNameValue, setDisplayNameValue] = useState('');
+  const [nameError, setNameError] = useState<string | null>(null);
   const toast = useToast();
+
+  useEffect(() => {
+    if (profile) {
+      setDisplayNameValue(profile.display_name);
+      setNameError(null);
+    } else {
+      setDisplayNameValue('');
+      setNameError(null);
+    }
+  }, [profile]);
 
   const handleRequestLink = async () => {
     try {
-      await requestMagicLink(email);
+      const trimmedEmail = email.trim();
+      if (!trimmedEmail) {
+        setEmail('');
+        return;
+      }
+      await signInWithMagicLink(trimmedEmail);
+      setEmail(trimmedEmail);
       setSent.on();
       toast({ title: 'Check your email', description: 'Click the magic link to return here.', status: 'success' });
     } catch (linkError) {
@@ -479,6 +513,75 @@ function AuthGate({ auth }: { auth: AuthState }) {
         title: 'Sign-in failed',
         status: 'error',
         description: linkError instanceof Error ? linkError.message : 'Unable to send magic link.',
+      });
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+      toast({ title: 'Redirecting to Google', status: 'info' });
+    } catch (oauthError) {
+      toast({
+        title: 'Google sign-in failed',
+        status: 'error',
+        description: oauthError instanceof Error ? oauthError.message : 'Unable to start Google sign-in.',
+      });
+    }
+  };
+
+  const handleGenerateName = () => {
+    const suggestion = generateDisplayName(session?.user.email ?? profile?.display_name);
+    setDisplayNameValue(suggestion);
+    setNameError(null);
+  };
+
+  const handleSaveName = async () => {
+    const validationError = validateDisplayName(displayNameValue);
+    if (validationError) {
+      setNameError(validationError);
+      return;
+    }
+
+    setSavingName.on();
+    try {
+      await updateDisplayName(displayNameValue);
+      toast({ title: 'Display name updated', status: 'success' });
+    } catch (updateError) {
+      const message = updateError instanceof Error ? updateError.message : 'Unable to update display name.';
+      setNameError(message);
+      toast({ title: 'Update failed', status: 'error', description: message });
+    } finally {
+      setSavingName.off();
+    }
+  };
+
+  const handleRetry = async () => {
+    setRetrying.on();
+    try {
+      await refreshProfile();
+    } catch (retryError) {
+      toast({
+        title: 'Unable to refresh',
+        status: 'error',
+        description: retryError instanceof Error ? retryError.message : 'Please try again later.',
+      });
+    } finally {
+      setRetrying.off();
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      setEmail('');
+      setSent.off();
+      toast({ title: 'Signed out', status: 'info' });
+    } catch (signOutError) {
+      toast({
+        title: 'Sign-out failed',
+        status: 'error',
+        description: signOutError instanceof Error ? signOutError.message : 'Unable to sign out right now.',
       });
     }
   };
@@ -491,12 +594,39 @@ function AuthGate({ auth }: { auth: AuthState }) {
     );
   }
 
-  if (error) {
+  if (!isConfigured) {
     return (
       <Alert status="warning" borderRadius="md">
         <AlertIcon />
-        <AlertTitle mr={2}>Supabase not configured</AlertTitle>
-        <AlertDescription>{error}</AlertDescription>
+        <Box>
+          <AlertTitle>Supabase not configured</AlertTitle>
+          <AlertDescription>
+            Online play and authentication are disabled. Follow SUPABASE_SETUP.md to configure Supabase before signing
+            in.
+          </AlertDescription>
+        </Box>
+      </Alert>
+    );
+  }
+
+  if (error) {
+    return (
+      <Alert status="error" borderRadius="md" alignItems="flex-start">
+        <AlertIcon />
+        <Box flex="1">
+          <AlertTitle>Authentication issue</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+          <Stack direction={{ base: 'column', sm: 'row' }} spacing={3} mt={4}>
+            <Button size="sm" colorScheme="teal" onClick={handleRetry} isLoading={retrying}>
+              Try again
+            </Button>
+            {session && (
+              <Button size="sm" variant="outline" onClick={handleSignOut}>
+                Sign out
+              </Button>
+            )}
+          </Stack>
+        </Box>
       </Alert>
     );
   }
@@ -507,44 +637,102 @@ function AuthGate({ auth }: { auth: AuthState }) {
         <CardHeader>
           <Heading size="md">Sign in to play</Heading>
         </CardHeader>
-        <CardBody as={Stack} spacing={4}>
+        <CardBody as={Stack} spacing={5}>
           <Text color="whiteAlpha.800">
-            Enter your email to receive a magic link. Supabase Auth keeps your rating and match history in sync.
+            Keep your rating, match history, and preferences synced across devices by signing in.
           </Text>
-          <Input
-            type="email"
-            placeholder="you@example.com"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-          <Button colorScheme="teal" onClick={handleRequestLink} isDisabled={!email}>
-            Send magic link
-          </Button>
-          {sent && (
-            <Alert status="success" borderRadius="md">
-              <AlertIcon />
-              <AlertDescription>Magic link sent! Check your inbox and return once authenticated.</AlertDescription>
-            </Alert>
-          )}
+          <Stack spacing={3}>
+            <FormControl>
+              <FormLabel>Email address</FormLabel>
+              <Input
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </FormControl>
+            <Button colorScheme="teal" onClick={handleRequestLink} isDisabled={!email.trim()}>
+              Send magic link
+            </Button>
+            {sent && (
+              <Alert status="success" borderRadius="md">
+                <AlertIcon />
+                <AlertDescription>Magic link sent! Check your inbox and return once authenticated.</AlertDescription>
+              </Alert>
+            )}
+          </Stack>
+          <Divider borderColor="whiteAlpha.300" />
+          <Stack spacing={3}>
+            <Text fontSize="sm" color="whiteAlpha.700">
+              Prefer using Google instead?
+            </Text>
+            <Button variant="outline" onClick={handleGoogleSignIn}>
+              Continue with Google
+            </Button>
+          </Stack>
         </CardBody>
       </Card>
     );
   }
 
+  const displayNameChanged = Boolean(profile && displayNameValue.trim() !== profile.display_name);
+
   return (
     <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200" w="100%">
-      <CardBody>
-        <Flex justify="space-between" align="center">
+      <CardBody as={Stack} spacing={5}>
+        <Flex
+          justify="space-between"
+          align={{ base: 'stretch', md: 'center' }}
+          direction={{ base: 'column', md: 'row' }}
+          gap={{ base: 4, md: 0 }}
+        >
           <Box>
             <Heading size="sm">Signed in as {profile.display_name}</Heading>
+            <Text fontSize="sm" color="whiteAlpha.700">
+              {session?.user.email ? `Email: ${session.user.email}` : 'Magic link sign-in'}
+            </Text>
             <Text fontSize="sm" color="whiteAlpha.700">
               Rating: {profile.rating} · Games played: {profile.games_played}
             </Text>
           </Box>
-          <Button variant="outline" size="sm" onClick={signOut}>
+          <Button variant="outline" size="sm" alignSelf={{ base: 'flex-start', md: 'auto' }} onClick={handleSignOut}>
             Sign out
           </Button>
         </Flex>
+        <Stack spacing={3}>
+          <FormControl isInvalid={Boolean(nameError)}>
+            <FormLabel>Display name</FormLabel>
+            <Input
+              value={displayNameValue}
+              onChange={(event) => {
+                const next = event.target.value;
+                setDisplayNameValue(next);
+                setNameError(validateDisplayName(next));
+              }}
+              placeholder="Choose how other players see you"
+            />
+            {nameError ? (
+              <FormErrorMessage>{nameError}</FormErrorMessage>
+            ) : (
+              <FormHelperText color="whiteAlpha.700">
+                Your public username. Shareable across matches.
+              </FormHelperText>
+            )}
+          </FormControl>
+          <HStack spacing={3} align="flex-start">
+            <Button
+              colorScheme="teal"
+              onClick={handleSaveName}
+              isDisabled={!displayNameChanged}
+              isLoading={savingName}
+            >
+              Save
+            </Button>
+            <Button variant="outline" onClick={handleGenerateName} isDisabled={savingName}>
+              Generate suggestion
+            </Button>
+          </HStack>
+        </Stack>
       </CardBody>
     </Card>
   );
