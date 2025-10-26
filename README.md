@@ -18,6 +18,24 @@ so once the assets are cached you can continue playing offline.
 > ℹ️ The first run downloads Pyodide, ONNX Runtime Web and the Santorini model,
 > so expect a 15–20s warm up.
 
+## 🔐 Enabling online play with Supabase
+
+The Practice tab works out of the box, but the Play and Analyze workspaces rely
+on Supabase for authentication, lobby management, and match storage. If you
+haven't connected a Supabase project yet, follow the step-by-step guide in
+[`SUPABASE_SETUP.md`](SUPABASE_SETUP.md). It covers:
+
+- creating the project and enabling email magic-link sign-in,
+- applying the `players`, `matches`, and `match_moves` schema,
+- adding Row Level Security policies so only participants can modify a match,
+- enabling Realtime for lobby updates (via the Replication UI **or** SQL `alter publication` commands if the UI is unavailable), and
+- configuring the required `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`
+  environment variables (see `web/.env.example`).
+
+Once Supabase is configured, open the Play tab and submit your email address to
+receive a magic link. Signing in automatically creates your player profile and
+unlocks match creation, lobby browsing, and online play.
+
 ### Preparing the neural-network model
 
 The AlphaZero evaluator is loaded from `web/public/santorini/model_no_god.onnx`.
