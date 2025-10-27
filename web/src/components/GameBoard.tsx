@@ -24,6 +24,9 @@ interface GameBoardProps {
   buttons: ButtonsState;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
+  undoLabel?: string;
+  hideRedoButton?: boolean;
+  undoDisabledOverride?: boolean;
 }
 
 function GameBoard({
@@ -35,6 +38,9 @@ function GameBoard({
   buttons,
   undo,
   redo,
+  undoLabel,
+  hideRedoButton,
+  undoDisabledOverride,
 }: GameBoardProps) {
   const cellBg = useColorModeValue('gray.50', 'gray.700');
   const selectableBg = useColorModeValue('teal.100', 'teal.700');
@@ -205,24 +211,26 @@ function GameBoard({
           size="lg"
           py={{ base: 5, sm: 6 }}
           onClick={undo}
-          isDisabled={!buttons.canUndo}
+          isDisabled={undoDisabledOverride ?? !buttons.canUndo}
           colorScheme="blue"
           boxShadow="lg"
         >
-          Undo
+          {undoLabel ?? 'Undo'}
         </Button>
-        <Button
-          flex="1"
-          w={{ base: '100%', sm: 'auto' }}
-          size="lg"
-          py={{ base: 5, sm: 6 }}
-          onClick={redo}
-          isDisabled={!buttons.canRedo}
-          colorScheme="purple"
-          boxShadow="lg"
-        >
-          Redo
-        </Button>
+        {!hideRedoButton && (
+          <Button
+            flex="1"
+            w={{ base: '100%', sm: 'auto' }}
+            size="lg"
+            py={{ base: 5, sm: 6 }}
+            onClick={redo}
+            isDisabled={!buttons.canRedo}
+            colorScheme="purple"
+            boxShadow="lg"
+          >
+            Redo
+          </Button>
+        )}
       </Flex>
       <Box
         px={4}
