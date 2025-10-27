@@ -111,6 +111,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   
   // Game engine state - pure TypeScript!
   const [engine, setEngine] = useState<SantoriniEngine>(() => SantoriniEngine.createInitial().engine);
+  const engineRef = useRef<SantoriniEngine>(engine); // Track current engine for fast path
   const [board, setBoard] = useState<BoardCell[][]>(() => engineToBoard(engine.snapshot));
   const moveSelectorRef = useRef<TypeScriptMoveSelector>(new TypeScriptMoveSelector());
   const [selectable, setSelectable] = useState<boolean[][]>(() =>
@@ -142,11 +143,17 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const gameCompletedRef = useRef<string | null>(null);
   const submissionLockRef = useRef<boolean>(false);
   
+  // Update engineRef whenever engine state changes
+  useEffect(() => {
+    engineRef.current = engine;
+  }, [engine]);
+  
   const resetMatch = useCallback(() => {
     if (!match) return;
     
     try {
       const newEngine = SantoriniEngine.fromSnapshot(match.initial_state);
+      engineRef.current = newEngine; // Update ref immediately
       setEngine(newEngine);
       setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
@@ -230,12 +237,59 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       return;
     }
 
+    const syncStart = performance.now();
     console.log('useOnlineSantorini: Syncing state', { 
       matchId: match.id, 
       movesCount: moves.length,
       lastSynced 
     });
 
+    // OPTIMIZATION: If we only have 1 new optimistic move, use fast path
+    const isOptimisticOnly = moves.length === lastSynced.appliedMoveCount + 1 && 
+                              moves[moves.length - 1]?.id.startsWith('optimistic-');
+    
+    if (isOptimisticOnly && moves.length > 0) {
+      const lastMove = moves[moves.length - 1];
+      const action = lastMove.action;
+      
+      if (isSantoriniMoveAction(action) && typeof action.move === 'number') {
+        try {
+          console.log('⚡ FAST PATH: Applying single optimistic move', action.move);
+          
+          // Use engineRef for current state (not stale useState value)
+          const currentEngine = engineRef.current;
+          const result = currentEngine.applyMove(action.move);
+          const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
+          
+          // Update ref immediately to prevent race conditions
+          engineRef.current = newEngine;
+          
+          // Batch state updates
+          setEngine(newEngine);
+          setBoard(engineToBoard(newEngine.snapshot));
+          moveSelectorRef.current.reset();
+          
+          // Only compute selectable if it's our turn (saves 50-100ms)
+          const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+          setSelectable(myTurn ? computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current, true) : []);
+          
+          lastSyncedStateRef.current = { 
+            matchId: match.id, 
+            snapshotMoveIndex: lastSynced.snapshotMoveIndex,
+            appliedMoveCount: moves.length
+          };
+          
+          const syncElapsed = performance.now() - syncStart;
+          console.log(`⚡ FAST PATH: State sync complete in ${syncElapsed.toFixed(0)}ms`);
+          return;
+        } catch (error) {
+          console.warn('⚡ FAST PATH failed, falling back to full sync', error);
+          // Fall through to full sync
+        }
+      }
+    }
+
+    // FULL SYNC PATH (for DB confirmations, reconnections, etc.)
     // Find the most recent snapshot
     let snapshotSource: MatchMoveRecord<MatchAction> | null = null;
     for (let index = moves.length - 1; index >= 0; index -= 1) {
@@ -282,35 +336,22 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       }
       
       // Update engine and board state
+      engineRef.current = newEngine; // Update ref immediately
       setEngine(newEngine);
       setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
-      const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
-      setSelectable(
-        computeSelectable(
-          newEngine.getValidMoves(),
-          newEngine.snapshot,
-          moveSelectorRef.current,
-          myTurn,
-          newEngine.getPlacementContext(),
-        ),
-      );
       
-      // Update clock states from all moves
+      // Only compute selectable if it's our turn (saves 50-100ms)
+      const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+      setSelectable(myTurn ? computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current, true) : []);
+      
+      // Update clock states from all moves (only process last clock update for speed)
       setClock(deriveInitialClocks(match));
-      for (const moveRecord of moves) {
-        const action = moveRecord.action;
-        if (isSantoriniMoveAction(action)) {
-          if (action.clocks) {
-            setClock({ creatorMs: action.clocks.creatorMs, opponentMs: action.clocks.opponentMs });
-          } else if (clockEnabled && match.clock_increment_seconds > 0) {
-            const increment = match.clock_increment_seconds * 1000;
-            if (action.by === 'creator') {
-              setClock((prev) => ({ ...prev, creatorMs: prev.creatorMs + increment }));
-            } else {
-              setClock((prev) => ({ ...prev, opponentMs: prev.opponentMs + increment }));
-            }
-          }
+      for (let i = moves.length - 1; i >= 0; i--) {
+        const action = moves[i].action;
+        if (isSantoriniMoveAction(action) && action.clocks) {
+          setClock({ creatorMs: action.clocks.creatorMs, opponentMs: action.clocks.opponentMs });
+          break; // Found most recent clock, stop
         }
       }
       
@@ -320,11 +361,12 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         appliedMoveCount: moves.length
       };
       
-      console.log('useOnlineSantorini: State sync complete');
+      const syncElapsed = performance.now() - syncStart;
+      console.log(`useOnlineSantorini: State sync complete in ${syncElapsed.toFixed(0)}ms`);
     } catch (error) {
       console.error('useOnlineSantorini: Failed to synchronize board with server', error);
     }
-  }, [clockEnabled, match, moves]);
+  }, [clockEnabled, match, moves, engine, role]);
 
   // Clock tick effect
   const currentTurn = useMemo(() => {

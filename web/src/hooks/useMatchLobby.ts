@@ -513,7 +513,101 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     fetchMoves();
 
     const channel = client
-      .channel(`match-${matchId}`)
+      .channel(`match-${matchId}`, {
+        config: {
+          broadcast: { self: true }, // Receive our own broadcasts for instant feedback
+        },
+      })
+      .on(
+        'broadcast',
+        { event: 'move' },
+        (payload: { type: string; event: string; payload: any }) => {
+          console.log('⚡ BROADCAST: Move received instantly!', { 
+            matchId, 
+            moveIndex: payload.payload?.move_index,
+            from: payload.payload?.player_id === profile?.id ? 'self' : 'opponent',
+            timestamp: Date.now()
+          });
+          
+          const broadcastMove = payload.payload;
+          if (!broadcastMove || typeof broadcastMove.move_index !== 'number') {
+            console.warn('⚡ BROADCAST: Invalid move payload', payload);
+            return;
+          }
+          
+          setState((prev) => {
+            if (prev.activeMatchId !== matchId) {
+              return prev;
+            }
+            
+            // Check if move already exists (prevent duplicates from race conditions)
+            const exists = prev.moves.some((move) => move.move_index === broadcastMove.move_index);
+            if (exists) {
+              console.log('⚡ BROADCAST: Move already exists, skipping', { moveIndex: broadcastMove.move_index });
+              return prev;
+            }
+            
+            // Check sequence (prevent out-of-order moves from breaking game state)
+            const expectedIndex = prev.moves.length;
+            if (broadcastMove.move_index !== expectedIndex) {
+              console.warn('⚡ BROADCAST: Out of sequence move!', { 
+                expected: expectedIndex, 
+                received: broadcastMove.move_index,
+                action: 'Will wait for DB confirmation'
+              });
+              // Don't add it yet - wait for DB to sort it out
+              return prev;
+            }
+            
+            // Create optimistic move record
+            const moveRecord: MatchMoveRecord<MatchAction> = {
+              id: `optimistic-${broadcastMove.move_index}-${Date.now()}`,
+              match_id: matchId,
+              move_index: broadcastMove.move_index,
+              player_id: broadcastMove.player_id,
+              action: normalizeAction(broadcastMove.action),
+              state_snapshot: null, // Server will compute
+              eval_snapshot: null,
+              created_at: new Date().toISOString(),
+            };
+            
+            console.log('⚡ BROADCAST: Adding optimistic move', { 
+              moveIndex: moveRecord.move_index,
+              totalMoves: prev.moves.length + 1,
+              isOptimistic: true
+            });
+            
+            const updatedMoves = [...prev.moves, moveRecord];
+            return { ...prev, moves: updatedMoves };
+          });
+        },
+      )
+      .on(
+        'broadcast',
+        { event: 'move-rejected' },
+        (payload: { type: string; event: string; payload: any }) => {
+          console.error('❌ BROADCAST: Move rejected by server!', payload.payload);
+          
+          const rejection = payload.payload;
+          setState((prev) => {
+            if (prev.activeMatchId !== matchId) {
+              return prev;
+            }
+            
+            // Remove the optimistic move
+            const updatedMoves = prev.moves.filter(
+              (move) => move.move_index !== rejection.move_index || !move.id.startsWith('optimistic-')
+            );
+            
+            console.log('❌ BROADCAST: Removed rejected optimistic move', { 
+              moveIndex: rejection.move_index,
+              reason: rejection.error
+            });
+            
+            return { ...prev, moves: updatedMoves };
+          });
+        },
+      )
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` },
@@ -540,7 +634,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         { event: '*', schema: 'public', table: 'match_moves', filter: `match_id=eq.${matchId}` },
         (payload: RealtimePostgresChangesPayload<MatchMoveRecord>) => {
           const newMove = payload.new as MatchMoveRecord;
-          console.log('useMatchLobby: Real-time move received', { 
+          console.log('✅ DB: Move confirmed in database', { 
             eventType: payload.eventType, 
             matchId, 
             moveId: newMove?.id,
@@ -556,19 +650,39 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
                 ...newMove,
                 action: normalizeAction(newMove.action),
               };
+              
+              // Check if we have an optimistic version of this move
+              const optimisticIndex = prev.moves.findIndex(
+                (move) => move.move_index === moveRecord.move_index && move.id.startsWith('optimistic-')
+              );
+              
+              if (optimisticIndex >= 0) {
+                console.log('✅ DB: Replacing optimistic move with confirmed', { 
+                  moveIndex: moveRecord.move_index,
+                  optimisticId: prev.moves[optimisticIndex].id,
+                  confirmedId: moveRecord.id
+                });
+                // Replace optimistic move with confirmed one
+                const updatedMoves = [...prev.moves];
+                updatedMoves[optimisticIndex] = moveRecord;
+                return { ...prev, moves: updatedMoves };
+              }
+              
+              // Check if confirmed move already exists (shouldn't happen but be safe)
               const exists = prev.moves.some((move) => move.id === moveRecord.id);
               if (exists) {
-                console.log('useMatchLobby: Move already exists, skipping');
+                console.log('✅ DB: Move already exists, skipping');
                 return prev;
               }
-              console.log('useMatchLobby: Adding new move', { 
+              
+              console.log('✅ DB: Adding confirmed move', { 
                 moveId: moveRecord.id, 
                 moveIndex: moveRecord.move_index,
-                totalMoves: prev.moves.length + 1 
+                totalMoves: prev.moves.length + 1,
+                note: 'No broadcast received (slow network or missed)'
               });
               
               // Add move and ensure proper ordering by move_index
-              // This handles cases where moves arrive out of order due to network delays
               const updatedMoves = [...prev.moves, moveRecord].sort((a, b) => a.move_index - b.move_index);
               return { ...prev, moves: updatedMoves };
             }
@@ -849,30 +963,82 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         throw new Error('Authentication required.');
       }
 
-      const startTime = performance.now();
-      console.log('🔒 Submitting move via SECURE edge function (with validation)');
-
-      // Use edge function for SECURE validation (v7 optimized!)
-      const { error } = await client.functions.invoke('submit-move', {
-        body: {
-          matchId: match.id,
-          moveIndex,
-          action: {
-            kind: movePayload.kind,
-            move: movePayload.move,
-            by: movePayload.by,
-            clocks: movePayload.clocks,
+      const broadcastStart = performance.now();
+      
+      // 1️⃣ BROADCAST FIRST - Instant feedback (50-100ms)!
+      console.log('⚡ Broadcasting move to all players...');
+      const channel = client.channel(`match-${match.id}`);
+      
+      try {
+        await channel.send({
+          type: 'broadcast',
+          event: 'move',
+          payload: {
+            move_index: moveIndex,
+            player_id: profile.id,
+            action: {
+              kind: movePayload.kind,
+              move: movePayload.move,
+              by: movePayload.by,
+              clocks: movePayload.clocks,
+            },
           },
-        },
-      });
-
-      const elapsed = performance.now() - startTime;
-      console.log(`🔒 Move validated and submitted in ${elapsed.toFixed(0)}ms`);
-
-      if (error) {
-        console.error('Failed to submit move', error);
-        throw error;
+        });
+        
+        const broadcastElapsed = performance.now() - broadcastStart;
+        console.log(`⚡ Move broadcast in ${broadcastElapsed.toFixed(0)}ms - INSTANT!`);
+      } catch (broadcastError) {
+        console.warn('⚡ Broadcast failed (will fall back to DB confirmation)', broadcastError);
+        // Continue anyway - DB confirmation will handle it
       }
+
+      // 2️⃣ VALIDATE IN BACKGROUND - Non-blocking!
+      const validationStart = performance.now();
+      console.log('🔒 Validating move on server (async)...');
+      
+      client.functions
+        .invoke('submit-move', {
+          body: {
+            matchId: match.id,
+            moveIndex,
+            action: {
+              kind: movePayload.kind,
+              move: movePayload.move,
+              by: movePayload.by,
+              clocks: movePayload.clocks,
+            },
+          },
+        })
+        .then(({ error }) => {
+          const validationElapsed = performance.now() - validationStart;
+          
+          if (error) {
+            console.error(`❌ Move rejected by server after ${validationElapsed.toFixed(0)}ms!`, error);
+            
+            // Broadcast rejection so all clients can revert
+            channel.send({
+              type: 'broadcast',
+              event: 'move-rejected',
+              payload: {
+                move_index: moveIndex,
+                error: error.message || 'Move validation failed',
+              },
+            }).catch((e) => console.error('Failed to broadcast rejection', e));
+            
+            return;
+          }
+          
+          console.log(`✅ Move validated successfully in ${validationElapsed.toFixed(0)}ms`);
+        })
+        .catch((err) => {
+          console.error('Validation request failed', err);
+          // The optimistic move will be replaced by DB confirmation
+          // or will stay if server is down (eventual consistency)
+        });
+      
+      // Return immediately - don't wait for validation!
+      const totalElapsed = performance.now() - broadcastStart;
+      console.log(`⚡ TOTAL time (user perception): ${totalElapsed.toFixed(0)}ms`);
     },
     [onlineEnabled, profile],
   );

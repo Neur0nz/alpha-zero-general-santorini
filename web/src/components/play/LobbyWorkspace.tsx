@@ -175,10 +175,12 @@ function PublicLobbies({
   matches,
   loading,
   onJoin,
+  onAfterJoin,
 }: {
   matches: LobbyMatch[];
   loading: boolean;
   onJoin: (id: string) => Promise<LobbyMatch>;
+  onAfterJoin?: () => void;
 }) {
   const [joiningId, setJoiningId] = useState<string | null>(null);
   const toast = useToast();
@@ -189,6 +191,7 @@ function PublicLobbies({
     try {
       await onJoin(id);
       toast({ title: 'Joined match', status: 'success' });
+      onAfterJoin?.();
     } catch (error) {
       toast({
         title: 'Failed to join match',
@@ -264,15 +267,22 @@ function PendingMatches({
   profile,
   onSelect,
   onCancel,
+  onAfterSelect,
 }: {
   matches: LobbyMatch[];
   profile: any;
   onSelect: (matchId: string) => void;
   onCancel: (matchId: string) => Promise<void>;
+  onAfterSelect?: () => void;
 }) {
   const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const toast = useToast();
+
+  const handleSelect = (matchId: string) => {
+    onSelect(matchId);
+    onAfterSelect?.();
+  };
 
   const pendingMatches = matches.filter((m) => m.status === 'waiting_for_opponent');
 
@@ -334,7 +344,7 @@ function PendingMatches({
                     </Text>
                   </Stack>
                   <HStack spacing={2}>
-                    <Button size="sm" variant="outline" onClick={() => onSelect(match.id)}>
+                    <Button size="sm" variant="outline" onClick={() => handleSelect(match.id)}>
                       View
                     </Button>
                     <Button
@@ -418,8 +428,8 @@ function SignInPrompt({ auth }: { auth: SupabaseAuthState }) {
   );
 }
 
-function LobbyWorkspace({ auth }: { auth: SupabaseAuthState }) {
-  const lobby = useMatchLobby(auth.profile);
+function LobbyWorkspace({ auth, onNavigateToPlay }: { auth: SupabaseAuthState; onNavigateToPlay: () => void }) {
+  const lobby = useMatchLobby(auth.profile, { autoConnectOnline: true });
   const [joiningCode, setJoiningCode] = useState('');
   const { isOpen: isCreateOpen, onOpen: onCreateOpen, onClose: onCreateClose } = useDisclosure();
   const { isOpen: isJoinOpen, onOpen: onJoinOpen, onClose: onJoinClose } = useDisclosure();
@@ -428,6 +438,8 @@ function LobbyWorkspace({ auth }: { auth: SupabaseAuthState }) {
 
   const handleCreate = async (payload: CreateMatchPayload) => {
     await lobby.createMatch(payload);
+    // Navigate to Play tab after creating match
+    onNavigateToPlay();
   };
 
   const handleJoinByCode = async () => {
@@ -437,6 +449,8 @@ function LobbyWorkspace({ auth }: { auth: SupabaseAuthState }) {
       toast({ title: 'Match joined successfully!', status: 'success' });
       setJoiningCode('');
       onJoinClose();
+      // Navigate to Play tab after joining match
+      onNavigateToPlay();
     } catch (error) {
       toast({
         title: 'Unable to join',
@@ -485,11 +499,12 @@ function LobbyWorkspace({ auth }: { auth: SupabaseAuthState }) {
           profile={auth.profile}
           onSelect={lobby.setActiveMatch}
           onCancel={lobby.leaveMatch}
+          onAfterSelect={onNavigateToPlay}
         />
       )}
 
       {/* Public Lobbies */}
-      <PublicLobbies matches={lobby.matches} loading={lobby.loading} onJoin={lobby.joinMatch} />
+      <PublicLobbies matches={lobby.matches} loading={lobby.loading} onJoin={lobby.joinMatch} onAfterJoin={onNavigateToPlay} />
 
       {/* Match Creation Modal */}
       <MatchCreationModal isOpen={isCreateOpen} onClose={onCreateClose} onCreate={handleCreate} loading={lobby.loading} />

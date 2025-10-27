@@ -218,7 +218,7 @@ function App() {
           <Container maxW="7xl" flex="1" px={{ base: 3, md: 6 }}>
             <TabPanels flex="1">
               <TabPanel px={0}>
-                <LobbyWorkspace auth={auth} />
+                <LobbyWorkspace auth={auth} onNavigateToPlay={() => setActiveTab('play')} />
               </TabPanel>
               <TabPanel px={0}>
                 <GamePlayWorkspace auth={auth} />
