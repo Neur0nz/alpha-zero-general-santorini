@@ -11,7 +11,7 @@ import {
   useDisclosure,
   useColorModeValue,
 } from '@chakra-ui/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { SearchIcon } from '@chakra-ui/icons';
 import { useSantorini } from '@hooks/useSantorini';
 import { useSupabaseAuth } from '@hooks/useSupabaseAuth';
@@ -49,6 +49,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('play');
   const activeIndex = Math.max(0, tabOrder.indexOf(activeTab));
   const auth = useSupabaseAuth();
+  const [, startInitializeTransition] = useTransition();
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -65,9 +66,11 @@ function App() {
   }, [tabOrder]);
 
   useEffect(() => {
-    // Initialize game engine in background without blocking UI
-    initialize().catch(console.error);
-  }, [initialize]);
+    // Initialize game engine in background without blocking urgent UI updates
+    startInitializeTransition(() => {
+      initialize().catch(console.error);
+    });
+  }, [initialize, startInitializeTransition]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

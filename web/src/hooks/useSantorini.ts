@@ -143,6 +143,15 @@ const toFiniteNumber = (value: unknown): number | null => {
   return null;
 };
 
+const yieldToMainThread = () =>
+  new Promise<void>((resolve) => {
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(() => resolve(), 0);
+  });
+
 const normalizeTopMoves = (rawMoves: unknown): TopMove[] => {
   if (!Array.isArray(rawMoves)) {
     return [];
@@ -589,11 +598,13 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     }
 
     initializeStartedRef.current = true;
+    setLoading(true);
 
     const initPromise = (async () => {
       try {
         // Don't block UI - just update status
         setButtons((prev) => ({ ...prev, status: 'Loading game engine...' }));
+        await yieldToMainThread();
         await loadPyodideRuntime();
         const game = gameRef.current;
         const selector = selectorRef.current;
@@ -612,6 +623,7 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
         throw error;
       } finally {
         initializePromiseRef.current = null;
+        setLoading(false);
       }
     })();
 
