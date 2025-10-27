@@ -5,9 +5,9 @@ export type CellState = {
   worker: number;
 };
 
-const LEVEL_COLORS = ['#F4F7FF', '#CFDAFF', '#A8C2FF'];
-const LEVEL_STROKE = '#1E2A4A';
-const DOME_COLOR = '#F5E8B8';
+const LEVEL_OPACITIES = [0.24, 0.48, 0.72];
+const LEVEL_STROKE_OPACITY = 0.85;
+const DOME_OPACITY = 0.82;
 
 export function renderCellSvg({ levels, worker }: CellState): string {
   const width = 240;
@@ -25,12 +25,12 @@ export function renderCellSvg({ levels, worker }: CellState): string {
     const xEnd = width - levelShrinkX * l;
     const yBeg = height - levelHeight * l;
     const yEnd = height - levelHeight * (l + 1);
-    const fillColor = LEVEL_COLORS[Math.min(l, LEVEL_COLORS.length - 1)];
-    svg += `<polygon fill="${fillColor}" stroke="${LEVEL_STROKE}" stroke-width="4" stroke-linejoin="round" points="${xBeg},${yBeg} ${xBeg},${yEnd} ${xEnd},${yEnd} ${xEnd},${yBeg}"/>`;
+    const opacity = LEVEL_OPACITIES[Math.min(l, LEVEL_OPACITIES.length - 1)];
+    svg += `<polygon fill="currentColor" fill-opacity="${opacity}" stroke="currentColor" stroke-opacity="${LEVEL_STROKE_OPACITY}" stroke-width="4" stroke-linejoin="round" points="${xBeg},${yBeg} ${xBeg},${yEnd} ${xEnd},${yEnd} ${xEnd},${yBeg}"/>`;
   }
 
   if (levels === 4) {
-    svg += `<path d="M 70 0 A 50 50, 0, 0 1, 170 0" fill="${DOME_COLOR}" stroke="${LEVEL_STROKE}" stroke-width="4" transform="translate(0 ${3 * levelHeight})"/>`;
+    svg += `<path d="M 70 0 A 50 50, 0, 0 1, 170 0" fill="currentColor" fill-opacity="${DOME_OPACITY}" stroke="currentColor" stroke-opacity="${LEVEL_STROKE_OPACITY}" stroke-width="4" transform="translate(0 ${3 * levelHeight})"/>`;
   } else if (worker !== 0) {
     svg += `<g ${workerStyle} transform="translate(70 ${height - levels * levelHeight - 100})">`;
     if (Math.abs(worker) === 1) {
