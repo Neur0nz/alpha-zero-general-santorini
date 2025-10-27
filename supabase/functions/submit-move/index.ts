@@ -24,7 +24,12 @@ if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
 
 function jsonResponse(body: Record<string, unknown>, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
-    headers: { 'content-type': 'application/json; charset=utf-8' },
+    headers: { 
+      'content-type': 'application/json; charset=utf-8',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    },
     ...init,
   });
 }
@@ -46,6 +51,11 @@ function sanitizeClocks(value: unknown): { creatorMs: number; opponentMs: number
 }
 
 serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return jsonResponse({}, { status: 200 });
+  }
+
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 });
   }
