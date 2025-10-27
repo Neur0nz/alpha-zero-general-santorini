@@ -3,7 +3,6 @@ import {
   Badge,
   Box,
   Button,
-  ButtonGroup,
   Card,
   CardBody,
   CardHeader,
@@ -13,6 +12,7 @@ import {
   FormLabel,
   Heading,
   HStack,
+  Icon,
   Input,
   List,
   ListItem,
@@ -25,6 +25,7 @@ import {
   ModalOverlay,
   Radio,
   RadioGroup,
+  SimpleGrid,
   Spinner,
   Stack,
   Switch,
@@ -32,12 +33,12 @@ import {
   useColorModeValue,
   useDisclosure,
   useToast,
+  useBoolean,
 } from '@chakra-ui/react';
-import { AddIcon } from '@chakra-ui/icons';
+import { AddIcon, ArrowForwardIcon, RepeatIcon, SearchIcon, StarIcon } from '@chakra-ui/icons';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import { useMatchLobby, type CreateMatchPayload, type LobbyMatch, type StartingPlayer } from '@hooks/useMatchLobby';
 import GoogleIcon from '@components/auth/GoogleIcon';
-import { useBoolean } from '@chakra-ui/react';
 
 function formatDate(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -52,6 +53,175 @@ function useSurfaceTokens() {
   const accentHeading = useColorModeValue('teal.600', 'teal.200');
   const panelBg = useColorModeValue('gray.50', 'blackAlpha.400');
   return { cardBg, cardBorder, mutedText, helperText, strongText, accentHeading, panelBg };
+}
+
+function LobbyHero({
+  onQuickMatch,
+  quickMatchLoading,
+  onOpenCreate,
+  onOpenJoin,
+  onNavigateToPractice,
+  onNavigateToAnalyze,
+  onNavigateToLeaderboard,
+}: {
+  onQuickMatch: () => Promise<void>;
+  quickMatchLoading: boolean;
+  onOpenCreate: () => void;
+  onOpenJoin: () => void;
+  onNavigateToPractice: () => void;
+  onNavigateToAnalyze: () => void;
+  onNavigateToLeaderboard: () => void;
+}) {
+  const gradientBg = useColorModeValue('linear(to-r, teal.100, teal.300)', 'linear(to-r, teal.700, teal.500)');
+  const frameBorder = useColorModeValue('teal.200', 'teal.500');
+  const bodyColor = useColorModeValue('gray.900', 'whiteAlpha.900');
+  const helperText = useColorModeValue('teal.900', 'teal.50');
+  const subtleText = useColorModeValue('teal.800', 'teal.100');
+
+  return (
+    <Card bgGradient={gradientBg} borderWidth="1px" borderColor={frameBorder} color={bodyColor} shadow="lg">
+      <CardBody>
+        <Stack spacing={6}>
+          <Stack spacing={2}>
+            <Badge colorScheme="teal" w="fit-content" borderRadius="full" px={3} py={1} fontSize="xs" textTransform="uppercase">
+              Online play
+            </Badge>
+            <Heading size={{ base: 'md', md: 'lg' }}>Jump into a Santorini match</Heading>
+            <Text fontSize={{ base: 'sm', md: 'md' }} color={helperText}>
+              Queue instantly for a rated game, challenge friends, or warm up against the AI — inspired by the fast flows of chess.com and lichess.
+            </Text>
+          </Stack>
+          <Stack
+            direction={{ base: 'column', sm: 'row' }}
+            spacing={{ base: 3, sm: 4 }}
+            align={{ base: 'stretch', sm: 'center' }}
+          >
+            <Button
+              size="lg"
+              colorScheme="teal"
+              rightIcon={<ArrowForwardIcon />}
+              onClick={onQuickMatch}
+              isLoading={quickMatchLoading}
+            >
+              Start quick match
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              leftIcon={<AddIcon />}
+              onClick={onOpenCreate}
+            >
+              Custom match
+            </Button>
+            <Button
+              size="lg"
+              variant="ghost"
+              onClick={onOpenJoin}
+            >
+              Join by code
+            </Button>
+          </Stack>
+          <HStack spacing={{ base: 3, md: 6 }} flexWrap="wrap">
+            <Button
+              variant="link"
+              colorScheme="whiteAlpha"
+              size="sm"
+              rightIcon={<ArrowForwardIcon />}
+              onClick={onNavigateToPractice}
+            >
+              Practice vs AI
+            </Button>
+            <Button
+              variant="link"
+              colorScheme="whiteAlpha"
+              size="sm"
+              rightIcon={<ArrowForwardIcon />}
+              onClick={onNavigateToAnalyze}
+            >
+              Analyze past games
+            </Button>
+            <Button
+              variant="link"
+              colorScheme="whiteAlpha"
+              size="sm"
+              rightIcon={<ArrowForwardIcon />}
+              onClick={onNavigateToLeaderboard}
+            >
+              View leaderboard
+            </Button>
+          </HStack>
+          <HStack spacing={3} flexWrap="wrap" color={subtleText} fontSize="sm">
+            <Text>Avg. lobby wait &lt; 2 minutes</Text>
+            <Text>Rated &amp; casual queues available</Text>
+            <Text>Invite friends with private codes</Text>
+          </HStack>
+        </Stack>
+      </CardBody>
+    </Card>
+  );
+}
+
+function FeatureHighlights({
+  onNavigateToPractice,
+  onNavigateToAnalyze,
+  onNavigateToLeaderboard,
+}: {
+  onNavigateToPractice: () => void;
+  onNavigateToAnalyze: () => void;
+  onNavigateToLeaderboard: () => void;
+}) {
+  const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
+  const items = [
+    {
+      title: 'Train with adaptive AI',
+      description: 'Sharpen tactics in Practice with undo, evaluation, and depth controls that mirror lichess studies.',
+      actionLabel: 'Open practice',
+      onClick: onNavigateToPractice,
+      icon: RepeatIcon,
+    },
+    {
+      title: 'Study every move',
+      description: 'Replay games with engine insights, timelines, and branching lines to find the perfect tower climb.',
+      actionLabel: 'Analyze games',
+      onClick: onNavigateToAnalyze,
+      icon: SearchIcon,
+    },
+    {
+      title: 'Climb the ladder',
+      description: 'Track top Santorini players, compare ratings, and chase your spot on the Ascent leaderboard.',
+      actionLabel: 'See leaderboard',
+      onClick: onNavigateToLeaderboard,
+      icon: StarIcon,
+    },
+  ] as const;
+
+  return (
+    <SimpleGrid columns={{ base: 1, md: 3 }} spacing={{ base: 4, md: 6 }}>
+      {items.map((item) => (
+        <Card key={item.title} bg={cardBg} borderWidth="1px" borderColor={cardBorder} h="100%">
+          <CardBody as={Stack} spacing={4}>
+            <HStack spacing={3} align="center">
+              <Icon as={item.icon} boxSize={5} color="teal.400" />
+              <Heading size="sm">{item.title}</Heading>
+            </HStack>
+            <Text color={mutedText} fontSize="sm">
+              {item.description}
+            </Text>
+            <Button
+              variant="link"
+              colorScheme="teal"
+              size="sm"
+              rightIcon={<ArrowForwardIcon />}
+              onClick={item.onClick}
+              alignSelf="flex-start"
+            >
+              {item.actionLabel}
+            </Button>
+          </CardBody>
+        </Card>
+      ))}
+    </SimpleGrid>
+  );
 }
 
 function MatchCreationModal({
@@ -398,6 +568,9 @@ function SignInPrompt({ auth }: { auth: SupabaseAuthState }) {
           <Text color={mutedText}>
             Challenge real opponents, protect your rating, and sync your Santorini journey across every device.
           </Text>
+          <Text color={mutedText}>
+            Unlock practice tools, deep analysis, and the global leaderboard to track your climb.
+          </Text>
         </Stack>
         <HStack spacing={2} flexWrap="wrap" justify="center">
           <Badge colorScheme="teal" px={3} py={1} borderRadius="full">
@@ -428,13 +601,25 @@ function SignInPrompt({ auth }: { auth: SupabaseAuthState }) {
   );
 }
 
-function LobbyWorkspace({ auth, onNavigateToPlay }: { auth: SupabaseAuthState; onNavigateToPlay: () => void }) {
+function LobbyWorkspace({
+  auth,
+  onNavigateToPlay,
+  onNavigateToPractice,
+  onNavigateToAnalyze,
+  onNavigateToLeaderboard,
+}: {
+  auth: SupabaseAuthState;
+  onNavigateToPlay: () => void;
+  onNavigateToPractice: () => void;
+  onNavigateToAnalyze: () => void;
+  onNavigateToLeaderboard: () => void;
+}) {
   const lobby = useMatchLobby(auth.profile, { autoConnectOnline: true });
   const [joiningCode, setJoiningCode] = useState('');
   const { isOpen: isCreateOpen, onOpen: onCreateOpen, onClose: onCreateClose } = useDisclosure();
   const { isOpen: isJoinOpen, onOpen: onJoinOpen, onClose: onJoinClose } = useDisclosure();
   const toast = useToast();
-  const { cardBg, cardBorder } = useSurfaceTokens();
+  const [creatingQuickMatch, setCreatingQuickMatch] = useBoolean(false);
 
   const handleCreate = async (payload: CreateMatchPayload) => {
     await lobby.createMatch(payload);
@@ -460,38 +645,58 @@ function LobbyWorkspace({ auth, onNavigateToPlay }: { auth: SupabaseAuthState; o
     }
   };
 
+  const handleQuickMatch = async () => {
+    setCreatingQuickMatch.on();
+    try {
+      await handleCreate({
+        visibility: 'public',
+        rated: true,
+        hasClock: true,
+        clockInitialMinutes: 10,
+        clockIncrementSeconds: 5,
+        startingPlayer: 'random',
+      });
+      toast({ title: 'Quick match created', status: 'success', description: 'Waiting for an opponent to join…' });
+    } catch (error) {
+      toast({
+        title: 'Quick match failed',
+        status: 'error',
+        description: error instanceof Error ? error.message : 'Unable to start a new match right now.',
+      });
+    } finally {
+      setCreatingQuickMatch.off();
+    }
+  };
+
   if (!auth.profile) {
     return (
       <Stack spacing={6} py={{ base: 6, md: 10 }}>
         <SignInPrompt auth={auth} />
+        <FeatureHighlights
+          onNavigateToPractice={onNavigateToPractice}
+          onNavigateToAnalyze={onNavigateToAnalyze}
+          onNavigateToLeaderboard={onNavigateToLeaderboard}
+        />
       </Stack>
     );
   }
 
   return (
-    <Stack spacing={6} py={{ base: 6, md: 10 }}>
-      {/* Action Buttons */}
-      <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
-        <CardBody>
-          <Flex justify="space-between" align="center" flexWrap="wrap" gap={4}>
-            <Stack spacing={1}>
-              <Heading size="sm">Find or create a match</Heading>
-              <Text fontSize="sm" color="gray.500">
-                Join open lobbies or create your own game
-              </Text>
-            </Stack>
-            <HStack spacing={3}>
-              <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={onCreateOpen} size="md">
-                Create Match
-              </Button>
-              <Button variant="outline" colorScheme="teal" onClick={onJoinOpen} size="md">
-                Join by Code
-              </Button>
-            </HStack>
-          </Flex>
-        </CardBody>
-      </Card>
-
+    <Stack spacing={{ base: 6, md: 8 }} py={{ base: 6, md: 10 }}>
+      <LobbyHero
+        onQuickMatch={handleQuickMatch}
+        quickMatchLoading={creatingQuickMatch}
+        onOpenCreate={onCreateOpen}
+        onOpenJoin={onJoinOpen}
+        onNavigateToPractice={onNavigateToPractice}
+        onNavigateToAnalyze={onNavigateToAnalyze}
+        onNavigateToLeaderboard={onNavigateToLeaderboard}
+      />
+      <FeatureHighlights
+        onNavigateToPractice={onNavigateToPractice}
+        onNavigateToAnalyze={onNavigateToAnalyze}
+        onNavigateToLeaderboard={onNavigateToLeaderboard}
+      />
       {/* Your Pending Matches */}
       {lobby.myMatches && (
         <PendingMatches
@@ -544,4 +749,3 @@ function LobbyWorkspace({ auth, onNavigateToPlay }: { auth: SupabaseAuthState; o
 }
 
 export default LobbyWorkspace;
-

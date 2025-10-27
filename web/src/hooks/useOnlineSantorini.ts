@@ -145,7 +145,8 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const [pendingMoveVersion, setPendingMoveVersion] = useState(0); // Trigger submission effect
   const gameCompletedRef = useRef<string | null>(null);
   const submissionLockRef = useRef<boolean>(false);
-  const syncInProgressRef = useRef<boolean>(false); // NEW: Prevent moves during sync
+  const syncInProgressRef = useRef<boolean>(false); // Prevent moves during sync
+  const processingMoveRef = useRef<boolean>(false); // Prevent rapid clicks
   
   // Helper function to atomically update engine and derived state
   const updateEngineState = useCallback((newEngine: SantoriniEngine, myTurn: boolean) => {
@@ -529,6 +530,12 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         return;
       }
       
+      // Block rapid clicks during move processing
+      if (processingMoveRef.current) {
+        console.log('useOnlineSantorini: Move processing in progress, ignoring click');
+        return;
+      }
+      
       if (pendingLocalMoveRef.current) {
         toast({ title: 'Please wait - syncing previous move', status: 'info' });
         return;
@@ -581,6 +588,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           toast({ title: 'Invalid placement', status: 'warning' });
           return;
         }
+        processingMoveRef.current = true;
         try {
           const result = engine.applyMove(placementAction);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
@@ -606,77 +614,84 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         } catch (error) {
           console.error('useOnlineSantorini: Move failed', error);
           toast({ title: 'Invalid move', status: 'error' });
+        } finally {
+          processingMoveRef.current = false;
         }
         return;
       }
 
       // During game phase: Use move selector
-      const moveSelector = moveSelectorRef.current;
-      console.log('🎮 Game phase click:', {
-        stage: moveSelector.stage,
-        player: engine.player,
-        board_at_click: engine.snapshot.board[y][x],
-      });
-      const clicked = moveSelector.click(y, x, engine.snapshot.board, validMoves, engine.player);
-      console.log('🎮 Click result:', clicked, 'New stage:', moveSelector.stage);
-      
-      if (!clicked) {
-        console.warn('❌ Invalid selection at', {y, x}, 'stage:', moveSelector.stage);
-        toast({ title: 'Invalid selection', status: 'warning' });
-        return;
-      }
-      
-      // Update highlighting for next stage
-      setSelectable(
-        computeSelectable(
-          validMoves,
-          engine.snapshot,
-          moveSelector,
-          isMyTurn,
-          engine.getPlacementContext(),
-        ),
-      );
-      
-      // Check if move is complete
-      const action = moveSelector.getAction();
-      if (action >= 0) {
-        // Move is complete - apply it and submit
-        try {
-          const result = engine.applyMove(action);
-          const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
-          moveSelector.reset();
-          
-          // Atomically update state
-          const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
-          updateEngineState(newEngine, myTurn);
-          
-          // Calculate move index and submit (server will compute state)
-          const pendingCount = pendingLocalMoveRef.current ? 1 : 0;
-          const nextMoveIndex = moves.length + pendingCount;
-          
-          pendingLocalMoveRef.current = {
-            expectedHistoryLength: 0,
-            expectedMoveIndex: nextMoveIndex,
-            moveAction: action,
-          };
-          
-          console.log('✅ Game move queued for submission', { action, nextMoveIndex });
-          setPendingMoveVersion(v => v + 1); // Trigger submission effect
-        } catch (error) {
-          console.error('useOnlineSantorini: Move failed', error);
-          toast({ title: 'Move failed', status: 'error' });
-          moveSelector.reset();
-          // Restore selectable state on error
-          setSelectable(
-            computeSelectable(
-              validMoves,
-              engine.snapshot,
-              moveSelector,
-              isMyTurn,
-              engine.getPlacementContext(),
-            ),
-          );
+      processingMoveRef.current = true;
+      try {
+        const moveSelector = moveSelectorRef.current;
+        console.log('🎮 Game phase click:', {
+          stage: moveSelector.stage,
+          player: engine.player,
+          board_at_click: engine.snapshot.board[y][x],
+        });
+        const clicked = moveSelector.click(y, x, engine.snapshot.board, validMoves, engine.player);
+        console.log('🎮 Click result:', clicked, 'New stage:', moveSelector.stage);
+        
+        if (!clicked) {
+          console.warn('❌ Invalid selection at', {y, x}, 'stage:', moveSelector.stage);
+          toast({ title: 'Invalid selection', status: 'warning' });
+          return;
         }
+        
+        // Update highlighting for next stage
+        setSelectable(
+          computeSelectable(
+            validMoves,
+            engine.snapshot,
+            moveSelector,
+            isMyTurn,
+            engine.getPlacementContext(),
+          ),
+        );
+        
+        // Check if move is complete
+        const action = moveSelector.getAction();
+        if (action >= 0) {
+          // Move is complete - apply it and submit
+          try {
+            const result = engine.applyMove(action);
+            const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
+            moveSelector.reset();
+            
+            // Atomically update state
+            const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+            updateEngineState(newEngine, myTurn);
+            
+            // Calculate move index and submit (server will compute state)
+            const pendingCount = pendingLocalMoveRef.current ? 1 : 0;
+            const nextMoveIndex = moves.length + pendingCount;
+            
+            pendingLocalMoveRef.current = {
+              expectedHistoryLength: 0,
+              expectedMoveIndex: nextMoveIndex,
+              moveAction: action,
+            };
+            
+            console.log('✅ Game move queued for submission', { action, nextMoveIndex });
+            setPendingMoveVersion(v => v + 1); // Trigger submission effect
+          } catch (error) {
+            console.error('useOnlineSantorini: Move failed', error);
+            toast({ title: 'Move failed', status: 'error' });
+            moveSelector.reset();
+            // Restore selectable state on error
+            setSelectable(
+              computeSelectable(
+                validMoves,
+                engine.snapshot,
+                moveSelector,
+                isMyTurn,
+                engine.getPlacementContext(),
+              ),
+            );
+          }
+        }
+      } finally {
+        processingMoveRef.current = false;
       }
     },
     [currentTurn, isMyTurn, match, moves.length, role, toast, updateEngineState],

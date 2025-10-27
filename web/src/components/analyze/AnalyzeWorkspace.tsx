@@ -97,6 +97,7 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
   const [myCompletedGames, setMyCompletedGames] = useState<LobbyMatch[]>([]);
   const [loadingMyGames, setLoadingMyGames] = useState(false);
   const [aiInitialized, setAiInitialized] = useState(false);
+  const [replaying, setReplaying] = useState(false);
 
   // Initialize AI engine on mount
   useEffect(() => {
@@ -157,8 +158,9 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
   // Replay game to a specific move index
   const replayTo = useCallback(
     async (index: number, sourceMoves: MatchMoveRecord<SantoriniMoveAction>[]) => {
-      if (!loaded || !aiInitialized) return;
+      if (!loaded || !aiInitialized || replaying) return;
 
+      setReplaying(true);
       try {
         // Start from initial state for TypeScript engine (fast display)
         const initialState = loaded.match.initial_state as SantoriniSnapshot;
@@ -200,9 +202,11 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
           status: 'error',
           description: error instanceof Error ? error.message : 'Unknown error',
         });
+      } finally {
+        setReplaying(false);
       }
     },
-    [loaded, aiInitialized, santorini, toast],
+    [loaded, aiInitialized, replaying, santorini, toast],
   );
 
   const loadMatchById = useCallback(async (id: string) => {
@@ -548,8 +552,8 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
           <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
             <CardBody>
               <Flex direction={{ base: 'column', xl: 'row' }} gap={6} align="stretch">
-                {/* Game Board */}
-                <Box flex="1" display="flex" justifyContent="center">
+                {/* Game Board - Read-only for analysis */}
+                <Box flex="1" display="flex" justifyContent="center" pointerEvents={replaying ? 'none' : 'auto'}>
                   <GameBoard
                     board={board}
                     selectable={Array.from({ length: 5 }, () => Array(5).fill(false))}
@@ -557,10 +561,14 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
                     onCellHover={() => {}}
                     onCellLeave={() => {}}
                     buttons={{
-                      loading: false,
+                      loading: replaying,
                       canUndo: false,
                       canRedo: false,
-                      status: currentIndex === -1 ? 'Initial position' : `Move ${currentIndex + 1}`,
+                      status: replaying 
+                        ? 'Loading position...' 
+                        : currentIndex === -1 
+                          ? 'Initial position' 
+                          : `Move ${currentIndex + 1} of ${loaded?.moves.length ?? 0}`,
                       editMode: 0,
                       setupMode: false,
                       setupTurn: 0,

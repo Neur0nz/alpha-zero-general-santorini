@@ -1,5 +1,6 @@
 import {
   Box,
+  Button,
   Container,
   Flex,
   IconButton,
@@ -12,7 +13,7 @@ import {
   useColorModeValue,
 } from '@chakra-ui/react';
 import { useEffect, useMemo, useState, useTransition } from 'react';
-import { SearchIcon } from '@chakra-ui/icons';
+import { SearchIcon, TimeIcon } from '@chakra-ui/icons';
 import { SantoriniProvider, useSantorini } from '@hooks/useSantorini';
 import { useSupabaseAuth } from '@hooks/useSupabaseAuth';
 import HeaderBar, { type AppTab } from '@components/HeaderBar';
@@ -24,8 +25,9 @@ import LobbyWorkspace from '@components/play/LobbyWorkspace';
 import GamePlayWorkspace from '@components/play/GamePlayWorkspace';
 import AnalyzeWorkspace from '@components/analyze/AnalyzeWorkspace';
 import ProfileWorkspace from '@components/profile/ProfileWorkspace';
+import LeaderboardWorkspace from '@components/leaderboard/LeaderboardWorkspace';
 
-const TAB_ORDER: AppTab[] = ['lobby', 'play', 'practice', 'analyze', 'profile'];
+const TAB_ORDER: AppTab[] = ['lobby', 'play', 'leaderboard', 'practice', 'analyze', 'profile'];
 const TAB_STORAGE_KEY = 'santorini:lastTab';
 
 function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
@@ -175,8 +177,21 @@ function App() {
         return null;
       case 'play':
         return null;
-      case 'practice':
+      case 'leaderboard':
         return null;
+      case 'practice':
+        return (
+          <Tooltip label="Review your move list" hasArrow>
+            <Button
+              size="sm"
+              colorScheme="teal"
+              leftIcon={<TimeIcon />}
+              onClick={openHistory}
+            >
+              Move history
+            </Button>
+          </Tooltip>
+        );
       case 'analyze':
         return (
           <Tooltip label="Search saved games (coming soon)" hasArrow>
@@ -218,10 +233,22 @@ function App() {
           <Container maxW="7xl" flex="1" px={{ base: 3, md: 6 }}>
             <TabPanels flex="1">
               <TabPanel px={0}>
-                <LobbyWorkspace auth={auth} onNavigateToPlay={() => setActiveTab('play')} />
+                <LobbyWorkspace
+                  auth={auth}
+                  onNavigateToPlay={() => setActiveTab('play')}
+                  onNavigateToPractice={() => setActiveTab('practice')}
+                  onNavigateToAnalyze={() => setActiveTab('analyze')}
+                  onNavigateToLeaderboard={() => setActiveTab('leaderboard')}
+                />
               </TabPanel>
               <TabPanel px={0}>
                 <GamePlayWorkspace auth={auth} />
+              </TabPanel>
+              <TabPanel px={0}>
+                <LeaderboardWorkspace
+                  auth={auth}
+                  onNavigateToPlay={() => setActiveTab('play')}
+                />
               </TabPanel>
               <TabPanel px={0}>
                 <SantoriniProvider>

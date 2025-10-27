@@ -6,6 +6,9 @@ import { MoveSelector } from '@game/moveSelector';
 import { renderCellSvg, type CellState } from '@game/svg';
 import { GAME_CONSTANTS } from '@game/constants';
 import type { SantoriniStateSnapshot } from '@/types/match';
+import { SantoriniEngine, type SantoriniSnapshot } from '@/lib/santoriniEngine';
+import { TypeScriptMoveSelector } from '@/lib/moveSelectorTS';
+import { useToast } from '@chakra-ui/react';
 
 export interface UseSantoriniOptions {
   evaluationEnabled?: boolean;
@@ -264,10 +267,41 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   const [calcOptionsBusy, setCalcOptionsBusy] = useState(false);
   const [calcDepthOverride, setCalcDepthOverride] = useState<number | null>(null);
 
+  const toast = useToast();
+  
+  // TypeScript engine for fast game logic (single source of truth)
+  const engineRef = useRef<SantoriniEngine>(SantoriniEngine.createInitial().engine);
+  const [engineVersion, setEngineVersion] = useState(0);
+  const moveSelectorRef = useRef<TypeScriptMoveSelector>(new TypeScriptMoveSelector());
+  
+  // Python engine for AI features only
   const gameRef = useRef<Santorini>();
   const selectorRef = useRef<MoveSelector>();
   const aiPromiseRef = useRef<Promise<void>>(Promise.resolve());
   const guidedSetupPlacementsRef = useRef<Array<[number, number]>>([]);
+  const processingMoveRef = useRef<boolean>(false); // Prevent rapid clicks
+
+  // Helper to sync TypeScript engine state to UI and Python engine
+  const syncEngineToUi = useCallback(() => {
+    const snapshot = engineRef.current.snapshot;
+    const newBoard = Array.from({ length: 5 }, (_, y) =>
+      Array.from({ length: 5 }, (_, x) => {
+        const cell = snapshot.board[y][x];
+        const worker = cell[0] || 0;
+        const level = cell[1] || 0;
+        return {
+          worker,
+          level,
+          levels: level,
+          svg: renderCellSvg({ levels: level, worker }),
+          highlight: false,
+        };
+      })
+    );
+    setBoard(newBoard);
+    setNextPlayer(snapshot.player);
+    setEngineVersion(v => v + 1);
+  }, []);
 
   const persistPracticeState = useCallback(async () => {
     if (typeof window === 'undefined') {
@@ -922,63 +956,123 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   );
 
   const onCellClick = useCallback(
-    async (y: number, x: number) => {
+    (y: number, x: number) => {
+      // Prevent overlapping move processing
+      if (processingMoveRef.current) {
+        return;
+      }
+
+      // Skip if Python engine not ready yet (only needed for AI, not moves)
       const game = gameRef.current;
-      const selector = selectorRef.current;
-      if (!game || !selector) return;
+      const pythonSelector = selectorRef.current;
 
-      // Handle setup mode
+      // Handle setup mode (requires Python)
       if (buttons.setupMode) {
-        await placeWorkerForSetup(y, x);
+        if (!game || !pythonSelector) return;
+        processingMoveRef.current = true;
+        placeWorkerForSetup(y, x).finally(() => {
+          processingMoveRef.current = false;
+        });
         return;
       }
 
-      const placement = getPlacementContext();
-      if (placement.phase === 'placement') {
-        if (placement.player !== game.nextPlayer) {
-          await updateButtons(false);
+      // Use TypeScript engine for fast, synchronous game logic
+      const engine = engineRef.current;
+      const validMoves = engine.getValidMoves();
+      const placement = engine.getPlacementContext();
+      const moveSelector = moveSelectorRef.current;
+      
+      // Placement phase
+      const isPlacementPhase = placement && placement.player === engine.player;
+      if (isPlacementPhase) {
+        const placementAction = y * 5 + x;
+        if (placementAction >= validMoves.length || !validMoves[placementAction]) {
+          toast({ title: 'Invalid placement', status: 'warning' });
           return;
         }
-        if (game.py && game.py._read_worker(y, x) !== 0) {
-          await updateButtons(false);
-          return;
-        }
-        const moveIndex = y * GAME_CONSTANTS.BOARD_SIZE + x;
-        if (Array.isArray(game.validMoves) && game.validMoves[moveIndex]) {
-          await applyMove(moveIndex);
-        } else {
-          await updateButtons(false);
+        
+        processingMoveRef.current = true;
+        try {
+          const result = engine.applyMove(placementAction);
+          engineRef.current = SantoriniEngine.fromSnapshot(result.snapshot);
+          moveSelector.reset();
+          syncEngineToUi();
+          
+          // Sync to Python engine for AI (async, in background)
+          if (game && game.py) {
+            applyMove(placementAction, { triggerAi: true });
+          }
+        } catch (error) {
+          console.error('Placement failed:', error);
+          toast({ title: 'Invalid move', status: 'error' });
+        } finally {
+          processingMoveRef.current = false;
         }
         return;
       }
 
-      if (selector.editMode === 1 || selector.editMode === 2) {
-        game.editCell(y, x, selector.editMode);
+      // Edit mode (requires Python)
+      if (pythonSelector && (pythonSelector.editMode === 1 || pythonSelector.editMode === 2)) {
+        if (!game) return;
+        processingMoveRef.current = true;
+        game.editCell(y, x, pythonSelector.editMode);
         readBoard();
         updateSelectable();
-        await updateButtons(false);
-        await persistPracticeState();
+        updateButtons(false).finally(() => {
+          persistPracticeState();
+          processingMoveRef.current = false;
+        });
         return;
       }
 
-      selector.click(y, x);
-      updateSelectable();
-      const move = selector.getMove();
-      if (move >= 0) {
-        await applyMove(move);
-      } else {
-        updateButtons(false);
+      // Game phase: Use TypeScript move selector (fast and synchronous!)
+      processingMoveRef.current = true;
+      try {
+        const clicked = moveSelector.click(y, x, engine.snapshot.board, validMoves, engine.player);
+        
+        if (!clicked) {
+          toast({ title: 'Invalid selection', status: 'warning' });
+          processingMoveRef.current = false;
+          return;
+        }
+        
+        // Update selectable highlighting
+        const newSelectable = moveSelector.computeSelectable(engine.snapshot.board, validMoves, engine.player);
+        setSelectable(newSelectable);
+        
+        // Check if move is complete
+        const action = moveSelector.getAction();
+        if (action >= 0) {
+          // Apply move to TypeScript engine (instant!)
+          try {
+            const result = engine.applyMove(action);
+            engineRef.current = SantoriniEngine.fromSnapshot(result.snapshot);
+            moveSelector.reset();
+            syncEngineToUi();
+            
+            // Sync to Python engine for AI evaluation (async, in background)
+            if (game && game.py) {
+              applyMove(action, { triggerAi: true });
+            }
+          } catch (error) {
+            console.error('Move failed:', error);
+            toast({ title: 'Move failed', status: 'error' });
+          }
+        }
+      } finally {
+        processingMoveRef.current = false;
       }
     },
     [
       applyMove,
-      updateButtons,
-      updateSelectable,
       buttons.setupMode,
       placeWorkerForSetup,
       persistPracticeState,
       readBoard,
-      getPlacementContext,
+      syncEngineToUi,
+      toast,
+      updateButtons,
+      updateSelectable,
     ],
   );
 
