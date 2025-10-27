@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { loadScript } from '@/utils/scriptLoader';
 import { Santorini } from '@game/santorini';
 import { MoveSelector } from '@game/moveSelector';
@@ -242,7 +243,7 @@ const normalizeTopMoves = (rawMoves: unknown): TopMove[] => {
   });
 };
 
-export function useSantorini(options: UseSantoriniOptions = {}) {
+function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   const { evaluationEnabled = true } = options;
   const [loading, setLoading] = useState(false); // Start with UI enabled
   const [board, setBoard] = useState<BoardCell[][]>(INITIAL_BOARD);
@@ -1242,4 +1243,26 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     gameEnded: gameRef.current?.gameEnded ?? [0, 0],
     importState,
   };
+}
+
+type SantoriniStore = ReturnType<typeof useSantoriniInternal>;
+
+const SantoriniContext = createContext<SantoriniStore | null>(null);
+
+export interface SantoriniProviderProps {
+  children: ReactNode;
+  evaluationEnabled?: boolean;
+}
+
+export function SantoriniProvider({ children, evaluationEnabled }: SantoriniProviderProps) {
+  const store = useSantoriniInternal({ evaluationEnabled });
+  return <SantoriniContext.Provider value={store}>{children}</SantoriniContext.Provider>;
+}
+
+export function useSantorini(options: UseSantoriniOptions = {}) {
+  const context = useContext(SantoriniContext);
+  if (context) {
+    return context;
+  }
+  return useSantoriniInternal(options);
 }

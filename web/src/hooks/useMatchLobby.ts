@@ -9,6 +9,7 @@ import type {
   MatchVisibility,
   PlayerProfile,
   SantoriniMoveAction,
+  SantoriniStateSnapshot,
 } from '@/types/match';
 
 export interface CreateMatchPayload {
@@ -32,6 +33,7 @@ export interface UseMatchLobbyState {
   activeMatch: LobbyMatch | null;
   moves: MatchMoveRecord<MatchAction>[];
   joinCode: string | null;
+  sessionMode: 'local' | 'online' | null;
 }
 
 const INITIAL_STATE: UseMatchLobbyState = {
@@ -42,7 +44,49 @@ const INITIAL_STATE: UseMatchLobbyState = {
   activeMatch: null,
   moves: [],
   joinCode: null,
+  sessionMode: null,
 };
+
+export interface UseMatchLobbyOptions {
+  autoConnectOnline?: boolean;
+}
+
+const LOCAL_MATCH_ID = 'local:match';
+
+function createEmptySnapshot(): SantoriniStateSnapshot {
+  return {
+    version: 1,
+    player: 0,
+    board: Array.from({ length: 5 }, () =>
+      Array.from({ length: 5 }, () => [0, 0, 0]),
+    ),
+    history: [],
+    future: [],
+    gameEnded: [0, 0],
+    validMoves: [],
+  };
+}
+
+function createLocalMatch(): LobbyMatch {
+  const createdAt = new Date().toISOString();
+  return {
+    id: LOCAL_MATCH_ID,
+    creator_id: 'local-blue',
+    opponent_id: 'local-red',
+    visibility: 'private',
+    rated: false,
+    private_join_code: null,
+    clock_initial_seconds: 0,
+    clock_increment_seconds: 0,
+    status: 'in_progress',
+    winner_id: null,
+    rematch_parent_id: null,
+    created_at: createdAt,
+    initial_state: createEmptySnapshot(),
+    creator: null,
+    opponent: null,
+  };
+}
 
 const TRACKED_MATCH_STATUSES: MatchStatus[] = ['waiting_for_opponent', 'in_progress'];
 
@@ -76,8 +120,9 @@ function selectPreferredMatch(matches: LobbyMatch[]): LobbyMatch | null {
   return matches.find((match) => match.status === 'in_progress') ?? matches[0] ?? null;
 }
 
-export function useMatchLobby(profile: PlayerProfile | null) {
+export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLobbyOptions = {}) {
   const [state, setState] = useState<UseMatchLobbyState>(INITIAL_STATE);
+  const [onlineEnabled, setOnlineEnabled] = useState<boolean>(options.autoConnectOnline ?? false);
   const channelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
   const playersRef = useRef<Record<string, PlayerProfile>>({});
   const [playersVersion, setPlayersVersion] = useState(0);
@@ -104,6 +149,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
 
   const ensurePlayersLoaded = useCallback(
     async (ids: Array<string | null | undefined>): Promise<void> => {
+      if (!onlineEnabled) return;
       const client = supabase;
       if (!client) return;
       const missing = Array.from(
@@ -121,7 +167,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       }
       mergePlayers((data ?? []) as PlayerProfile[]);
     },
-    [mergePlayers],
+    [mergePlayers, onlineEnabled],
   );
 
   const attachProfiles = useCallback(
@@ -148,7 +194,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
 
   useEffect(() => {
     const client = supabase;
-    if (!client) return undefined;
+    if (!client || !onlineEnabled) return undefined;
 
     const channel = client
       .channel('public:players')
@@ -169,11 +215,11 @@ export function useMatchLobby(profile: PlayerProfile | null) {
     return () => {
       client.removeChannel(channel);
     };
-  }, [mergePlayers]);
+  }, [mergePlayers, onlineEnabled]);
 
   useEffect(() => {
     const client = supabase;
-    if (!client || !profile) return undefined;
+    if (!client || !profile || !onlineEnabled) return undefined;
 
     const cleanup = async () => {
       const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -193,11 +239,11 @@ export function useMatchLobby(profile: PlayerProfile | null) {
     return () => {
       clearInterval(timer);
     };
-  }, [profile]);
+  }, [profile, onlineEnabled]);
 
   useEffect(() => {
     const client = supabase;
-    if (!client) return undefined;
+    if (!client || !onlineEnabled) return undefined;
 
     const fetchMatches = async () => {
       setState((prev) => ({ ...prev, loading: true }));
@@ -271,11 +317,11 @@ export function useMatchLobby(profile: PlayerProfile | null) {
     return () => {
       client.removeChannel(channel);
     };
-  }, []);
+  }, [attachProfiles, ensurePlayersLoaded, mergePlayers, onlineEnabled]);
 
   useEffect(() => {
     const client = supabase;
-    if (!client || !profile) {
+    if (!client || !profile || !onlineEnabled) {
       setState((prev) => ({ ...prev, myMatches: [], activeMatchId: null, activeMatch: null }));
       return undefined;
     }
@@ -390,11 +436,11 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       isMounted = false;
       client.removeChannel(channel);
     };
-  }, [attachProfiles, ensurePlayersLoaded, mergePlayers, profile]);
+  }, [attachProfiles, ensurePlayersLoaded, mergePlayers, profile, onlineEnabled]);
 
   useEffect(() => {
     const client = supabase;
-    if (!client || !matchId) {
+    if (!client || !matchId || !onlineEnabled) {
       if (channelRef.current) {
         client?.removeChannel(channelRef.current);
         channelRef.current = null;
@@ -518,10 +564,13 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       client.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [attachProfiles, ensurePlayersLoaded, matchId, mergePlayers]);
+  }, [attachProfiles, ensurePlayersLoaded, matchId, mergePlayers, onlineEnabled]);
 
   const createMatch = useCallback(
     async (payload: CreateMatchPayload) => {
+      if (!onlineEnabled) {
+        throw new Error('Online play is not enabled.');
+      }
       const client = supabase;
       if (!client || !profile) {
         throw new Error('Authentication required.');
@@ -551,6 +600,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       const joinCode = record.private_join_code ?? null;
       setState((prev) => ({
         ...prev,
+        sessionMode: 'online',
         activeMatchId: enriched.id,
         activeMatch: enriched,
         joinCode,
@@ -560,11 +610,14 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
       return enriched;
     },
-    [attachProfiles, ensurePlayersLoaded, mergePlayers, profile],
+    [attachProfiles, ensurePlayersLoaded, mergePlayers, onlineEnabled, profile],
   );
 
   const joinMatch = useCallback(
     async (idOrCode: string) => {
+      if (!onlineEnabled) {
+        throw new Error('Online play is not enabled.');
+      }
       const client = supabase;
       if (!client || !profile) {
         throw new Error('Authentication required.');
@@ -654,6 +707,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         ...prev,
         activeMatchId: enriched.id,
         activeMatch: enriched,
+        sessionMode: 'online',
         joinCode: targetMatch.private_join_code,
         moves: [],
         myMatches: upsertMatch(prev.myMatches, enriched),
@@ -661,20 +715,52 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       void ensurePlayersLoaded([joined.creator_id, joined.opponent_id ?? undefined]);
       return enriched;
     },
-    [attachProfiles, ensurePlayersLoaded, mergePlayers, profile],
+    [attachProfiles, ensurePlayersLoaded, mergePlayers, onlineEnabled, profile],
   );
 
   const leaveMatch = useCallback(
     async (matchId?: string | null) => {
-      const client = supabase;
-      if (!client || !profile) {
-        setState((prev) => ({ ...prev, activeMatchId: null, activeMatch: null, moves: [], joinCode: null }));
+      const targetId = matchId ?? state.activeMatchId;
+
+      if (!targetId) {
+        setState((prev) => ({
+          ...prev,
+          sessionMode: prev.sessionMode === 'local' ? null : prev.sessionMode,
+          activeMatchId: null,
+          activeMatch: null,
+          moves: [],
+          joinCode: null,
+        }));
         return;
       }
 
-      const targetId = matchId ?? state.activeMatchId;
-      if (!targetId) {
-        setState((prev) => ({ ...prev, activeMatchId: null, activeMatch: null, moves: [], joinCode: null }));
+      if (targetId === LOCAL_MATCH_ID || state.sessionMode === 'local') {
+        setState({ ...INITIAL_STATE });
+        return;
+      }
+
+      if (!onlineEnabled) {
+        setState((prev) => ({
+          ...prev,
+          sessionMode: null,
+          activeMatchId: null,
+          activeMatch: null,
+          moves: [],
+          joinCode: null,
+        }));
+        return;
+      }
+
+      const client = supabase;
+      if (!client || !profile) {
+        setState((prev) => ({
+          ...prev,
+          sessionMode: null,
+          activeMatchId: null,
+          activeMatch: null,
+          moves: [],
+          joinCode: null,
+        }));
         return;
       }
 
@@ -704,6 +790,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         return {
           ...prev,
           myMatches: remaining,
+          sessionMode: fallback ? 'online' : null,
           activeMatchId: wasActive ? fallback?.id ?? null : prev.activeMatchId,
           activeMatch: wasActive ? fallback ?? null : prev.activeMatch,
           moves: wasActive ? [] : prev.moves,
@@ -711,11 +798,14 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         };
       });
     },
-    [profile, state.activeMatch, state.activeMatchId, state.myMatches],
+    [onlineEnabled, profile, state.activeMatch, state.activeMatchId, state.myMatches, state.sessionMode],
   );
 
   const submitMove = useCallback(
     async (match: LobbyMatch, moveIndex: number, movePayload: SantoriniMoveAction) => {
+      if (!onlineEnabled) {
+        throw new Error('Online play is not enabled.');
+      }
       const client = supabase;
       if (!client || !profile) {
         throw new Error('Authentication required.');
@@ -732,23 +822,30 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         throw error;
       }
     },
-    [profile],
+    [onlineEnabled, profile],
   );
 
-  const updateMatchStatus = useCallback(async (status: MatchStatus, payload?: { winner_id?: string | null }) => {
-    const client = supabase;
-    if (!client || !state.activeMatchId) return;
-    const { error } = await client
-      .from('matches')
-      .update({ status, winner_id: payload?.winner_id ?? null })
-      .eq('id', state.activeMatchId);
-    if (error) {
-      console.error('Failed to update match status', error);
-    }
-  }, [state.activeMatchId]);
+  const updateMatchStatus = useCallback(
+    async (status: MatchStatus, payload?: { winner_id?: string | null }) => {
+      if (!onlineEnabled) return;
+      const client = supabase;
+      if (!client || !state.activeMatchId) return;
+      const { error } = await client
+        .from('matches')
+        .update({ status, winner_id: payload?.winner_id ?? null })
+        .eq('id', state.activeMatchId);
+      if (error) {
+        console.error('Failed to update match status', error);
+      }
+    },
+    [onlineEnabled, state.activeMatchId],
+  );
 
   const offerRematch = useCallback(
     async () => {
+      if (!onlineEnabled) {
+        throw new Error('Online play is not enabled.');
+      }
       const client = supabase;
       if (!client || !profile || !state.activeMatch) return null;
       const { data, error } = await client
@@ -775,6 +872,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       const enriched = attachProfiles(record) ?? { ...record, creator: profile, opponent: null };
       setState((prev) => ({
         ...prev,
+        sessionMode: 'online',
         activeMatchId: enriched.id,
         activeMatch: enriched,
         moves: [],
@@ -784,14 +882,30 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
       return enriched;
     },
-    [attachProfiles, ensurePlayersLoaded, mergePlayers, profile, state.activeMatch],
+    [attachProfiles, ensurePlayersLoaded, mergePlayers, onlineEnabled, profile, state.activeMatch],
   );
 
   const setActiveMatch = useCallback(
     (matchId: string | null) => {
+      if (matchId === LOCAL_MATCH_ID) {
+        setState({
+          ...INITIAL_STATE,
+          sessionMode: 'local',
+          activeMatchId: LOCAL_MATCH_ID,
+          activeMatch: createLocalMatch(),
+        });
+        return;
+      }
       setState((prev) => {
         if (!matchId) {
-          return { ...prev, activeMatchId: null, activeMatch: null, moves: [], joinCode: null };
+          return {
+            ...prev,
+            sessionMode: prev.sessionMode === 'local' ? null : prev.sessionMode,
+            activeMatchId: null,
+            activeMatch: null,
+            moves: [],
+            joinCode: null,
+          };
         }
         const nextMatch =
           prev.myMatches.find((match) => match.id === matchId) ??
@@ -800,6 +914,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         const sameMatch = prev.activeMatchId === matchId;
         return {
           ...prev,
+          sessionMode: 'online',
           activeMatchId: matchId,
           activeMatch: hydrated,
           moves: sameMatch ? prev.moves : [],
@@ -811,11 +926,11 @@ export function useMatchLobby(profile: PlayerProfile | null) {
   );
 
   const activeRole = useMemo<'creator' | 'opponent' | null>(() => {
-    if (!profile || !state.activeMatch) return null;
+    if (!profile || !state.activeMatch || state.sessionMode !== 'online') return null;
     if (state.activeMatch.creator_id === profile.id) return 'creator';
     if (state.activeMatch.opponent_id === profile.id) return 'opponent';
     return null;
-  }, [profile, state.activeMatch]);
+  }, [profile, state.activeMatch, state.sessionMode]);
 
   const myMatchesWithProfiles = useMemo(
     () =>
@@ -837,6 +952,57 @@ export function useMatchLobby(profile: PlayerProfile | null) {
 
   const activeMatchWithProfiles = useMemo(() => attachProfiles(state.activeMatch), [attachProfiles, state.activeMatch]);
 
+  const startLocalMatch = useCallback(() => {
+    const localMatch = createLocalMatch();
+    setOnlineEnabled(false);
+    setState({
+      ...INITIAL_STATE,
+      sessionMode: 'local',
+      activeMatchId: localMatch.id,
+      activeMatch: localMatch,
+    });
+  }, []);
+
+  const stopLocalMatch = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      sessionMode: null,
+      activeMatchId: null,
+      activeMatch: null,
+      moves: [],
+      joinCode: null,
+    }));
+  }, []);
+
+  const enableOnline = useCallback(() => {
+    setOnlineEnabled(true);
+    setState((prev) => {
+      if (prev.sessionMode === 'local') {
+        return {
+          ...prev,
+          sessionMode: 'online',
+          activeMatchId: null,
+          activeMatch: null,
+          moves: [],
+          joinCode: null,
+        };
+      }
+      return { ...prev, sessionMode: 'online' };
+    });
+  }, []);
+
+  const disableOnline = useCallback(() => {
+    setOnlineEnabled(false);
+    setState((prev) => ({
+      ...prev,
+      sessionMode: null,
+      activeMatchId: null,
+      activeMatch: null,
+      moves: [],
+      joinCode: null,
+    }));
+  }, []);
+
   return {
     matches: matchesWithProfiles,
     myMatches: myMatchesWithProfiles,
@@ -846,6 +1012,8 @@ export function useMatchLobby(profile: PlayerProfile | null) {
     moves: state.moves,
     joinCode: state.joinCode,
     activeRole,
+    sessionMode: state.sessionMode,
+    onlineEnabled,
     setActiveMatch,
     createMatch,
     joinMatch,
@@ -853,5 +1021,9 @@ export function useMatchLobby(profile: PlayerProfile | null) {
     submitMove,
     updateMatchStatus,
     offerRematch,
+    startLocalMatch,
+    stopLocalMatch,
+    enableOnline,
+    disableOnline,
   };
 }

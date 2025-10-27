@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AlertDescription,
@@ -38,6 +38,7 @@ import { AddIcon } from '@chakra-ui/icons';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import { useMatchLobby, type CreateMatchPayload, type LobbyMatch } from '@hooks/useMatchLobby';
 import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
+import { SantoriniProvider, useSantorini } from '@hooks/useSantorini';
 import GameBoard from '@components/GameBoard';
 import GoogleIcon from '@components/auth/GoogleIcon';
 import type { SantoriniMoveAction, MatchStatus } from '@/types/match';
@@ -240,7 +241,165 @@ function PublicLobbies({
   );
 }
 
+function MatchModeSelector({
+  mode,
+  onSelectLocal,
+  onSelectOnline,
+  onlineAvailable,
+}: {
+  mode: 'local' | 'online';
+  onSelectLocal: () => void;
+  onSelectOnline: () => void;
+  onlineAvailable: boolean;
+}) {
+  return (
+    <Card>
+      <CardBody>
+        <Stack direction={{ base: 'column', md: 'row' }} justify="space-between" align={{ base: 'stretch', md: 'center' }} spacing={4}>
+          <Stack spacing={1}>
+            <Heading size="sm">Choose how to play</Heading>
+            <Text fontSize="sm" color="gray.500">
+              Start a local game on this device or head online for matchmaking.
+            </Text>
+          </Stack>
+          <ButtonGroup isAttached variant="outline">
+            <Button
+              colorScheme={mode === 'local' ? 'teal' : undefined}
+              variant={mode === 'local' ? 'solid' : 'outline'}
+              onClick={onSelectLocal}
+            >
+              Local match
+            </Button>
+            <Tooltip
+              label={onlineAvailable ? undefined : 'Sign in to play rated games and join online lobbies'}
+              isDisabled={onlineAvailable}
+            >
+              <Button
+                colorScheme={mode === 'online' ? 'teal' : undefined}
+                variant={mode === 'online' ? 'solid' : 'outline'}
+                onClick={onSelectOnline}
+              >
+                Online lobby
+              </Button>
+            </Tooltip>
+          </ButtonGroup>
+        </Stack>
+      </CardBody>
+    </Card>
+  );
+}
+
+function LocalMatchPanel({ onExit }: { onExit: () => void }) {
+  const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
+  return (
+    <SantoriniProvider evaluationEnabled={false}>
+      <LocalMatchContent onExit={onExit} cardBg={cardBg} cardBorder={cardBorder} mutedText={mutedText} />
+    </SantoriniProvider>
+  );
+}
+
+function LocalMatchContent({
+  onExit,
+  cardBg,
+  cardBorder,
+  mutedText,
+}: {
+  onExit: () => void;
+  cardBg: string;
+  cardBorder: string;
+  mutedText: string;
+}) {
+  const {
+    loading,
+    initialize,
+    board,
+    selectable,
+    onCellClick,
+    onCellHover,
+    onCellLeave,
+    buttons,
+    undo,
+    redo,
+    nextPlayer,
+    controls,
+  } = useSantorini({ evaluationEnabled: false });
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await initialize();
+        if (!cancelled) {
+          await controls.setGameMode('Human');
+          setInitialized(true);
+        }
+      } catch (error) {
+        console.error('Failed to initialize local match engine', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [controls, initialize]);
+
+  const currentPlayer = nextPlayer === 0 ? 'Blue (Player 1)' : 'Red (Player 2)';
+
+  return (
+    <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} w="100%">
+      <CardHeader>
+        <Flex justify="space-between" align={{ base: 'flex-start', md: 'center' }} direction={{ base: 'column', md: 'row' }} gap={3}>
+          <Stack spacing={1}>
+            <Heading size="md">Local match</Heading>
+            <Text fontSize="sm" color={mutedText}>
+              Pass the device between players. {initialized ? `Current turn: ${currentPlayer}` : 'Preparing board...'}
+            </Text>
+          </Stack>
+          <Button variant="outline" size="sm" onClick={onExit}>
+            End local match
+          </Button>
+        </Flex>
+      </CardHeader>
+      <CardBody>
+        <Stack spacing={6}>
+          <Box display="flex" justifyContent="center">
+            {loading ? (
+              <Center py={8} w="100%">
+                <Spinner />
+              </Center>
+            ) : (
+              <GameBoard
+                board={board}
+                selectable={selectable}
+                onCellClick={onCellClick}
+                onCellHover={onCellHover}
+                onCellLeave={onCellLeave}
+                buttons={buttons}
+                undo={undo}
+                redo={redo}
+              />
+            )}
+          </Box>
+          <HStack spacing={3} justify="center" wrap="wrap">
+            <Button colorScheme="teal" onClick={() => controls.reset()} isDisabled={loading}>
+              Reset board
+            </Button>
+            <Button variant="outline" onClick={undo} isDisabled={loading || !buttons.canUndo}>
+              Undo
+            </Button>
+            <Button variant="outline" onClick={redo} isDisabled={loading || !buttons.canRedo}>
+              Redo
+            </Button>
+            <Badge colorScheme={nextPlayer === 0 ? 'blue' : 'red'}>{currentPlayer}</Badge>
+          </HStack>
+        </Stack>
+      </CardBody>
+    </Card>
+  );
+}
+
 function ActiveMatchPanel({
+  sessionMode,
   match,
   role,
   moves,
@@ -249,7 +408,9 @@ function ActiveMatchPanel({
   onLeave,
   onOfferRematch,
   onGameComplete,
+  onStopLocal,
 }: {
+  sessionMode: ReturnType<typeof useMatchLobby>['sessionMode'];
   match: LobbyMatch | null;
   role: 'creator' | 'opponent' | null;
   moves: ReturnType<typeof useMatchLobby>['moves'];
@@ -258,6 +419,7 @@ function ActiveMatchPanel({
   onLeave: (matchId?: string | null) => Promise<void>;
   onOfferRematch: ReturnType<typeof useMatchLobby>['offerRematch'];
   onGameComplete: (status: MatchStatus, payload?: { winner_id?: string | null }) => Promise<void>;
+  onStopLocal: () => void;
 }) {
   const toast = useToast();
   const [offerBusy, setOfferBusy] = useBoolean();
@@ -311,6 +473,25 @@ function ActiveMatchPanel({
       });
     }
   }, [lobbyMatch, onGameComplete, toast]);
+
+  if (sessionMode === 'local') {
+    return <LocalMatchPanel onExit={onStopLocal} />;
+  }
+
+  if (sessionMode !== 'online') {
+    return (
+      <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} w="100%">
+        <CardBody>
+          <Center py={10}>
+            <Stack spacing={3} textAlign="center">
+              <Heading size="md">Start playing</Heading>
+              <Text color={mutedText}>Select a mode above to begin a new Santorini match.</Text>
+            </Stack>
+          </Center>
+        </CardBody>
+      </Card>
+    );
+  }
 
   const santorini = useOnlineSantorini({
     match: lobbyMatch,
@@ -696,6 +877,15 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   const [joiningCode, setJoiningCode] = useState('');
   const toast = useToast();
   const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
+  const initializedLocalRef = useRef(false);
+  const sessionMode = lobby.sessionMode ?? 'local';
+
+  useEffect(() => {
+    if (!initializedLocalRef.current && !lobby.sessionMode) {
+      lobby.startLocalMatch();
+      initializedLocalRef.current = true;
+    }
+  }, [lobby.sessionMode, lobby.startLocalMatch]);
 
   const handleCreate = async (payload: CreateMatchPayload) => {
     await lobby.createMatch(payload);
@@ -719,7 +909,33 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   return (
     <Stack spacing={6} py={{ base: 6, md: 10 }}>
       <PlaySignInGate auth={auth} />
-      {auth.profile && (
+      <MatchModeSelector
+        mode={sessionMode}
+        onSelectLocal={() => {
+          if (sessionMode !== 'local') {
+            lobby.startLocalMatch();
+          }
+        }}
+        onSelectOnline={() => {
+          if (sessionMode !== 'online') {
+            lobby.enableOnline();
+          }
+        }}
+        onlineAvailable={Boolean(auth.profile)}
+      />
+      {sessionMode === 'online' && !auth.profile && (
+        <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
+          <CardBody>
+            <Stack spacing={3} textAlign="center">
+              <Heading size="sm">Sign in to join the lobby</Heading>
+              <Text fontSize="sm" color={mutedText}>
+                Connect your account to challenge other players, save match history, and compete on the leaderboard.
+              </Text>
+            </Stack>
+          </CardBody>
+        </Card>
+      )}
+      {sessionMode === 'online' && auth.profile && (
         <Grid templateColumns={{ base: '1fr', lg: '2fr 1fr' }} gap={6} alignItems="flex-start">
           <GridItem>
             <Stack spacing={6}>
@@ -762,18 +978,18 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
           </GridItem>
         </Grid>
       )}
-      {auth.profile && (
-        <ActiveMatchPanel
-          match={lobby.activeMatch}
-          role={lobby.activeRole}
-          moves={lobby.moves}
-          joinCode={lobby.joinCode}
-          onSubmitMove={lobby.submitMove}
-          onLeave={lobby.leaveMatch}
-          onOfferRematch={lobby.offerRematch}
-          onGameComplete={lobby.updateMatchStatus}
-        />
-      )}
+      <ActiveMatchPanel
+        sessionMode={sessionMode}
+        match={lobby.activeMatch}
+        role={lobby.activeRole}
+        moves={lobby.moves}
+        joinCode={lobby.joinCode}
+        onSubmitMove={lobby.submitMove}
+        onLeave={lobby.leaveMatch}
+        onOfferRematch={lobby.offerRematch}
+        onGameComplete={lobby.updateMatchStatus}
+        onStopLocal={lobby.stopLocalMatch}
+      />
     </Stack>
   );
 }
