@@ -48,6 +48,63 @@ def _normalize_coordinates(coord):
 
     return y, x
 
+
+def _serialize_board_state(state):
+    """Convert a numpy board state into a JSON-serializable list."""
+    array = np.array(state, copy=True)
+    if array.shape != (5, 5, 3):
+        raise ValueError(f"Unexpected board shape while serializing: {array.shape}")
+    return array.astype(np.int8).tolist()
+
+
+def _deserialize_board_state(payload):
+    """Convert a JSON payload back into a board state array."""
+    array = np.array(payload, dtype=np.int8)
+    if array.shape != (5, 5, 3):
+        raise ValueError(f"Unexpected board shape while deserializing: {array.shape}")
+    return array
+
+
+def _serialize_history(entries):
+    """Serialize history or future history entries for persistence."""
+    serialized = []
+    for entry in entries:
+        player_value = int(entry[0])
+        board_state = _serialize_board_state(entry[1])
+        action = entry[2]
+        serialized.append(
+            {
+                "player": player_value,
+                "board": board_state,
+                "action": None if action is None else int(action),
+            }
+        )
+    return serialized
+
+
+def _deserialize_history(entries):
+    """Deserialize persisted history data back into runtime structures."""
+    if entries is None:
+        return []
+
+    restored = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if "board" not in entry:
+            continue
+        board_state = _deserialize_board_state(entry["board"])
+        player_value = int(entry.get("player", 0))
+        action_value = entry.get("action")
+        restored.append(
+            [
+                player_value,
+                board_state,
+                None if action_value is None else int(action_value),
+            ]
+        )
+    return restored
+
 class dotdict(dict):
     def __getattr__(self, name):
         return self[name]
@@ -439,6 +496,77 @@ def get_history_snapshot():
         )
 
     return snapshot
+
+
+# -----------------------------------------------------------------------------
+
+
+def export_practice_state():
+    """Serialize the current practice state for persistence in local storage."""
+    global g, board, player, history, future_history
+
+    if g is None:
+        return None
+
+    try:
+        current_board = _serialize_board_state(board)
+        history_payload = _serialize_history(history)
+        future_payload = _serialize_history(future_history)
+        end_state = g.getGameEnded(board, player)
+        valid_moves = g.getValidMoves(board, player)
+
+        return {
+            "version": 1,
+            "player": int(player),
+            "board": current_board,
+            "history": history_payload,
+            "future": future_payload,
+            "gameEnded": [int(end_state[0]), int(end_state[1])],
+            "validMoves": [bool(x) for x in valid_moves.tolist()],
+        }
+    except Exception as exc:  # pragma: no cover - defensive guard
+        print(f"Failed to export practice state: {exc}")
+        return None
+
+
+def import_practice_state(payload):
+    """Restore a previously persisted practice state."""
+    global g, board, player, history, future_history, current_eval, last_probs
+
+    if g is None:
+        raise RuntimeError("Game has not been initialised")
+
+    if payload is None:
+        raise ValueError("Empty practice state payload")
+
+    if hasattr(payload, "to_py"):  # pragma: no cover - pyodide proxy handling
+        payload = payload.to_py()
+
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid practice state payload")
+
+    board_data = payload.get("board")
+    player_value = int(payload.get("player", 0))
+
+    try:
+        restored_board = _deserialize_board_state(board_data)
+        history_entries = _deserialize_history(payload.get("history"))
+        future_entries = _deserialize_history(payload.get("future"))
+    except Exception as exc:
+        raise ValueError("Malformed practice state data") from exc
+
+    g.board.state[:, :, :] = restored_board
+    board = np.copy(g.board.get_state())
+    player = player_value
+    history = history_entries
+    future_history = future_entries
+    current_eval = [0.0, 0.0]
+    last_probs = None
+
+    end_state = g.getGameEnded(board, player)
+    valid_moves = g.getValidMoves(board, player)
+
+    return [int(player), end_state, valid_moves]
 
 
 # -----------------------------------------------------------------------------

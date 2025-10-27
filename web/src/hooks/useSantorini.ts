@@ -25,6 +25,8 @@ const ONNX_OUTPUT_SIZE = 162;
 
 let onnxSessionPromise: Promise<any> | null = null;
 
+const PRACTICE_STATE_KEY = 'santorini:practiceState';
+
 export type BoardCell = CellState & {
   svg: string;
   highlight: boolean;
@@ -147,6 +149,87 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
   const gameRef = useRef<Santorini>();
   const selectorRef = useRef<MoveSelector>();
   const aiPromiseRef = useRef<Promise<void>>(Promise.resolve());
+
+  const persistPracticeState = useCallback(async () => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const game = gameRef.current;
+    if (!game?.py || !game.py.export_practice_state) {
+      return;
+    }
+    try {
+      const snapshotProxy = game.py.export_practice_state();
+      if (!snapshotProxy) {
+        return;
+      }
+      const snapshot =
+        typeof snapshotProxy.toJs === 'function'
+          ? snapshotProxy.toJs({ create_proxies: false })
+          : snapshotProxy;
+      snapshotProxy.destroy?.();
+      if (!snapshot) {
+        return;
+      }
+      window.localStorage.setItem(PRACTICE_STATE_KEY, JSON.stringify(snapshot));
+    } catch (error) {
+      console.error('Failed to persist practice state:', error);
+    }
+  }, []);
+
+  const restorePracticeState = useCallback(async () => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    const stored = window.localStorage.getItem(PRACTICE_STATE_KEY);
+    if (!stored) {
+      return false;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(stored);
+    } catch (error) {
+      console.error('Failed to parse stored practice state:', error);
+      window.localStorage.removeItem(PRACTICE_STATE_KEY);
+      return false;
+    }
+
+    const game = gameRef.current;
+    if (!game?.py || !game.py.import_practice_state) {
+      return false;
+    }
+
+    try {
+      const resultProxy = game.py.import_practice_state(parsed);
+      if (!resultProxy) {
+        return false;
+      }
+      const result =
+        typeof resultProxy.toJs === 'function'
+          ? resultProxy.toJs({ create_proxies: false })
+          : resultProxy;
+      resultProxy.destroy?.();
+      if (!Array.isArray(result) || result.length < 3) {
+        return false;
+      }
+      const [nextPlayer, gameEndedRaw, validMovesRaw] = result as [
+        number,
+        ArrayLike<number> | number[],
+        ArrayLike<boolean> | boolean[],
+      ];
+      game.nextPlayer = typeof nextPlayer === 'number' ? nextPlayer : 0;
+      const endArray = Array.from(gameEndedRaw ?? [], (value) => Number(value));
+      game.gameEnded = (endArray.length === 2 ? endArray : [0, 0]) as [number, number];
+      const validArray = Array.from(validMovesRaw ?? [], (value) => Boolean(value));
+      game.validMoves =
+        validArray.length > 0 ? validArray : Array(GAME_CONSTANTS.TOTAL_MOVES).fill(false);
+      return true;
+    } catch (error) {
+      console.error('Failed to restore practice state:', error);
+      window.localStorage.removeItem(PRACTICE_STATE_KEY);
+      return false;
+    }
+  }, []);
 
   const initOnnxSession = useCallback(async () => {
     if (!window.ort) {
@@ -414,7 +497,8 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     updateSelectable();
     await updateButtons(loadingState);
     refreshHistory();
-  }, [readBoard, updateSelectable, updateButtons, refreshHistory]);
+    await persistPracticeState();
+  }, [persistPracticeState, readBoard, updateSelectable, updateButtons, refreshHistory]);
 
   const initializeStartedRef = useRef(false);
   const initializePromiseRef = useRef<Promise<void> | null>(null);
@@ -440,6 +524,7 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
           return;
         }
         game.init_game();
+        await restorePracticeState();
         selector.resetAndStart();
         await syncUi(true);
         await refreshEvaluation();
@@ -455,7 +540,7 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
 
     initializePromiseRef.current = initPromise;
     await initPromise;
-  }, [loadPyodideRuntime, refreshEvaluation, syncUi]);
+  }, [loadPyodideRuntime, refreshEvaluation, restorePracticeState, syncUi]);
 
   const aiPlayIfNeeded = useCallback(async () => {
     if (!evaluationEnabled) {
@@ -548,11 +633,12 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     }));
     
     readBoard();
+    await persistPracticeState();
 
     if (newSetupTurn >= 4) {
       await finalizeGuidedSetup();
     }
-  }, [buttons.setupTurn, readBoard, finalizeGuidedSetup]);
+  }, [buttons.setupTurn, finalizeGuidedSetup, persistPracticeState, readBoard]);
 
   const applyMove = useCallback(
     async (move: number, options: ApplyMoveOptions = {}) => {
@@ -594,6 +680,7 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
         readBoard();
         updateSelectable();
         await updateButtons(false);
+        await persistPracticeState();
         return;
       }
 
@@ -606,7 +693,15 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
         updateButtons(false);
       }
     },
-    [applyMove, updateButtons, updateSelectable, buttons.setupMode, placeWorkerForSetup, readBoard],
+    [
+      applyMove,
+      updateButtons,
+      updateSelectable,
+      buttons.setupMode,
+      placeWorkerForSetup,
+      persistPracticeState,
+      readBoard,
+    ],
   );
 
   const onCellHover = useCallback((_y: number, _x: number) => {
@@ -782,7 +877,8 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
 
     // Clear selectable cells and refresh board
     readBoard();
-  }, [readBoard]);
+    await persistPracticeState();
+  }, [persistPracticeState, readBoard]);
 
   const controls: Controls = useMemo(
     () => ({

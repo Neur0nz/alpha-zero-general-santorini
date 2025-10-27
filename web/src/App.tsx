@@ -22,6 +22,9 @@ import PracticeToolbar from '@components/PracticeToolbar';
 import PlayWorkspace from '@components/play/PlayWorkspace';
 import AnalyzeWorkspace from '@components/analyze/AnalyzeWorkspace';
 
+const TAB_ORDER: AppTab[] = ['play', 'practice', 'analyze'];
+const TAB_STORAGE_KEY = 'santorini:lastTab';
+
 function App() {
   const {
     loading,
@@ -41,15 +44,40 @@ function App() {
     calcOptionsBusy,
   } = useSantorini();
   const { isOpen: isHistoryOpen, onOpen: openHistory, onClose: closeHistory } = useDisclosure();
-  const tabOrder: AppTab[] = ['play', 'practice', 'analyze'];
+  const tabOrder = TAB_ORDER;
   const [activeTab, setActiveTab] = useState<AppTab>('play');
-  const activeIndex = tabOrder.indexOf(activeTab);
+  const activeIndex = Math.max(0, tabOrder.indexOf(activeTab));
   const auth = useSupabaseAuth();
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      const storedTab = window.localStorage.getItem(TAB_STORAGE_KEY) as AppTab | null;
+      if (storedTab && tabOrder.includes(storedTab)) {
+        setActiveTab(storedTab);
+      }
+    } catch (error) {
+      console.error('Failed to restore last active tab', error);
+    }
+  }, [tabOrder]);
 
   useEffect(() => {
     // Initialize game engine in background without blocking UI
     initialize().catch(console.error);
   }, [initialize]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      window.localStorage.setItem(TAB_STORAGE_KEY, activeTab);
+    } catch (error) {
+      console.error('Failed to persist last active tab', error);
+    }
+  }, [activeTab]);
 
   const tabActions = useMemo(() => {
     switch (activeTab) {
@@ -80,7 +108,11 @@ function App() {
   }, [activeTab, openHistory]);
 
   const handleTabChange = (index: number) => {
-    setActiveTab(tabOrder[index]);
+    const nextTab = tabOrder[index];
+    if (!nextTab) {
+      return;
+    }
+    setActiveTab(nextTab);
   };
 
   return (
