@@ -40,7 +40,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const [clockEnabled, setClockEnabled] = useState(match?.clock_initial_seconds ? match.clock_initial_seconds > 0 : false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appliedMovesRef = useRef(0);
-  const pendingLocalMoveRef = useRef<{ expectedHistoryLength: number } | null>(null);
+  const pendingLocalMoveRef = useRef<{ expectedHistoryLength: number; expectedMoveIndex: number } | null>(null);
   const lastSyncedRef = useRef<{ matchId: string | null; moveIndex: number }>({ matchId: null, moveIndex: -1 });
   const resetMatch = useCallback(async () => {
     if (!match) {
@@ -253,7 +253,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       return;
     }
 
-    const nextIndex = base.history.length - 1;
+    const nextIndex = pending.expectedMoveIndex;
     const updatedClock = clockEnabled
       ? {
           creatorMs: clock.creatorMs,
@@ -309,10 +309,10 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         return;
       }
 
-      pendingLocalMoveRef.current = { expectedHistoryLength: base.history.length };
+      pendingLocalMoveRef.current = { expectedHistoryLength: base.history.length, expectedMoveIndex: moves.length };
       await base.onCellClick(y, x);
     },
-    [base, currentTurn, match, role, toast],
+    [base, currentTurn, match, moves.length, role, toast],
   );
 
   const localPlayerClock = role === 'opponent' ? clock.opponentMs : clock.creatorMs;
