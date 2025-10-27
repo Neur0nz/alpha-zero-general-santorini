@@ -1109,7 +1109,13 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
         </ModalContent>
       </Modal>
       
-      {sessionMode === 'online' && auth.profile && (
+      {sessionMode === 'online' && auth.profile && (() => {
+        // Theme-aware colors for active state - MUST be at component level, not inside map!
+        const activeBg = useColorModeValue('teal.50', 'teal.900');
+        const activeBorder = useColorModeValue('teal.200', 'teal.600');
+        const hoverBorder = useColorModeValue('teal.300', 'teal.500');
+        
+        return (
         <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
           <CardHeader>
             <Heading size="md" color={accentHeading}>
@@ -1130,11 +1136,6 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
                     const opponentName = isCreator ? m.opponent?.display_name : m.creator?.display_name;
                     const status = m.status === 'waiting_for_opponent' ? 'Waiting...' : 
                                    m.status === 'completed' ? 'Finished' : 'In Progress';
-                    
-                    // Theme-aware colors for active state
-                    const activeBg = useColorModeValue('teal.50', 'teal.900');
-                    const activeBorder = useColorModeValue('teal.200', 'teal.600');
-                    const hoverBorder = useColorModeValue('teal.300', 'teal.500');
                     
                     return (
                       <Card
@@ -1239,7 +1240,8 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
             </Stack>
           </CardBody>
         </Card>
-      )}
+        );
+      })()}
       <ActiveMatchPanel
         sessionMode={sessionMode}
         match={lobby.activeMatch}
