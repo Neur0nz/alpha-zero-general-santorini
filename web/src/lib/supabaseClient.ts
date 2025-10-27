@@ -13,6 +13,15 @@ export const supabase = supabaseUrl && supabaseAnonKey
       auth: {
         persistSession: true,
         autoRefreshToken: true,
+        detectSessionInUrl: true,
+        flowType: 'pkce',
+        storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+        storageKey: 'sb-santorini-auth-token',
+      },
+      global: {
+        headers: {
+          'X-Client-Info': 'santorini-app',
+        },
       },
     })
   : null;

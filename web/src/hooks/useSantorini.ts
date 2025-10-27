@@ -125,15 +125,15 @@ const normalizeTopMoves = (rawMoves: unknown): TopMove[] => {
 
 export function useSantorini(options: UseSantoriniOptions = {}) {
   const { evaluationEnabled = true } = options;
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start with UI enabled
   const [board, setBoard] = useState<BoardCell[][]>(INITIAL_BOARD);
   const [selectable, setSelectable] = useState<boolean[][]>(INITIAL_SELECTABLE);
   const [buttons, setButtons] = useState<ButtonsState>({
-    loading: true,
+    loading: false,
     canRedo: false,
     canUndo: false,
     editMode: 0,
-    status: 'Loading engine...',
+    status: 'Initializing game engine...',
     setupMode: false,
     setupTurn: 0
   });
@@ -431,7 +431,8 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
 
     const initPromise = (async () => {
       try {
-        setLoading(true);
+        // Don't block UI - just update status
+        setButtons((prev) => ({ ...prev, status: 'Loading game engine...' }));
         await loadPyodideRuntime();
         const game = gameRef.current;
         const selector = selectorRef.current;
@@ -442,10 +443,10 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
         selector.resetAndStart();
         await syncUi(true);
         await refreshEvaluation();
-        setLoading(false);
-        setButtons((prev) => ({ ...prev, loading: false }));
+        setButtons((prev) => ({ ...prev, loading: false, status: 'Ready to play!' }));
       } catch (error) {
         initializeStartedRef.current = false;
+        setButtons((prev) => ({ ...prev, status: 'Failed to load game engine' }));
         throw error;
       } finally {
         initializePromiseRef.current = null;

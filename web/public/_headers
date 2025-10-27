@@ -4,6 +4,7 @@
 /*
   Cross-Origin-Embedder-Policy: require-corp
   Cross-Origin-Opener-Policy: same-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
 
 # Cache Python sources aggressively for faster repeat loads
 /*.py

@@ -47,7 +47,8 @@ function App() {
   const auth = useSupabaseAuth();
 
   useEffect(() => {
-    initialize();
+    // Initialize game engine in background without blocking UI
+    initialize().catch(console.error);
   }, [initialize]);
 
   const tabActions = useMemo(() => {
