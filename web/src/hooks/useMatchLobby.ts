@@ -409,6 +409,10 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         throw new Error('Match is no longer accepting players.');
       }
 
+      if (targetMatch.opponent_id !== null) {
+        throw new Error('Match is no longer available or has already been joined by another player.');
+      }
+
       if (targetMatch.creator_id === profile.id) {
         setState((prev) => ({ ...prev, activeMatch: targetMatch, joinCode: targetMatch.private_join_code, moves: [] }));
         void ensurePlayersLoaded([targetMatch.creator_id, targetMatch.opponent_id ?? undefined]);
@@ -422,11 +426,15 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         .eq('id', targetMatch.id)
         .is('opponent_id', null)
         .select('*')
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error('Failed to join match', error);
         throw error;
+      }
+
+      if (!data) {
+        throw new Error('Match is no longer available or has already been joined by another player.');
       }
 
       const joined = data as MatchRecord;
