@@ -949,6 +949,12 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   const { isOpen: isJoinOpen, onOpen: onJoinOpen, onClose: onJoinClose } = useDisclosure();
   const toast = useToast();
   const { cardBg, cardBorder, mutedText, accentHeading } = useSurfaceTokens();
+  
+  // Theme-aware colors for active game cards - MUST be at component top level!
+  const activeGameBg = useColorModeValue('teal.50', 'teal.900');
+  const activeGameBorder = useColorModeValue('teal.200', 'teal.600');
+  const activeGameHoverBorder = useColorModeValue('teal.300', 'teal.500');
+  
   const initializedOnlineRef = useRef(false);
   const sessionMode = lobby.sessionMode ?? 'online';
 
@@ -1109,13 +1115,7 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
         </ModalContent>
       </Modal>
       
-      {sessionMode === 'online' && auth.profile && (() => {
-        // Theme-aware colors for active state - MUST be at component level, not inside map!
-        const activeBg = useColorModeValue('teal.50', 'teal.900');
-        const activeBorder = useColorModeValue('teal.200', 'teal.600');
-        const hoverBorder = useColorModeValue('teal.300', 'teal.500');
-        
-        return (
+      {sessionMode === 'online' && auth.profile && (
         <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
           <CardHeader>
             <Heading size="md" color={accentHeading}>
@@ -1141,11 +1141,11 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
                       <Card
                         key={m.id}
                         variant="outline"
-                        bg={isActive ? activeBg : undefined}
-                        borderColor={isActive ? activeBorder : cardBorder}
+                        bg={isActive ? activeGameBg : undefined}
+                        borderColor={isActive ? activeGameBorder : cardBorder}
                         cursor="pointer"
                         onClick={() => lobby.setActiveMatch(m.id)}
-                        _hover={{ borderColor: hoverBorder }}
+                        _hover={{ borderColor: activeGameHoverBorder }}
                       >
                         <CardBody py={3}>
                           <Flex justify="space-between" align="center">
@@ -1240,8 +1240,7 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
             </Stack>
           </CardBody>
         </Card>
-        );
-      })()}
+      )}
       <ActiveMatchPanel
         sessionMode={sessionMode}
         match={lobby.activeMatch}
