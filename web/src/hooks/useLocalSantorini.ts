@@ -78,6 +78,7 @@ export function useLocalSantorini() {
   const [selectable, setSelectable] = useState<boolean[][]>(() => computeSelectable(engine.getValidMoves(), engine.snapshot, moveSelectorRef.current));
   const [history, setHistory] = useState<Array<{ action: number; description: string }>>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const processingMoveRef = useRef<boolean>(false);
   
   const nextPlayer = useMemo(() => engine.player, [engine]);
   
@@ -105,6 +106,12 @@ export function useLocalSantorini() {
 
   const onCellClick = useCallback(
     (y: number, x: number) => {
+      // Prevent overlapping move processing
+      if (processingMoveRef.current) {
+        console.log('useLocalSantorini: Move processing in progress, ignoring click');
+        return;
+      }
+
       if (gameEnded) {
         toast({ title: 'Game has ended', status: 'info' });
         return;
@@ -118,6 +125,7 @@ export function useLocalSantorini() {
       // During placement phase ONLY
       const placementAction = y * 5 + x;
       if (hasPlacementMoves && placementAction < 25 && validMoves[placementAction]) {
+        processingMoveRef.current = true;
         try {
           const result = engine.applyMove(placementAction);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
@@ -138,6 +146,8 @@ export function useLocalSantorini() {
         } catch (error) {
           console.error('Move failed:', error);
           toast({ title: 'Invalid move', status: 'error' });
+        } finally {
+          processingMoveRef.current = false;
         }
         return;
       }
@@ -158,6 +168,7 @@ export function useLocalSantorini() {
       const action = moveSelector.getAction();
       if (action >= 0) {
         // Move is complete - apply it
+        processingMoveRef.current = true;
         try {
           const result = engine.applyMove(action);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
@@ -180,6 +191,8 @@ export function useLocalSantorini() {
           toast({ title: 'Invalid move', status: 'error' });
           moveSelector.reset();
           setSelectable(computeSelectable(validMoves, engine.snapshot, moveSelector));
+        } finally {
+          processingMoveRef.current = false;
         }
       }
     },

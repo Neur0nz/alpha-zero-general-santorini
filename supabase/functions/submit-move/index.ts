@@ -148,46 +148,45 @@ serve(async (req) => {
     return jsonResponse({ error: 'Match state is unavailable' }, { status: 500 });
   }
 
-  let engine: SantoriniEngine;
-  try {
-    console.log('Building engine from initial state:', JSON.stringify(match.initial_state, null, 2));
-    engine = SantoriniEngine.fromSnapshot(match.initial_state as SantoriniStateSnapshot);
-    console.log('Engine created successfully, current player:', engine.player);
-  } catch (error) {
-    console.error('Failed to build engine from initial state', error);
-    console.error('Initial state was:', JSON.stringify(match.initial_state, null, 2));
-    return jsonResponse({ error: 'Match state is corrupted' }, { status: 500 });
-  }
-
-  const { data: existingMoves, error: movesError } = await supabase
+  // OPTIMIZATION: Load from LAST move's snapshot instead of replaying all history!
+  const { data: lastMove, error: lastMoveError } = await supabase
     .from('match_moves')
-    .select('id, move_index, action')
+    .select('move_index, state_snapshot')
     .eq('match_id', match.id)
-    .order('move_index', { ascending: true });
-  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Historical moves loaded (${existingMoves?.length ?? 0} moves)`);
+    .order('move_index', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Last move snapshot loaded`);
 
-  if (movesError) {
-    console.error('Failed to load existing moves', movesError);
-    return jsonResponse({ error: 'Unable to load move history' }, { status: 500 });
+  if (lastMoveError) {
+    console.error('Failed to load last move', lastMoveError);
+    return jsonResponse({ error: 'Unable to load match state' }, { status: 500 });
   }
 
+  let engine: SantoriniEngine;
   let expectedMoveIndex = 0;
-  if (Array.isArray(existingMoves)) {
-    for (const record of existingMoves) {
-      if (!Number.isInteger(record.move_index) || record.move_index !== expectedMoveIndex) {
-        console.error('Detected inconsistent move history ordering', record);
-        return jsonResponse({ error: 'Match history is inconsistent' }, { status: 500 });
-      }
-      const action = record.action as SantoriniMoveAction | null;
-      if (action?.kind === 'santorini.move' && Number.isInteger(action.move)) {
-        try {
-          engine.applyMove(action.move);
-        } catch (error) {
-          console.error('Detected invalid historical move', error);
-          return jsonResponse({ error: 'Existing move history failed validation' }, { status: 500 });
-        }
-      }
-      expectedMoveIndex += 1;
+
+  if (lastMove && lastMove.state_snapshot) {
+    // Resume from last move's snapshot (FAST!)
+    try {
+      console.log('Building engine from last move snapshot, move_index:', lastMove.move_index);
+      engine = SantoriniEngine.fromSnapshot(lastMove.state_snapshot as SantoriniStateSnapshot);
+      expectedMoveIndex = lastMove.move_index + 1;
+      console.log('Engine resumed from snapshot, current player:', engine.player, 'next move index:', expectedMoveIndex);
+    } catch (error) {
+      console.error('Failed to build engine from snapshot', error);
+      return jsonResponse({ error: 'Match state snapshot is corrupted' }, { status: 500 });
+    }
+  } else {
+    // First move - start from initial state
+    try {
+      console.log('Building engine from initial state (first move)');
+      engine = SantoriniEngine.fromSnapshot(match.initial_state as SantoriniStateSnapshot);
+      expectedMoveIndex = 0;
+      console.log('Engine created from initial state, current player:', engine.player);
+    } catch (error) {
+      console.error('Failed to build engine from initial state', error);
+      return jsonResponse({ error: 'Match state is corrupted' }, { status: 500 });
     }
   }
 
