@@ -22,8 +22,9 @@ import HistoryModal from '@components/HistoryModal';
 import PracticeToolbar from '@components/PracticeToolbar';
 import PlayWorkspace from '@components/play/PlayWorkspace';
 import AnalyzeWorkspace from '@components/analyze/AnalyzeWorkspace';
+import ProfileWorkspace from '@components/profile/ProfileWorkspace';
 
-const TAB_ORDER: AppTab[] = ['play', 'practice', 'analyze'];
+const TAB_ORDER: AppTab[] = ['play', 'practice', 'analyze', 'profile'];
 const TAB_STORAGE_KEY = 'santorini:lastTab';
 
 function App() {
@@ -95,6 +96,8 @@ function App() {
             <IconButton aria-label="Search games" icon={<SearchIcon />} size="sm" variant="outline" isDisabled />
           </Tooltip>
         );
+      case 'profile':
+        return null;
       default:
         return null;
     }
@@ -201,6 +204,9 @@ function App() {
               </TabPanel>
               <TabPanel px={0}>
                 <AnalyzeWorkspace />
+              </TabPanel>
+              <TabPanel px={0}>
+                <ProfileWorkspace auth={auth} />
               </TabPanel>
             </TabPanels>
           </Container>
