@@ -16,6 +16,8 @@ const NO_BUILD = 4;
 const NB_GODS = 1;
 const ACTION_SIZE = NB_GODS * 2 * 9 * 9; // 162 total actions
 
+export type PlacementContext = { player: 0 | 1; workerId: 1 | 2 | -1 | -2 };
+
 const DIRECTIONS: Array<[number, number]> = [
   [-1, -1], [-1, 0], [-1, 1],
   [0, -1],  [0, 0],  [0, 1],
@@ -208,6 +210,10 @@ export class SantoriniEngine {
 
   getValidMoves(): boolean[] {
     return this.validMoves.slice();
+  }
+
+  getPlacementContext(): PlacementContext | null {
+    return this.getNextPlacement();
   }
 
   getGameEnded(): [number, number] {
@@ -442,7 +448,7 @@ export class SantoriniEngine {
     return null;
   }
 
-  private getNextPlacement(): { player: 0 | 1; workerId: 1 | 2 | -1 | -2 } | null {
+  private getNextPlacement(): PlacementContext | null {
     const hasWorker = (id: number) => this.findWorker(id) !== null;
     if (!hasWorker(1)) return { player: 0, workerId: 1 };
     if (!hasWorker(2)) return { player: 0, workerId: 2 };

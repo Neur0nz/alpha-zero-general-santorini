@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
-import { SantoriniEngine, type SantoriniSnapshot } from '@/lib/santoriniEngine';
+import { SantoriniEngine, type SantoriniSnapshot, type PlacementContext } from '@/lib/santoriniEngine';
 import { TypeScriptMoveSelector } from '@/lib/moveSelectorTS';
 import { renderCellSvg } from '@game/svg';
 import { useToast } from '@chakra-ui/react';
@@ -41,15 +41,16 @@ function engineToBoard(snapshot: SantoriniSnapshot): BoardCell[][] {
 }
 
 function computeSelectable(
-  validMoves: boolean[], 
+  validMoves: boolean[],
   snapshot: SantoriniSnapshot,
-  moveSelector: TypeScriptMoveSelector | null
+  moveSelector: TypeScriptMoveSelector | null,
+  placement: PlacementContext | null,
 ): boolean[][] {
   const selectable: boolean[][] = Array.from({ length: 5 }, () => Array(5).fill(false));
-  
-  // During placement phase (first 25 actions are placements)
-  const hasPlacementMoves = validMoves.slice(0, 25).some(v => v);
-  if (hasPlacementMoves) {
+
+  // During placement phase highlight available empty squares
+  const isPlacementPhase = placement && placement.player === snapshot.player;
+  if (isPlacementPhase) {
     for (let i = 0; i < 25; i++) {
       if (validMoves[i]) {
         const y = Math.floor(i / 5);
@@ -75,7 +76,14 @@ export function useLocalSantorini() {
   const [engine, setEngine] = useState<SantoriniEngine>(() => SantoriniEngine.createInitial().engine);
   const [board, setBoard] = useState<BoardCell[][]>(() => engineToBoard(engine.snapshot));
   const moveSelectorRef = useRef<TypeScriptMoveSelector>(new TypeScriptMoveSelector());
-  const [selectable, setSelectable] = useState<boolean[][]>(() => computeSelectable(engine.getValidMoves(), engine.snapshot, moveSelectorRef.current));
+  const [selectable, setSelectable] = useState<boolean[][]>(() =>
+    computeSelectable(
+      engine.getValidMoves(),
+      engine.snapshot,
+      moveSelectorRef.current,
+      engine.getPlacementContext(),
+    ),
+  );
   const [history, setHistory] = useState<Array<{ action: number; description: string }>>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const processingMoveRef = useRef<boolean>(false);
@@ -95,7 +103,14 @@ export function useLocalSantorini() {
     setEngine(newEngine);
     setBoard(engineToBoard(newEngine.snapshot));
     moveSelectorRef.current.reset();
-    setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current));
+    setSelectable(
+      computeSelectable(
+        newEngine.getValidMoves(),
+        newEngine.snapshot,
+        moveSelectorRef.current,
+        newEngine.getPlacementContext(),
+      ),
+    );
     setHistory([]);
     setHistoryIndex(-1);
   }, []);
@@ -118,23 +133,33 @@ export function useLocalSantorini() {
       }
 
       const validMoves = engine.getValidMoves();
-      
-      // Check if we're in placement phase (first 25 valid moves are placements)
-      const hasPlacementMoves = validMoves.slice(0, 25).some(v => v);
-      
+      const placement = engine.getPlacementContext();
+
       // During placement phase ONLY
+      const isPlacementPhase = placement && placement.player === engine.player;
       const placementAction = y * 5 + x;
-      if (hasPlacementMoves && placementAction < 25 && validMoves[placementAction]) {
+      if (isPlacementPhase) {
+        if (placementAction >= validMoves.length || !validMoves[placementAction]) {
+          toast({ title: 'Invalid placement', status: 'warning' });
+          return;
+        }
         processingMoveRef.current = true;
         try {
           const result = engine.applyMove(placementAction);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
-          
+
           setEngine(newEngine);
           setBoard(engineToBoard(newEngine.snapshot));
           moveSelectorRef.current.reset();
-          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current));
-          
+          setSelectable(
+            computeSelectable(
+              newEngine.getValidMoves(),
+              newEngine.snapshot,
+              moveSelectorRef.current,
+              newEngine.getPlacementContext(),
+            ),
+          );
+
           // Update history
           const newHistory = history.slice(0, historyIndex + 1);
           newHistory.push({
@@ -162,7 +187,9 @@ export function useLocalSantorini() {
       }
       
       // Update highlighting for next stage
-      setSelectable(computeSelectable(validMoves, engine.snapshot, moveSelector));
+      setSelectable(
+        computeSelectable(validMoves, engine.snapshot, moveSelector, engine.getPlacementContext()),
+      );
       
       // Check if move is complete
       const action = moveSelector.getAction();
@@ -176,7 +203,14 @@ export function useLocalSantorini() {
           setEngine(newEngine);
           setBoard(engineToBoard(newEngine.snapshot));
           moveSelector.reset();
-          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelector));
+          setSelectable(
+            computeSelectable(
+              newEngine.getValidMoves(),
+              newEngine.snapshot,
+              moveSelector,
+              newEngine.getPlacementContext(),
+            ),
+          );
           
           // Update history
           const newHistory = history.slice(0, historyIndex + 1);
@@ -190,7 +224,9 @@ export function useLocalSantorini() {
           console.error('Move failed:', error);
           toast({ title: 'Invalid move', status: 'error' });
           moveSelector.reset();
-          setSelectable(computeSelectable(validMoves, engine.snapshot, moveSelector));
+          setSelectable(
+            computeSelectable(validMoves, engine.snapshot, moveSelector, engine.getPlacementContext()),
+          );
         } finally {
           processingMoveRef.current = false;
         }
@@ -216,7 +252,14 @@ export function useLocalSantorini() {
       setEngine(currentEngine);
       setBoard(engineToBoard(currentEngine.snapshot));
       moveSelectorRef.current.reset();
-      setSelectable(computeSelectable(currentEngine.getValidMoves(), currentEngine.snapshot, moveSelectorRef.current));
+      setSelectable(
+        computeSelectable(
+          currentEngine.getValidMoves(),
+          currentEngine.snapshot,
+          moveSelectorRef.current,
+          currentEngine.getPlacementContext(),
+        ),
+      );
       setHistoryIndex(newIndex);
     } catch (error) {
       console.error('Undo failed:', error);
@@ -237,7 +280,14 @@ export function useLocalSantorini() {
       setEngine(newEngine);
       setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
-      setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current));
+      setSelectable(
+        computeSelectable(
+          newEngine.getValidMoves(),
+          newEngine.snapshot,
+          moveSelectorRef.current,
+          newEngine.getPlacementContext(),
+        ),
+      );
       setHistoryIndex(newIndex);
     } catch (error) {
       console.error('Redo failed:', error);
