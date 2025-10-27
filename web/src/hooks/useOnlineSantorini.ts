@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSantorini } from './useSantorini';
 import type { LobbyMatch } from './useMatchLobby';
-import type { MatchMoveRecord, SantoriniMoveAction, SantoriniStateSnapshot } from '@/types/match';
+import type { MatchAction, MatchMoveRecord, SantoriniMoveAction, SantoriniStateSnapshot } from '@/types/match';
 import { useToast } from '@chakra-ui/react';
 
 export interface UseOnlineSantoriniOptions {
   match: LobbyMatch | null;
-  moves: MatchMoveRecord<SantoriniMoveAction>[];
+  moves: MatchMoveRecord<MatchAction>[];
   role: 'creator' | 'opponent' | null;
   onSubmitMove: (match: LobbyMatch, index: number, action: SantoriniMoveAction) => Promise<void>;
   onGameComplete?: (winnerId: string | null) => void;
@@ -25,6 +25,10 @@ function deriveInitialClocks(match: LobbyMatch | null): ClockState {
   }
   const baseMs = match.clock_initial_seconds * 1000;
   return { creatorMs: baseMs, opponentMs: baseMs };
+}
+
+function isSantoriniMoveAction(action: MatchAction | null | undefined): action is SantoriniMoveAction {
+  return Boolean(action && (action as SantoriniMoveAction).kind === 'santorini.move');
 }
 
 export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
@@ -142,7 +146,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     while (appliedMovesRef.current < moves.length) {
       const moveRecord = moves[appliedMovesRef.current];
       const action = moveRecord.action;
-      if (action && action.kind === 'santorini.move') {
+      if (isSantoriniMoveAction(action)) {
         if (action.clocks) {
           setClock({ creatorMs: action.clocks.creatorMs, opponentMs: action.clocks.opponentMs });
         } else if (clockEnabled && match.clock_increment_seconds > 0) {

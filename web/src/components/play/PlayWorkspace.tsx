@@ -315,7 +315,7 @@ function ActiveMatchPanel({
   const santorini = useOnlineSantorini({
     match: lobbyMatch,
     role,
-    moves: typedMoves,
+    moves,
     onSubmitMove,
     onGameComplete: handleGameComplete,
   });
