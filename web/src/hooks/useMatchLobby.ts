@@ -848,13 +848,27 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       if (!client || !profile) {
         throw new Error('Authentication required.');
       }
+
+      const startTime = performance.now();
+      console.log('🔒 Submitting move via SECURE edge function (with validation)');
+
+      // Use edge function for SECURE validation (v7 optimized!)
       const { error } = await client.functions.invoke('submit-move', {
         body: {
           matchId: match.id,
           moveIndex,
-          action: movePayload,
+          action: {
+            kind: movePayload.kind,
+            move: movePayload.move,
+            by: movePayload.by,
+            clocks: movePayload.clocks,
+          },
         },
       });
+
+      const elapsed = performance.now() - startTime;
+      console.log(`🔒 Move validated and submitted in ${elapsed.toFixed(0)}ms`);
+
       if (error) {
         console.error('Failed to submit move', error);
         throw error;
