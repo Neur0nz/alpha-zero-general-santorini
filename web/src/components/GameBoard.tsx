@@ -46,6 +46,7 @@ function GameBoard({
   const highlightBorderColor = useColorModeValue('yellow.400', 'yellow.300');
   const actionBorderColor = useColorModeValue('gray.200', 'whiteAlpha.200');
   const panelTextColor = useColorModeValue('gray.800', 'whiteAlpha.800');
+  const buildingColor = useColorModeValue('gray.900', 'whiteAlpha.900');
   const [boardPixels, setBoardPixels] = useState<number>(() => {
     if (typeof window === 'undefined') {
       return 600;
@@ -171,6 +172,7 @@ function GameBoard({
                             justifyContent="center"
                             w="100%"
                             h="100%"
+                            color={buildingColor}
                             sx={{
                               '& svg': {
                                 width: '88%',
