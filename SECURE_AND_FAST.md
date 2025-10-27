@@ -98,7 +98,9 @@ DROP POLICY "Participants can insert moves";
 ### Test it now:
 1. Make a move
 2. Check console for: `🔒 Move validated and submitted in XXXms`
-3. Expected: **200-400ms**
+3. Expected: **200-400ms** (was 2000ms due to trigger!)
+
+**UPDATE:** Removed redundant database trigger that was causing 1500ms overhead!
 
 ### Verify security:
 1. ✅ Can't insert moves via database directly

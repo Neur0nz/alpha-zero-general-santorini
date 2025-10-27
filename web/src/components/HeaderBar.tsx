@@ -17,7 +17,7 @@ import { MoonIcon, SunIcon } from '@chakra-ui/icons';
 import AuthJourney from '@components/auth/AuthJourney';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 
-export type AppTab = 'practice' | 'play' | 'analyze' | 'profile';
+export type AppTab = 'lobby' | 'play' | 'practice' | 'analyze' | 'profile';
 
 interface HeaderBarProps {
   activeTab: AppTab;
@@ -68,6 +68,13 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
             w="100%"
             sx={{ button: { fontWeight: 'semibold' } }}
           >
+            <Tab
+              _selected={{ color: 'teal.300', boxShadow: 'inset 0 -2px 0 0 currentColor' }}
+              px={{ base: 2, md: 3 }}
+              py={{ base: 1, md: 2 }}
+            >
+              Lobby
+            </Tab>
             <Tab
               _selected={{ color: 'teal.300', boxShadow: 'inset 0 -2px 0 0 currentColor' }}
               px={{ base: 2, md: 3 }}

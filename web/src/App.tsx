@@ -20,11 +20,12 @@ import GameBoard from '@components/GameBoard';
 import EvaluationPanel from '@components/EvaluationPanel';
 import HistoryModal from '@components/HistoryModal';
 import PracticeToolbar from '@components/PracticeToolbar';
-import PlayWorkspace from '@components/play/PlayWorkspace';
+import LobbyWorkspace from '@components/play/LobbyWorkspace';
+import GamePlayWorkspace from '@components/play/GamePlayWorkspace';
 import AnalyzeWorkspace from '@components/analyze/AnalyzeWorkspace';
 import ProfileWorkspace from '@components/profile/ProfileWorkspace';
 
-const TAB_ORDER: AppTab[] = ['play', 'practice', 'analyze', 'profile'];
+const TAB_ORDER: AppTab[] = ['lobby', 'play', 'practice', 'analyze', 'profile'];
 const TAB_STORAGE_KEY = 'santorini:lastTab';
 
 function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
@@ -139,7 +140,7 @@ function PracticeHistoryModal({ isOpen, onClose }: { isOpen: boolean; onClose: (
 function App() {
   const { isOpen: isHistoryOpen, onOpen: openHistory, onClose: closeHistory } = useDisclosure();
   const tabOrder = TAB_ORDER;
-  const [activeTab, setActiveTab] = useState<AppTab>('play');
+  const [activeTab, setActiveTab] = useState<AppTab>('lobby');
   const activeIndex = Math.max(0, tabOrder.indexOf(activeTab));
   const auth = useSupabaseAuth();
 
@@ -170,9 +171,11 @@ function App() {
 
   const tabActions = useMemo(() => {
     switch (activeTab) {
-      case 'practice':
+      case 'lobby':
         return null;
       case 'play':
+        return null;
+      case 'practice':
         return null;
       case 'analyze':
         return (
@@ -215,7 +218,10 @@ function App() {
           <Container maxW="7xl" flex="1" px={{ base: 3, md: 6 }}>
             <TabPanels flex="1">
               <TabPanel px={0}>
-                <PlayWorkspace auth={auth} />
+                <LobbyWorkspace auth={auth} />
+              </TabPanel>
+              <TabPanel px={0}>
+                <GamePlayWorkspace auth={auth} />
               </TabPanel>
               <TabPanel px={0}>
                 <SantoriniProvider>
