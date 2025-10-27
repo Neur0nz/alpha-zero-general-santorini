@@ -38,24 +38,24 @@ function GameBoard({
   return (
     <Flex
       direction="column"
-      gap={{ base: 5, md: 6 }}
+      gap={{ base: 6, md: 7 }}
       w="100%"
-      maxW={{ base: '100%', sm: '460px', md: '580px', lg: '680px' }}
+      maxW={{ base: '100%', sm: '560px', md: '700px', lg: '840px', xl: '920px' }}
       mx="auto"
     >
-      <AspectRatio ratio={1} w="100%">
+      <AspectRatio ratio={1} w="100%" maxW="min(100%, 920px)">
         <Flex
           direction="column"
           w="100%"
           h="100%"
           bg="blackAlpha.500"
-          p={{ base: 4, sm: 5, md: 6 }}
+          p={{ base: 5, sm: 6, md: 7 }}
           borderRadius="xl"
           boxShadow="2xl"
         >
           <Grid
             templateColumns="repeat(5, 1fr)"
-            gap={{ base: 2, sm: 3, md: 3 }}
+            gap={{ base: 2, sm: 3, md: 4 }}
             w="100%"
             h="100%"
             flex={1}
@@ -109,10 +109,10 @@ function GameBoard({
                           h="100%"
                           sx={{
                             '& svg': {
-                              width: '78%',
-                              height: '78%',
-                              maxWidth: '78%',
-                              maxHeight: '78%',
+                              width: '88%',
+                              height: '88%',
+                              maxWidth: '88%',
+                              maxHeight: '88%',
                             },
                           }}
                           dangerouslySetInnerHTML={{ __html: cell.svg }}
