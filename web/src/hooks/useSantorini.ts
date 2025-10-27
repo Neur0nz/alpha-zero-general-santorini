@@ -89,6 +89,60 @@ const INITIAL_SELECTABLE = Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () 
   Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () => false),
 );
 
+type PyLike = {
+  toJs?: (options?: { create_proxies?: boolean }) => unknown;
+  destroy?: () => void;
+  valueOf?: () => unknown;
+};
+
+const toPlainValue = (value: unknown): unknown => {
+  if (value && typeof value === 'object') {
+    const candidate = value as PyLike;
+    if (typeof candidate.toJs === 'function') {
+      try {
+        const plain = candidate.toJs({ create_proxies: false });
+        candidate.destroy?.();
+        return plain;
+      } catch {
+        // Fall through and try other conversions
+      }
+    }
+    if (typeof candidate.valueOf === 'function') {
+      try {
+        const plain = candidate.valueOf();
+        if (plain !== value) {
+          return toPlainValue(plain);
+        }
+      } catch {
+        // Ignore and fall through to default handling
+      }
+    }
+  }
+  return value;
+};
+
+const toFiniteNumber = (value: unknown): number | null => {
+  const plain = toPlainValue(value);
+  if (typeof plain === 'number') {
+    return Number.isFinite(plain) ? plain : null;
+  }
+  if (typeof plain === 'bigint') {
+    return Number(plain);
+  }
+  if (typeof plain === 'string') {
+    const cleaned = plain.trim().replace(/,/g, '.').replace(/[^0-9.+-eE]/g, '');
+    if (!cleaned) {
+      return null;
+    }
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (plain !== value) {
+    return toFiniteNumber(plain);
+  }
+  return null;
+};
+
 const normalizeTopMoves = (rawMoves: unknown): TopMove[] => {
   if (!Array.isArray(rawMoves)) {
     return [];
@@ -97,33 +151,48 @@ const normalizeTopMoves = (rawMoves: unknown): TopMove[] => {
   const stripAnsi = (value: string) => value.replace(/\u001b\[[0-9;]*m/g, '').trim();
 
   return rawMoves.map((entry) => {
-    const move = entry as Record<string, unknown>;
+    const move = toPlainValue(entry) as Record<string, unknown>;
 
-    const actionValue = Number(move.action);
-    const probValue = Number(move.prob);
-    const textValue = move.text;
+    const actionValue = toFiniteNumber(move?.action);
+    const rawProb = move?.prob;
+    const probValue = toFiniteNumber(rawProb);
+    const textValue = toPlainValue(move?.text);
 
     const normalized: TopMove = {
-      action: Number.isFinite(actionValue) ? actionValue : -1,
-      prob: Number.isFinite(probValue) ? Math.min(Math.max(probValue, 0), 1) : 0,
+      action: actionValue != null ? Math.trunc(actionValue) : -1,
+      prob:
+        probValue != null
+          ? (() => {
+              const base = (() => {
+                if (typeof rawProb === 'string' && rawProb.includes('%')) {
+                  return probValue / 100;
+                }
+                if (probValue > 1) {
+                  return probValue / 100;
+                }
+                return probValue;
+              })();
+              return Math.min(Math.max(base, 0), 1);
+            })()
+          : 0,
       text:
         typeof textValue === 'string'
           ? stripAnsi(textValue)
           : textValue != null
-          ? stripAnsi(String(textValue))
+          ? stripAnsi(String(toPlainValue(textValue)))
           : '',
     };
 
     if (move.eval !== undefined) {
-      const evalValue = Number(move.eval);
-      if (Number.isFinite(evalValue)) {
+      const evalValue = toFiniteNumber(move.eval);
+      if (evalValue != null) {
         normalized.eval = evalValue;
       }
     }
 
     if (move.delta !== undefined) {
-      const deltaValue = Number(move.delta);
-      if (Number.isFinite(deltaValue)) {
+      const deltaValue = toFiniteNumber(move.delta);
+      if (deltaValue != null) {
         normalized.delta = deltaValue;
       }
     }
