@@ -22,6 +22,13 @@ import {
   Input,
   List,
   ListItem,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalCloseButton,
+  ModalFooter,
   Radio,
   RadioGroup,
   Spinner,
@@ -32,6 +39,7 @@ import {
   VStack,
   useBoolean,
   useColorModeValue,
+  useDisclosure,
   useToast,
 } from '@chakra-ui/react';
 import { AddIcon } from '@chakra-ui/icons';
@@ -60,10 +68,14 @@ function useSurfaceTokens() {
   return { cardBg, cardBorder, mutedText, helperText, strongText, accentHeading, panelBg };
 }
 
-function MatchCreationForm({
+function MatchCreationModal({
+  isOpen,
+  onClose,
   onCreate,
   loading,
 }: {
+  isOpen: boolean;
+  onClose: () => void;
   onCreate: (payload: CreateMatchPayload) => Promise<void>;
   loading: boolean;
 }) {
@@ -74,7 +86,7 @@ function MatchCreationForm({
   const [increment, setIncrement] = useState(5);
   const [startingPlayer, setStartingPlayer] = useState<StartingPlayer>('random');
   const toast = useToast();
-  const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
+  const { mutedText } = useSurfaceTokens();
 
   const handleSubmit = async () => {
     try {
@@ -86,7 +98,8 @@ function MatchCreationForm({
         clockIncrementSeconds: increment,
         startingPlayer,
       });
-      toast({ title: 'Match created', status: 'success' });
+      toast({ title: 'Match created successfully!', status: 'success' });
+      onClose();
     } catch (error) {
       toast({
         title: 'Unable to create match',
@@ -97,11 +110,12 @@ function MatchCreationForm({
   };
 
   return (
-    <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
-      <CardHeader>
-        <Heading size="md">Create a match</Heading>
-      </CardHeader>
-      <CardBody as={Stack} spacing={4}>
+    <Modal isOpen={isOpen} onClose={onClose} size="lg">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>Create New Match</ModalHeader>
+        <ModalCloseButton />
+        <ModalBody as={Stack} spacing={4}>
         <FormControl as={Stack} spacing={2}>
           <FormLabel fontSize="sm">Visibility</FormLabel>
           <RadioGroup value={visibility} onChange={(value) => setVisibility(value as 'public' | 'private')}>
@@ -157,11 +171,17 @@ function MatchCreationForm({
             </Stack>
           )}
         </FormControl>
-        <Button colorScheme="teal" leftIcon={<AddIcon />} onClick={handleSubmit} isLoading={loading} alignSelf="flex-start">
-          Create match
+        <Button colorScheme="teal" onClick={handleSubmit} isDisabled={loading} isLoading={loading} w="full">
+          Create Match
         </Button>
-      </CardBody>
-    </Card>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="ghost" onClick={onClose} w="full">
+            Cancel
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
   );
 }
 
@@ -925,8 +945,10 @@ function PlaySignInGate({ auth }: { auth: SupabaseAuthState }) {
 function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   const lobby = useMatchLobby(auth.profile);
   const [joiningCode, setJoiningCode] = useState('');
+  const { isOpen: isCreateOpen, onOpen: onCreateOpen, onClose: onCreateClose } = useDisclosure();
+  const { isOpen: isJoinOpen, onOpen: onJoinOpen, onClose: onJoinClose } = useDisclosure();
   const toast = useToast();
-  const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
+  const { cardBg, cardBorder, mutedText, accentHeading } = useSurfaceTokens();
   const initializedOnlineRef = useRef(false);
   const sessionMode = lobby.sessionMode ?? 'online';
 
@@ -946,8 +968,9 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
     if (!joiningCode) return;
     try {
       await lobby.joinMatch(joiningCode.trim());
-      toast({ title: 'Match ready', status: 'success' });
+      toast({ title: 'Match joined successfully!', status: 'success' });
       setJoiningCode('');
+      onJoinClose();
     } catch (error) {
       toast({
         title: 'Unable to join',
@@ -960,20 +983,80 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   return (
     <Stack spacing={6} py={{ base: 6, md: 10 }}>
       <PlaySignInGate auth={auth} />
-      <MatchModeSelector
-        mode={sessionMode}
-        onSelectLocal={() => {
-          if (sessionMode !== 'local') {
-            lobby.startLocalMatch();
-          }
-        }}
-        onSelectOnline={() => {
-          if (sessionMode !== 'online') {
-            lobby.enableOnline();
-          }
-        }}
-        onlineAvailable={Boolean(auth.profile)}
-      />
+      
+      {/* Combined Mode Selector + Action Buttons */}
+      {auth.profile && (
+        <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
+          <CardBody>
+            <Flex justify="space-between" align="center" flexWrap="wrap" gap={4}>
+              {/* Mode Selector */}
+              <ButtonGroup size="md" isAttached variant="outline">
+                <Button
+                  colorScheme={sessionMode === 'online' ? 'teal' : undefined}
+                  variant={sessionMode === 'online' ? 'solid' : 'outline'}
+                  onClick={() => {
+                    if (sessionMode !== 'online') {
+                      lobby.enableOnline();
+                    }
+                  }}
+                >
+                  Online lobby
+                </Button>
+                <Button
+                  colorScheme={sessionMode === 'local' ? 'teal' : undefined}
+                  variant={sessionMode === 'local' ? 'solid' : 'outline'}
+                  onClick={() => {
+                    if (sessionMode !== 'local') {
+                      lobby.startLocalMatch();
+                    }
+                  }}
+                >
+                  Local match
+                </Button>
+              </ButtonGroup>
+
+              {/* Action Buttons (only for online mode) */}
+              {sessionMode === 'online' && (
+                <HStack spacing={3}>
+                  <Button
+                    leftIcon={<AddIcon />}
+                    colorScheme="teal"
+                    onClick={onCreateOpen}
+                    size="md"
+                  >
+                    Create Match
+                  </Button>
+                  <Button
+                    variant="outline"
+                    colorScheme="teal"
+                    onClick={onJoinOpen}
+                    size="md"
+                  >
+                    Join by Code
+                  </Button>
+                </HStack>
+              )}
+            </Flex>
+          </CardBody>
+        </Card>
+      )}
+      
+      {!auth.profile && (
+        <MatchModeSelector
+          mode={sessionMode}
+          onSelectLocal={() => {
+            if (sessionMode !== 'local') {
+              lobby.startLocalMatch();
+            }
+          }}
+          onSelectOnline={() => {
+            if (sessionMode !== 'online') {
+              lobby.enableOnline();
+            }
+          }}
+          onlineAvailable={Boolean(auth.profile)}
+        />
+      )}
       {sessionMode === 'online' && !auth.profile && (
         <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
           <CardBody>
@@ -986,48 +1069,176 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
           </CardBody>
         </Card>
       )}
-      {sessionMode === 'online' && auth.profile && (
-        <Grid templateColumns={{ base: '1fr', lg: '2fr 1fr' }} gap={6} alignItems="flex-start">
-          <GridItem>
-            <Stack spacing={6}>
-              <MatchCreationForm onCreate={handleCreate} loading={lobby.loading} />
-              <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
-                <CardHeader>
-                  <Heading size="md">Join by code</Heading>
-                </CardHeader>
-                <CardBody>
-                  <Stack spacing={3}>
-                    <Text fontSize="sm" color={mutedText}>
-                      Enter a private code or match ID to join a friend.
-                    </Text>
-                    <HStack spacing={3}>
-                      <Input
-                        placeholder="ABC123"
-                        value={joiningCode}
-                        onChange={(event) => setJoiningCode(event.target.value.toUpperCase())}
-                      />
-                      <Button colorScheme="teal" onClick={handleJoinByCode} isDisabled={!joiningCode}>
-                        Join
-                      </Button>
-                    </HStack>
-                  </Stack>
-                </CardBody>
-              </Card>
-            </Stack>
-          </GridItem>
-          <GridItem>
-            <Stack spacing={6}>
-              <PublicLobbies matches={lobby.matches} loading={lobby.loading} onJoin={lobby.joinMatch} />
-              <MyMatchesPanel
-                matches={lobby.myMatches}
-                activeMatchId={lobby.activeMatchId}
-                profile={auth.profile}
-                onSelect={lobby.setActiveMatch}
-                onLeave={lobby.leaveMatch}
+      
+      {/* Match Creation Modal */}
+      <MatchCreationModal
+        isOpen={isCreateOpen}
+        onClose={onCreateClose}
+        onCreate={handleCreate}
+        loading={lobby.loading}
+      />
+      
+      {/* Join by Code Modal */}
+      <Modal isOpen={isJoinOpen} onClose={onJoinClose}>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Join by Code</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Stack spacing={3}>
+              <Text fontSize="sm" color={mutedText}>
+                Enter a private join code or match ID to join a friend's game.
+              </Text>
+              <Input
+                placeholder="ABC123"
+                value={joiningCode}
+                onChange={(event) => setJoiningCode(event.target.value.toUpperCase())}
+                onKeyPress={(e) => e.key === 'Enter' && handleJoinByCode()}
+                autoFocus
               />
             </Stack>
-          </GridItem>
-        </Grid>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={onJoinClose}>
+              Cancel
+            </Button>
+            <Button colorScheme="teal" onClick={handleJoinByCode} isDisabled={!joiningCode}>
+              Join Match
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+      
+      {sessionMode === 'online' && auth.profile && (
+        <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
+          <CardHeader>
+            <Heading size="md" color={accentHeading}>
+              Games
+            </Heading>
+          </CardHeader>
+          <CardBody as={Stack} spacing={6}>
+            {/* Your Active Matches First */}
+            {lobby.myMatches && lobby.myMatches.length > 0 && (
+              <Stack spacing={3}>
+                <Heading size="sm" color={mutedText}>
+                  Your Games
+                </Heading>
+                <Stack spacing={2}>
+                  {lobby.myMatches.map((m) => {
+                    const isActive = m.id === lobby.activeMatchId;
+                    const isCreator = m.creator_id === auth.profile?.id;
+                    const opponentName = isCreator ? m.opponent?.display_name : m.creator?.display_name;
+                    const status = m.status === 'waiting_for_opponent' ? 'Waiting...' : 
+                                   m.status === 'completed' ? 'Finished' : 'In Progress';
+                    
+                    // Theme-aware colors for active state
+                    const activeBg = useColorModeValue('teal.50', 'teal.900');
+                    const activeBorder = useColorModeValue('teal.200', 'teal.600');
+                    const hoverBorder = useColorModeValue('teal.300', 'teal.500');
+                    
+                    return (
+                      <Card
+                        key={m.id}
+                        variant="outline"
+                        bg={isActive ? activeBg : undefined}
+                        borderColor={isActive ? activeBorder : cardBorder}
+                        cursor="pointer"
+                        onClick={() => lobby.setActiveMatch(m.id)}
+                        _hover={{ borderColor: hoverBorder }}
+                      >
+                        <CardBody py={3}>
+                          <Flex justify="space-between" align="center">
+                            <Stack spacing={0}>
+                              <HStack spacing={2}>
+                                <Text fontWeight="semibold" fontSize="sm">
+                                  {opponentName || 'Waiting for opponent...'}
+                                </Text>
+                                <Badge colorScheme={
+                                  m.status === 'in_progress' ? 'green' :
+                                  m.status === 'waiting_for_opponent' ? 'yellow' : 'gray'
+                                } size="sm">
+                                  {status}
+                                </Badge>
+                              </HStack>
+                              <Text fontSize="xs" color={mutedText}>
+                                {m.created_at ? formatDate(m.created_at) : ''}
+                              </Text>
+                            </Stack>
+                            {m.status === 'waiting_for_opponent' && (
+                              <Button
+                                size="xs"
+                                colorScheme="red"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  lobby.leaveMatch(m.id);
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            )}
+                          </Flex>
+                        </CardBody>
+                      </Card>
+                    );
+                  })}
+                </Stack>
+              </Stack>
+            )}
+
+            {/* Open Public Games */}
+            <Stack spacing={3}>
+              <Heading size="sm" color={mutedText}>
+                Open Games
+              </Heading>
+              {lobby.loading ? (
+                <Center py={8}>
+                  <Spinner />
+                </Center>
+              ) : lobby.matches && lobby.matches.length > 0 ? (
+                <Stack spacing={2}>
+                  {lobby.matches.map((m) => {
+                    const creatorName = m.creator?.display_name || 'Anonymous';
+                    const clockInfo = m.clock_initial_seconds > 0
+                      ? `${Math.floor(m.clock_initial_seconds / 60)}+${m.clock_increment_seconds}`
+                      : 'No clock';
+
+                    return (
+                      <Card key={m.id} variant="outline" borderColor={cardBorder}>
+                        <CardBody py={3}>
+                          <Flex justify="space-between" align="center">
+                            <Stack spacing={0}>
+                              <HStack spacing={2}>
+                                <Text fontWeight="semibold" fontSize="sm">
+                                  {creatorName}
+                                </Text>
+                                {m.rated && <Badge colorScheme="purple" size="sm">Rated</Badge>}
+                              </HStack>
+                              <Text fontSize="xs" color={mutedText}>
+                                {clockInfo} • {formatDate(m.created_at)}
+                              </Text>
+                            </Stack>
+                            <Button
+                              size="sm"
+                              colorScheme="teal"
+                              onClick={() => lobby.joinMatch(m.id)}
+                            >
+                              Join
+                            </Button>
+                          </Flex>
+                        </CardBody>
+                      </Card>
+                    );
+                  })}
+                </Stack>
+              ) : (
+                <Text fontSize="sm" color={mutedText} py={4} textAlign="center">
+                  No open games available. Create one to get started!
+                </Text>
+              )}
+            </Stack>
+          </CardBody>
+        </Card>
       )}
       <ActiveMatchPanel
         sessionMode={sessionMode}

@@ -461,6 +461,23 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       // Find valid move for this cell click
       const validMoves = engine.getValidMoves();
       
+      console.log('🎯 onCellClick Debug:', {
+        y, x,
+        role,
+        enginePlayer: engine.player,
+        currentTurn,
+        moveSelector: {
+          stage: moveSelectorRef.current.stage,
+          workerIndex: moveSelectorRef.current.workerIndex,
+          workerY: moveSelectorRef.current.workerY,
+          workerX: moveSelectorRef.current.workerX,
+        },
+        cellWorker: engine.snapshot.board[y][x][0],
+        cellLevel: engine.snapshot.board[y][x][1],
+        validMovesCount: validMoves.filter(v => v).length,
+        firstFewValidMoves: validMoves.slice(0, 30).map((v, i) => v ? i : null).filter(Boolean),
+      });
+      
       // During placement, the action is simply y * 5 + x
       const placementAction = y * 5 + x;
       if (placementAction < 25 && validMoves[placementAction]) {
@@ -492,9 +509,16 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
 
       // During game phase: Use move selector
       const moveSelector = moveSelectorRef.current;
+      console.log('🎮 Game phase click:', {
+        stage: moveSelector.stage,
+        player: engine.player,
+        board_at_click: engine.snapshot.board[y][x],
+      });
       const clicked = moveSelector.click(y, x, engine.snapshot.board, validMoves, engine.player);
+      console.log('🎮 Click result:', clicked, 'New stage:', moveSelector.stage);
       
       if (!clicked) {
+        console.warn('❌ Invalid selection at', {y, x}, 'stage:', moveSelector.stage);
         toast({ title: 'Invalid selection', status: 'warning' });
         return;
       }

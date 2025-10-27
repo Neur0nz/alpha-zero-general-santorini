@@ -51,6 +51,9 @@ function sanitizeClocks(value: unknown): { creatorMs: number; opponentMs: number
 }
 
 serve(async (req) => {
+  const startTime = performance.now();
+  console.log('⏱️ [START] submit-move request received');
+  
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return jsonResponse({}, { status: 200 });
@@ -76,6 +79,8 @@ serve(async (req) => {
     console.error('Failed to parse submit-move payload', error);
     return jsonResponse({ error: 'Invalid JSON body' }, { status: 400 });
   }
+  
+  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Payload parsed`);
 
   if (!payload?.matchId || typeof payload.matchId !== 'string') {
     return jsonResponse({ error: 'Missing match identifier' }, { status: 400 });
@@ -90,12 +95,14 @@ serve(async (req) => {
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
   });
+  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Supabase client created`);
 
   const { data: authData, error: authError } = await supabase.auth.getUser(token);
   if (authError || !authData?.user) {
     console.error('Failed to authenticate request token', authError);
     return jsonResponse({ error: 'Unauthorized' }, { status: 401 });
   }
+  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Auth verified`);
 
   const { data: profile, error: profileError } = await supabase
     .from('players')
@@ -107,12 +114,14 @@ serve(async (req) => {
     console.error('Player profile missing for auth user', profileError);
     return jsonResponse({ error: 'Player profile not found' }, { status: 403 });
   }
+  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Profile loaded`);
 
   const { data: match, error: matchError } = await supabase
     .from('matches')
     .select('id, creator_id, opponent_id, status, winner_id, initial_state')
     .eq('id', payload.matchId)
     .maybeSingle();
+  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Match loaded`);
 
   if (matchError || !match) {
     console.error('Unable to load match', matchError);
@@ -155,6 +164,7 @@ serve(async (req) => {
     .select('id, move_index, action')
     .eq('match_id', match.id)
     .order('move_index', { ascending: true });
+  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Historical moves loaded (${existingMoves?.length ?? 0} moves)`);
 
   if (movesError) {
     console.error('Failed to load existing moves', movesError);
@@ -230,6 +240,7 @@ serve(async (req) => {
     .insert(insertPayload)
     .select('*')
     .single();
+  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Move inserted`);
 
   if (insertError || !insertedMove) {
     console.error('Failed to persist move', insertError);
@@ -251,7 +262,9 @@ serve(async (req) => {
     if (updateError) {
       console.error('Failed to mark match as completed', updateError);
     }
+    console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Match status updated`);
   }
 
+  console.log(`⏱️ [TOTAL: ${(performance.now() - startTime).toFixed(0)}ms] Request complete`);
   return jsonResponse({ move: insertedMove, snapshot: applyResult.snapshot });
 });
