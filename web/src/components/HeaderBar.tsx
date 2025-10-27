@@ -27,15 +27,17 @@ interface HeaderBarProps {
 
 function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
   const { colorMode, toggleColorMode } = useColorMode();
-  const bg = useColorModeValue('whiteAlpha.200', 'gray.800');
-  const headingColor = useColorModeValue('whiteAlpha.900', 'white');
+  const bg = useColorModeValue('white', 'gray.800');
+  const borderColor = useColorModeValue('gray.200', 'whiteAlpha.200');
+  const headingColor = useColorModeValue('gray.900', 'white');
+  const descriptionColor = useColorModeValue('gray.600', 'whiteAlpha.700');
   const activeTabLabel = useMemo(
     () => `${activeTab.charAt(0).toUpperCase()}${activeTab.slice(1)} workspace`,
     [activeTab],
   );
 
   return (
-    <Box bg={bg} borderBottomWidth="1px" borderColor="whiteAlpha.200" px={{ base: 3, md: 8 }} py={{ base: 3, md: 4 }}>
+    <Box bg={bg} borderBottomWidth="1px" borderColor={borderColor} px={{ base: 3, md: 8 }} py={{ base: 3, md: 4 }}>
       <Flex direction="column" gap={{ base: 3, md: 4 }}>
         <Flex direction={{ base: 'column', md: 'row' }} align={{ base: 'flex-start', md: 'center' }} gap={{ base: 2, md: 3 }}>
           <Heading size={{ base: 'sm', md: 'md' }} letterSpacing="wide" color={headingColor}>
@@ -90,7 +92,7 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
           </TabList>
           <Spacer />
           <HStack spacing={3} align="center">
-            <Text fontSize="sm" color="whiteAlpha.700" display={{ base: 'none', md: 'block' }}>
+            <Text fontSize="sm" color={descriptionColor} display={{ base: 'none', md: 'block' }}>
               {activeTabLabel}
             </Text>
             {actions && <HStack spacing={2} display={{ base: 'none', md: 'flex' }}>{actions}</HStack>}

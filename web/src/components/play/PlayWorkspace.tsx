@@ -34,6 +34,7 @@ import {
   Tooltip,
   VStack,
   useBoolean,
+  useColorModeValue,
   useToast,
 } from '@chakra-ui/react';
 import { AddIcon } from '@chakra-ui/icons';
@@ -49,6 +50,17 @@ function formatDate(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function useSurfaceTokens() {
+  const cardBg = useColorModeValue('white', 'whiteAlpha.100');
+  const cardBorder = useColorModeValue('gray.200', 'whiteAlpha.200');
+  const mutedText = useColorModeValue('gray.600', 'whiteAlpha.700');
+  const helperText = useColorModeValue('gray.500', 'whiteAlpha.600');
+  const strongText = useColorModeValue('gray.900', 'whiteAlpha.900');
+  const accentHeading = useColorModeValue('teal.600', 'teal.200');
+  const panelBg = useColorModeValue('gray.50', 'blackAlpha.400');
+  return { cardBg, cardBorder, mutedText, helperText, strongText, accentHeading, panelBg };
+}
+
 function MatchCreationForm({
   onCreate,
   loading,
@@ -62,6 +74,7 @@ function MatchCreationForm({
   const [minutes, setMinutes] = useState(10);
   const [increment, setIncrement] = useState(5);
   const toast = useToast();
+  const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
 
   const handleSubmit = async () => {
     try {
@@ -83,7 +96,7 @@ function MatchCreationForm({
   };
 
   return (
-    <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200">
+    <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
       <CardHeader>
         <Heading size="md">Create a match</Heading>
       </CardHeader>
@@ -152,6 +165,7 @@ function PublicLobbies({
 }) {
   const [joiningId, setJoiningId] = useState<string | null>(null);
   const toast = useToast();
+  const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
 
   const handleJoin = async (id: string) => {
     setJoiningId(id);
@@ -170,7 +184,7 @@ function PublicLobbies({
   };
 
   return (
-    <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200">
+    <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
       <CardHeader>
         <Heading size="md">Open public lobbies</Heading>
       </CardHeader>
@@ -180,14 +194,14 @@ function PublicLobbies({
             <Spinner />
           </Center>
         ) : matches.length === 0 ? (
-          <Text color="whiteAlpha.700">No public games are waiting right now.</Text>
+          <Text color={mutedText}>No public games are waiting right now.</Text>
         ) : (
           <List spacing={3}>
             {matches.map((match) => (
               <ListItem
                 key={match.id}
                 borderWidth="1px"
-                borderColor="whiteAlpha.200"
+                borderColor={cardBorder}
                 borderRadius="md"
                 px={4}
                 py={3}
@@ -206,7 +220,7 @@ function PublicLobbies({
                       </Badge>
                     )}
                   </HStack>
-                  <Text fontSize="sm" color="whiteAlpha.700">
+                  <Text fontSize="sm" color={mutedText}>
                     {match.opponent ? `Facing ${match.opponent.display_name}` : 'Waiting for an opponent'} ·
                     {' '}
                     {match.visibility === 'public' ? 'Public lobby' : 'Private code'} · Created {formatDate(match.created_at)}
@@ -252,6 +266,9 @@ function ActiveMatchPanel({
   const [offerBusy, setOfferBusy] = useBoolean();
   const [leaveBusy, setLeaveBusy] = useBoolean();
   const lobbyMatch = match ?? null;
+  const { cardBg, cardBorder, mutedText, helperText, strongText, accentHeading, panelBg } = useSurfaceTokens();
+  const googleHoverBg = useColorModeValue('gray.100', 'whiteAlpha.300');
+  const googleActiveBg = useColorModeValue('gray.200', 'whiteAlpha.200');
   const typedMoves = useMemo(
     () =>
       moves
@@ -348,13 +365,13 @@ function ActiveMatchPanel({
   const showJoinCode = lobbyMatch?.visibility === 'private' && joinCode;
 
   return (
-    <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200" w="100%">
+    <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} w="100%">
       <CardHeader>
         <Flex justify="space-between" align="center">
           <Stack spacing={1}>
             <Heading size="md">Active match</Heading>
             {lobbyMatch && (
-              <Text fontSize="sm" color="whiteAlpha.700">
+              <Text fontSize="sm" color={mutedText}>
                 {creatorName} vs {lobbyMatch.opponent ? opponentName : 'Waiting for opponent'}
               </Text>
             )}
@@ -379,17 +396,17 @@ function ActiveMatchPanel({
       <CardBody>
         {!lobbyMatch ? (
           <Center py={10}>
-            <Text color="whiteAlpha.700">Select or create a match to begin.</Text>
+            <Text color={mutedText}>Select or create a match to begin.</Text>
           </Center>
         ) : (
           <Grid templateColumns={{ base: '1fr', xl: '1.2fr 0.8fr' }} gap={8} alignItems="flex-start">
             <GridItem>
               <VStack spacing={4} align="stretch">
                 <Box
-                  bg="blackAlpha.400"
+                  bg={panelBg}
                   borderRadius="xl"
                   borderWidth="1px"
-                  borderColor="whiteAlpha.200"
+                  borderColor={cardBorder}
                   p={{ base: 2, md: 3 }}
                   display="flex"
                   justifyContent="center"
@@ -413,24 +430,24 @@ function ActiveMatchPanel({
                   align={{ base: 'stretch', sm: 'center' }}
                 >
                   <VStack spacing={1} align={{ base: 'center', sm: 'flex-start' }} w="100%">
-                    <Text fontSize="sm" color="whiteAlpha.700">
+                    <Text fontSize="sm" color={mutedText}>
                       {role === 'creator' ? 'Your clock' : 'Player 1 (Blue)'}
                     </Text>
-                    <Heading size="lg" color={creatorTurnActive ? 'teal.200' : 'whiteAlpha.900'}>
+                    <Heading size="lg" color={creatorTurnActive ? accentHeading : strongText}>
                       {creatorClock}
                     </Heading>
-                    <Text fontSize="xs" color="whiteAlpha.600" textAlign={{ base: 'center', sm: 'left' }}>
+                    <Text fontSize="xs" color={helperText} textAlign={{ base: 'center', sm: 'left' }}>
                       {creatorName}
                     </Text>
                   </VStack>
                   <VStack spacing={1} align={{ base: 'center', sm: 'flex-end' }} w="100%">
-                    <Text fontSize="sm" color="whiteAlpha.700" textAlign={{ base: 'center', sm: 'right' }}>
+                    <Text fontSize="sm" color={mutedText} textAlign={{ base: 'center', sm: 'right' }}>
                       {role === 'opponent' ? 'Your clock' : 'Player 2 (Red)'}
                     </Text>
-                    <Heading size="lg" color={opponentTurnActive ? 'teal.200' : 'whiteAlpha.900'}>
+                    <Heading size="lg" color={opponentTurnActive ? accentHeading : strongText}>
                       {opponentClock}
                     </Heading>
-                    <Text fontSize="xs" color="whiteAlpha.600" textAlign={{ base: 'center', sm: 'right' }}>
+                    <Text fontSize="xs" color={helperText} textAlign={{ base: 'center', sm: 'right' }}>
                       {opponentName}
                     </Text>
                   </VStack>
@@ -443,14 +460,14 @@ function ActiveMatchPanel({
                   <Heading size="sm" mb={3}>
                     Match status
                   </Heading>
-                  <Text fontSize="sm" color="whiteAlpha.800">
+                  <Text fontSize="sm" color={strongText}>
                     {role === 'creator'
                       ? 'You are playing as Player 1 (Blue)'
                       : role === 'opponent'
                       ? 'You are playing as Player 2 (Red)'
                       : 'Spectating this match'}
                   </Text>
-                  <Text fontSize="sm" color="whiteAlpha.600">
+                  <Text fontSize="sm" color={helperText}>
                     {typedMoves.length} moves played · Turn:{' '}
                     {santorini.currentTurn === 'creator'
                       ? `Player 1 (Blue) – ${creatorName}`
@@ -462,7 +479,7 @@ function ActiveMatchPanel({
                     Recent moves
                   </Heading>
                   {santorini.history.length === 0 ? (
-                    <Text color="whiteAlpha.700" fontSize="sm">
+                    <Text color={mutedText} fontSize="sm">
                       No moves yet. Use the board to make the first move.
                     </Text>
                   ) : (
@@ -471,11 +488,11 @@ function ActiveMatchPanel({
                         .slice()
                         .reverse()
                         .map((entry, index) => (
-                          <Box key={`${entry.action}-${index}`} borderBottomWidth="1px" borderColor="whiteAlpha.200" pb={2}>
+                          <Box key={`${entry.action}-${index}`} borderBottomWidth="1px" borderColor={cardBorder} pb={2}>
                             <Text fontWeight="semibold" fontSize="sm">
                               Move {santorini.history.length - index}
                             </Text>
-                            <Text fontSize="sm" color="whiteAlpha.700">
+                            <Text fontSize="sm" color={mutedText}>
                               {entry.description || `Action ${entry.action}`}
                             </Text>
                           </Box>
@@ -541,6 +558,9 @@ function AuthGate({ auth }: { auth: SupabaseAuthState }) {
   const [displayNameValue, setDisplayNameValue] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
   const toast = useToast();
+  const googleHoverBg = useColorModeValue('gray.100', 'whiteAlpha.300');
+  const googleActiveBg = useColorModeValue('gray.200', 'whiteAlpha.200');
+  const { cardBg, cardBorder, mutedText, helperText, strongText, accentHeading, panelBg } = useSurfaceTokens();
 
   useEffect(() => {
     if (profile) {
@@ -672,11 +692,11 @@ function AuthGate({ auth }: { auth: SupabaseAuthState }) {
 
   if (!profile) {
     return (
-      <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200" w="100%">
+      <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} w="100%">
         <CardBody as={Stack} spacing={6} align="center" textAlign="center" py={{ base: 8, md: 10 }}>
           <Stack spacing={2} maxW="lg">
             <Heading size="md">Sign in with Google to play online</Heading>
-            <Text color="whiteAlpha.800">
+            <Text color={mutedText}>
               Challenge real opponents, protect your rating, and sync your Santorini journey across every device.
             </Text>
           </Stack>
@@ -699,12 +719,12 @@ function AuthGate({ auth }: { auth: SupabaseAuthState }) {
             onClick={handleGoogleSignIn}
             isLoading={startingGoogle}
             isDisabled={startingGoogle}
-            _hover={{ bg: 'whiteAlpha.900', transform: 'translateY(-1px)', boxShadow: '2xl' }}
-            _active={{ bg: 'whiteAlpha.800' }}
+            _hover={{ bg: googleHoverBg, transform: 'translateY(-1px)', boxShadow: '2xl' }}
+            _active={{ bg: googleActiveBg }}
           >
             Continue with Google
           </Button>
-          <Text fontSize="sm" color="whiteAlpha.700" maxW="md">
+          <Text fontSize="sm" color={mutedText} maxW="md">
             After connecting, you&rsquo;ll be able to choose a unique display name that other players will see.
           </Text>
         </CardBody>
@@ -715,7 +735,7 @@ function AuthGate({ auth }: { auth: SupabaseAuthState }) {
   const displayNameChanged = Boolean(profile && displayNameValue.trim() !== profile.display_name);
 
   return (
-    <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200" w="100%">
+    <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} w="100%">
       <CardBody as={Stack} spacing={6}>
         <Flex
           justify="space-between"
@@ -732,11 +752,11 @@ function AuthGate({ auth }: { auth: SupabaseAuthState }) {
             <Box>
               <Heading size="sm">{profile.display_name}</Heading>
               {session?.user.email && (
-                <Text fontSize="sm" color="whiteAlpha.700">
+                <Text fontSize="sm" color={mutedText}>
                   {session.user.email}
                 </Text>
               )}
-              <Text fontSize="sm" color="whiteAlpha.700">
+              <Text fontSize="sm" color={mutedText}>
                 Connected with Google
               </Text>
               <HStack spacing={2} mt={3} flexWrap="wrap">
@@ -775,7 +795,7 @@ function AuthGate({ auth }: { auth: SupabaseAuthState }) {
             {nameError ? (
               <FormErrorMessage>{nameError}</FormErrorMessage>
             ) : (
-              <FormHelperText color="whiteAlpha.700">
+              <FormHelperText color={helperText}>
                 Your public username. Shareable across matches.
               </FormHelperText>
             )}
@@ -803,6 +823,7 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   const lobby = useMatchLobby(auth.profile);
   const [joiningCode, setJoiningCode] = useState('');
   const toast = useToast();
+  const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
 
   const handleCreate = async (payload: CreateMatchPayload) => {
     await lobby.createMatch(payload);
@@ -831,13 +852,13 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
           <GridItem>
             <Stack spacing={6}>
               <MatchCreationForm onCreate={handleCreate} loading={lobby.loading} />
-              <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200">
+              <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
                 <CardHeader>
                   <Heading size="md">Join by code</Heading>
                 </CardHeader>
                 <CardBody>
                   <Stack spacing={3}>
-                    <Text fontSize="sm" color="whiteAlpha.700">
+                    <Text fontSize="sm" color={mutedText}>
                       Enter a private code or match ID to join a friend.
                     </Text>
                     <HStack spacing={3}>
