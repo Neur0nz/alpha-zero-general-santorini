@@ -142,6 +142,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     expectedMoveIndex: number; 
     moveAction?: number;
   } | null>(null);
+  const [pendingMoveVersion, setPendingMoveVersion] = useState(0); // Trigger submission effect
   const gameCompletedRef = useRef<string | null>(null);
   const submissionLockRef = useRef<boolean>(false);
   const syncInProgressRef = useRef<boolean>(false); // NEW: Prevent moves during sync
@@ -455,8 +456,9 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
 
     // Get the move from pending ref
     const moveAction = pending.moveAction;
-    if (!moveAction) {
-    pendingLocalMoveRef.current = null;
+    if (moveAction === undefined || moveAction === null) {
+      console.warn('useOnlineSantorini: Pending move has no moveAction', pending);
+      pendingLocalMoveRef.current = null;
       return;
     }
 
@@ -499,7 +501,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       .finally(() => {
         submissionLockRef.current = false;
       });
-  }, [clock, clockEnabled, match, moves, onSubmitMove, role, toast]);
+  }, [clock, clockEnabled, match, moves, onSubmitMove, pendingMoveVersion, role, toast]);
 
   const formatClock = useCallback((ms: number) => {
     if (!clockEnabled) return '--:--';
@@ -598,6 +600,9 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
             expectedMoveIndex: nextMoveIndex,
             moveAction: placementAction,
           };
+          
+          console.log('✅ Placement move queued for submission', { placementAction, nextMoveIndex });
+          setPendingMoveVersion(v => v + 1); // Trigger submission effect
         } catch (error) {
           console.error('useOnlineSantorini: Move failed', error);
           toast({ title: 'Invalid move', status: 'error' });
@@ -654,6 +659,9 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
             expectedMoveIndex: nextMoveIndex,
             moveAction: action,
           };
+          
+          console.log('✅ Game move queued for submission', { action, nextMoveIndex });
+          setPendingMoveVersion(v => v + 1); // Trigger submission effect
         } catch (error) {
           console.error('useOnlineSantorini: Move failed', error);
           toast({ title: 'Move failed', status: 'error' });
