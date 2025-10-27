@@ -264,7 +264,8 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       setEngine(newEngine);
       setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
-      setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current));
+      const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+      setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current, myTurn));
       
       // Update clock states from all moves
       setClock(deriveInitialClocks(match));
@@ -469,7 +470,8 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           setEngine(newEngine);
           setBoard(engineToBoard(newEngine.snapshot));
           moveSelectorRef.current.reset();
-          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current));
+          const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current, myTurn));
           
           // Calculate the correct move index
           const pendingCount = pendingLocalMoveRef.current ? 1 : 0;
@@ -498,7 +500,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       }
       
       // Update highlighting for next stage
-      setSelectable(computeSelectable(validMoves, engine.snapshot, moveSelector));
+      setSelectable(computeSelectable(validMoves, engine.snapshot, moveSelector, isMyTurn));
       
       // Check if move is complete
       const action = moveSelector.getAction();
@@ -510,7 +512,8 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           setEngine(newEngine);
           setBoard(engineToBoard(newEngine.snapshot));
           moveSelector.reset();
-          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelector));
+          const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelector, myTurn));
           
           // Calculate move index and submit
           const pendingCount = pendingLocalMoveRef.current ? 1 : 0;
@@ -525,7 +528,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           console.error('useOnlineSantorini: Move failed', error);
           toast({ title: 'Move failed', status: 'error' });
           moveSelector.reset();
-          setSelectable(computeSelectable(validMoves, engine.snapshot, moveSelector));
+          setSelectable(computeSelectable(validMoves, engine.snapshot, moveSelector, isMyTurn));
         }
       }
     },
