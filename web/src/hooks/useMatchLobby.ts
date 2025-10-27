@@ -28,6 +28,15 @@ export interface LobbyMatch extends MatchRecord {
   opponent?: PlayerProfile | null;
 }
 
+export interface UndoRequestState {
+  matchId: string;
+  moveIndex: number;
+  requestedBy: 'creator' | 'opponent';
+  requestedAt: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'applied';
+  respondedBy?: 'creator' | 'opponent';
+}
+
 export interface UseMatchLobbyState {
   matches: LobbyMatch[];
   myMatches: LobbyMatch[];
@@ -37,6 +46,7 @@ export interface UseMatchLobbyState {
   moves: MatchMoveRecord<MatchAction>[];
   joinCode: string | null;
   sessionMode: 'local' | 'online' | null;
+  undoRequests: Record<string, UndoRequestState | undefined>;
 }
 
 const INITIAL_STATE: UseMatchLobbyState = {
@@ -48,6 +58,7 @@ const INITIAL_STATE: UseMatchLobbyState = {
   moves: [],
   joinCode: null,
   sessionMode: null,
+  undoRequests: {},
 };
 
 export interface UseMatchLobbyOptions {
@@ -55,6 +66,11 @@ export interface UseMatchLobbyOptions {
 }
 
 const LOCAL_MATCH_ID = 'local:match';
+
+// Helper to check if profile is temporary (fallback from network error)
+function isTemporaryProfile(profile: PlayerProfile | null): boolean {
+  return Boolean(profile?.id.startsWith('temp_'));
+}
 
 function createEmptySnapshot(): SantoriniStateSnapshot {
   return {
@@ -252,6 +268,12 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
   useEffect(() => {
     const client = supabase;
     if (!client || !profile || !onlineEnabled) return undefined;
+    
+    // Skip if we have a temporary profile (network error fallback)
+    if (isTemporaryProfile(profile)) {
+      console.log('Skipping cleanup with temporary profile ID');
+      return undefined;
+    }
 
     const cleanup = async () => {
       const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -354,6 +376,13 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
   useEffect(() => {
     const client = supabase;
     if (!client || !profile || !onlineEnabled) {
+      setState((prev) => ({ ...prev, myMatches: [], activeMatchId: null, activeMatch: null }));
+      return undefined;
+    }
+    
+    // Skip if we have a temporary profile (network error fallback)
+    if (isTemporaryProfile(profile)) {
+      console.log('Skipping match fetch with temporary profile ID - waiting for real profile');
       setState((prev) => ({ ...prev, myMatches: [], activeMatchId: null, activeMatch: null }));
       return undefined;
     }
@@ -638,6 +667,67 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         },
       )
       .on(
+        'broadcast',
+        { event: 'undo-request' },
+        (payload: { type: string; event: string; payload: any }) => {
+          const data = payload.payload ?? {};
+          const moveIndexRaw = typeof data.move_index === 'number' ? data.move_index : null;
+          const requestedByRole = data.requested_by_role === 'creator' ? 'creator' : data.requested_by_role === 'opponent' ? 'opponent' : null;
+          if (requestedByRole === null) {
+            console.warn('⚠️ Received undo-request with unknown role', data);
+            return;
+          }
+          setState((prev) => {
+            const moveIndex = moveIndexRaw ?? Math.max(prev.moves.length - 1, 0);
+            const requestState: UndoRequestState = {
+              matchId,
+              moveIndex,
+              requestedBy: requestedByRole,
+              requestedAt: data.requested_at ?? new Date().toISOString(),
+              status: 'pending',
+            };
+            return {
+              ...prev,
+              undoRequests: {
+                ...prev.undoRequests,
+                [matchId]: requestState,
+              },
+            };
+          });
+        },
+      )
+      .on(
+        'broadcast',
+        { event: 'undo-response' },
+        (payload: { type: string; event: string; payload: any }) => {
+          const data = payload.payload ?? {};
+          const accepted = Boolean(data.accepted);
+          const responderRole = data.responded_by_role === 'creator' ? 'creator' : data.responded_by_role === 'opponent' ? 'opponent' : null;
+          const moveIndexRaw = typeof data.move_index === 'number' ? data.move_index : null;
+          setState((prev) => {
+            const existing = prev.undoRequests[matchId];
+            if (!existing) {
+              return prev;
+            }
+            if (moveIndexRaw !== null && existing.moveIndex !== moveIndexRaw) {
+              return prev;
+            }
+            const nextState: UndoRequestState = {
+              ...existing,
+              status: accepted ? 'accepted' : 'rejected',
+              respondedBy: responderRole ?? existing.respondedBy,
+            };
+            return {
+              ...prev,
+              undoRequests: {
+                ...prev.undoRequests,
+                [matchId]: nextState,
+              },
+            };
+          });
+        },
+      )
+      .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` },
         (payload: RealtimePostgresChangesPayload<MatchRecord>) => {
@@ -714,6 +804,21 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
               // Add move and ensure proper ordering by move_index
               const updatedMoves = [...prev.moves, moveRecord].sort((a, b) => a.move_index - b.move_index);
               return { ...prev, moves: updatedMoves };
+            }
+            if (payload.eventType === 'DELETE') {
+              const deletedMove = payload.old as MatchMoveRecord;
+              const updatedMoves = prev.moves
+                .filter((move) => move.id !== deletedMove.id && move.move_index !== deletedMove.move_index)
+                .sort((a, b) => a.move_index - b.move_index);
+              const pendingUndo = prev.undoRequests[matchId];
+              const nextUndoRequests = { ...prev.undoRequests };
+              if (pendingUndo && pendingUndo.moveIndex === deletedMove.move_index) {
+                nextUndoRequests[matchId] = {
+                  ...pendingUndo,
+                  status: 'applied',
+                };
+              }
+              return { ...prev, moves: updatedMoves, undoRequests: nextUndoRequests };
             }
             return prev;
           });
@@ -911,6 +1016,13 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           activeMatch: null,
           moves: [],
           joinCode: null,
+          undoRequests: prev.activeMatchId
+            ? (() => {
+                const next = { ...prev.undoRequests };
+                delete next[prev.activeMatchId];
+                return next;
+              })()
+            : prev.undoRequests,
         }));
         return;
       }
@@ -928,6 +1040,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           activeMatch: null,
           moves: [],
           joinCode: null,
+          undoRequests: {},
         }));
         return;
       }
@@ -941,6 +1054,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           activeMatch: null,
           moves: [],
           joinCode: null,
+          undoRequests: {},
         }));
         return;
       }
@@ -968,6 +1082,8 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         const remaining = removeMatch(prev.myMatches, targetId);
         const wasActive = prev.activeMatchId === targetId;
         const fallback = wasActive ? selectPreferredMatch(remaining) : null;
+        const nextUndo = { ...prev.undoRequests };
+        delete nextUndo[targetId];
         return {
           ...prev,
           myMatches: remaining,
@@ -976,6 +1092,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           activeMatch: wasActive ? fallback ?? null : prev.activeMatch,
           moves: wasActive ? [] : prev.moves,
           joinCode: wasActive && fallback ? fallback.private_join_code ?? null : wasActive ? null : prev.joinCode,
+          undoRequests: nextUndo,
         };
       });
     },
@@ -1133,6 +1250,171 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     [attachProfiles, ensurePlayersLoaded, mergePlayers, onlineEnabled, profile, state.activeMatch],
   );
 
+  const requestUndo = useCallback(
+    async () => {
+      if (!onlineEnabled) {
+        throw new Error('Online play is not enabled.');
+      }
+      const channel = channelRef.current;
+      const match = state.activeMatch;
+      if (!channel || !match || state.sessionMode !== 'online') {
+        throw new Error('No active online match to request undo.');
+      }
+      if (!profile) {
+        throw new Error('Authentication required.');
+      }
+      const moveIndex = state.moves.length - 1;
+      if (moveIndex < 0) {
+        throw new Error('There are no moves to undo yet.');
+      }
+      const role =
+        match.creator_id === profile.id
+          ? 'creator'
+          : match.opponent_id === profile.id
+            ? 'opponent'
+            : null;
+      if (!role) {
+        throw new Error('Only participants may request an undo.');
+      }
+      const existing = state.undoRequests[match.id];
+      if (existing && existing.status === 'pending') {
+        throw new Error('Undo request already pending.');
+      }
+      const requestedAt = new Date().toISOString();
+      const payload = {
+        match_id: match.id,
+        move_index: moveIndex,
+        requested_by_role: role,
+        requested_by_user_id: profile.id,
+        requested_at: requestedAt,
+      };
+      setState((prev) => ({
+        ...prev,
+        undoRequests: {
+          ...prev.undoRequests,
+          [match.id]: {
+            matchId: match.id,
+            moveIndex,
+            requestedBy: role,
+            requestedAt,
+            status: 'pending',
+          },
+        },
+      }));
+      try {
+        await channel.send({
+          type: 'broadcast',
+          event: 'undo-request',
+          payload,
+        });
+      } catch (error) {
+        setState((prev) => {
+          const existing = prev.undoRequests[match.id];
+          if (!existing || existing.requestedAt !== requestedAt) {
+            return prev;
+          }
+          const nextUndo = { ...prev.undoRequests };
+          delete nextUndo[match.id];
+          return { ...prev, undoRequests: nextUndo };
+        });
+        throw error;
+      }
+    },
+    [onlineEnabled, profile, state.activeMatch, state.moves.length, state.sessionMode, state.undoRequests],
+  );
+
+  const respondUndo = useCallback(
+    async (accepted: boolean) => {
+      if (!onlineEnabled) {
+        throw new Error('Online play is not enabled.');
+      }
+      const channel = channelRef.current;
+      const client = supabase;
+      const match = state.activeMatch;
+      if (!channel || !match || state.sessionMode !== 'online') {
+        throw new Error('No active online match to respond to.');
+      }
+      if (!profile) {
+        throw new Error('Authentication required.');
+      }
+      const pending = state.undoRequests[match.id];
+      if (!pending || pending.status !== 'pending') {
+        throw new Error('There is no pending undo request to respond to.');
+      }
+      const responderRole =
+        match.creator_id === profile.id
+          ? 'creator'
+          : match.opponent_id === profile.id
+            ? 'opponent'
+            : null;
+      if (!responderRole) {
+        throw new Error('Only participants may respond to undo requests.');
+      }
+      const moveIndex = pending.moveIndex;
+      if (accepted) {
+        if (!client) {
+          throw new Error('Supabase client unavailable.');
+        }
+        const { error } = await client.functions.invoke('submit-move', {
+          body: {
+            matchId: match.id,
+            moveIndex,
+            action: {
+              kind: 'undo.accept',
+              moveIndex,
+            },
+          },
+        });
+        if (error) {
+          console.error('Failed to apply undo on server', error);
+          throw error;
+        }
+      }
+      const respondedAt = new Date().toISOString();
+      await channel.send({
+        type: 'broadcast',
+        event: 'undo-response',
+        payload: {
+          match_id: match.id,
+          move_index: moveIndex,
+          accepted,
+          responded_by_role: responderRole,
+          responded_by_user_id: profile.id,
+          responded_at: respondedAt,
+        },
+      });
+      setState((prev) => {
+        const existing = prev.undoRequests[match.id];
+        if (!existing) {
+          return prev;
+        }
+        return {
+          ...prev,
+          undoRequests: {
+            ...prev.undoRequests,
+            [match.id]: {
+              ...existing,
+              status: accepted ? 'accepted' : 'rejected',
+              respondedBy: responderRole,
+            },
+          },
+        };
+      });
+    },
+    [onlineEnabled, profile, state.activeMatch, state.sessionMode, state.undoRequests],
+  );
+
+  const clearUndoRequest = useCallback((matchId: string) => {
+    setState((prev) => {
+      if (!prev.undoRequests[matchId]) {
+        return prev;
+      }
+      const next = { ...prev.undoRequests };
+      delete next[matchId];
+      return { ...prev, undoRequests: next };
+    });
+  }, []);
+
   const setActiveMatch = useCallback(
     (matchId: string | null) => {
       if (matchId === LOCAL_MATCH_ID) {
@@ -1219,6 +1501,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       activeMatch: null,
       moves: [],
       joinCode: null,
+      undoRequests: {},
     }));
   }, []);
 
@@ -1248,6 +1531,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       activeMatch: null,
       moves: [],
       joinCode: null,
+      undoRequests: {},
     }));
   }, []);
 
@@ -1262,6 +1546,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     activeRole,
     sessionMode: state.sessionMode,
     onlineEnabled,
+    undoRequests: state.undoRequests,
     setActiveMatch,
     createMatch,
     joinMatch,
@@ -1273,5 +1558,10 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     stopLocalMatch,
     enableOnline,
     disableOnline,
+    requestUndo,
+    respondUndo,
+    clearUndoRequest,
   };
 }
+
+export type UseMatchLobbyReturn = ReturnType<typeof useMatchLobby>;

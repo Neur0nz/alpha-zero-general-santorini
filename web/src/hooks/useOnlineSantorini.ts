@@ -84,8 +84,7 @@ function computeSelectable(
   }
 
   // During placement phase highlight available empty squares
-  const isPlacementPhase = placement && placement.player === snapshot.player;
-  if (isPlacementPhase) {
+  if (placement) {
     for (let i = 0; i < 25; i++) {
       if (validMoves[i]) {
         const y = Math.floor(i / 5);
@@ -384,6 +383,10 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   // Use engineVersion as dependency to recompute when engine changes
   const currentTurn = useMemo(() => {
     if (!match) return null;
+    const placement = engineRef.current.getPlacementContext();
+    if (placement) {
+      return placement.player === 0 ? 'creator' : 'opponent';
+    }
     return engineRef.current.player === 0 ? 'creator' : 'opponent';
   }, [engineVersion, match]);
   
@@ -561,7 +564,8 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       const engine = engineRef.current;
       const validMoves = engine.getValidMoves();
       const placement = engine.getPlacementContext();
-      const isPlacementPhase = placement && placement.player === engine.player;
+      const placementRole = placement ? (placement.player === 0 ? 'creator' : 'opponent') : null;
+      const isPlacementPhase = Boolean(placement);
       
       console.log('🎯 onCellClick Debug:', {
         y, x,
@@ -584,6 +588,10 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       // During placement phase ONLY - apply placement moves
       const placementAction = y * 5 + x;
       if (isPlacementPhase) {
+        if (placementRole && placementRole !== role) {
+          toast({ title: "It's not your placement turn", status: 'warning' });
+          return;
+        }
         if (placementAction >= validMoves.length || !validMoves[placementAction]) {
           toast({ title: 'Invalid placement', status: 'warning' });
           return;

@@ -64,4 +64,23 @@ export type RematchOfferAction = {
   newMatchId: string;
 };
 
-export type MatchAction = SantoriniMoveAction | RematchOfferAction | Record<string, unknown>;
+export type UndoRequestAction = {
+  kind: 'undo.request';
+  by: 'creator' | 'opponent';
+  moveIndex: number;
+  createdAt?: string;
+};
+
+export type UndoResponseAction = {
+  kind: 'undo.response';
+  by: 'creator' | 'opponent';
+  accepted: boolean;
+  moveIndex: number;
+};
+
+export type MatchAction =
+  | SantoriniMoveAction
+  | RematchOfferAction
+  | UndoRequestAction
+  | UndoResponseAction
+  | Record<string, unknown>;

@@ -52,6 +52,8 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
 
   return (
     <Box
+      as="header"
+      role="banner"
       bg={bg}
       borderBottomWidth="1px"
       borderColor={borderColor}
@@ -66,7 +68,12 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
           gap={{ base: 2, md: 4 }}
         >
           <VStack align="flex-start" spacing={1}>
-            <Heading size={{ base: 'md', md: 'lg' }} letterSpacing="tight" color={headingColor}>
+            <Heading 
+              as="h1" 
+              size={{ base: 'md', md: 'lg' }} 
+              letterSpacing="tight" 
+              color={headingColor}
+            >
               Ascent Santorini
             </Heading>
             <Text fontSize={{ base: 'sm', md: 'md' }} color={helperMuted}>
@@ -99,17 +106,31 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
           gap={{ base: 3, md: 4 }}
         >
           <TabList
+            as="nav"
+            aria-label="Main navigation"
             display="flex"
             flexWrap="wrap"
             gap={{ base: 1, md: 2 }}
             borderBottom="none"
             justifyContent={{ base: 'center', md: 'flex-start' }}
             w="100%"
-            sx={{ button: { fontWeight: 'semibold' } }}
+            sx={{ 
+              button: { 
+                fontWeight: 'semibold',
+                // Enhanced focus visible state
+                '&:focus-visible': {
+                  outline: '2px solid',
+                  outlineColor: 'teal.500',
+                  outlineOffset: '2px',
+                }
+              } 
+            }}
           >
             {NAV_TABS.map((tab) => (
               <Tab
                 key={tab.key}
+                aria-label={`${tab.label}: ${tab.helper}`}
+                aria-current={activeTab === tab.key ? 'page' : undefined}
                 px={{ base: 3, md: 4 }}
                 py={{ base: 2, md: 3 }}
                 borderRadius="lg"
@@ -123,6 +144,11 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
                   boxShadow: 'md',
                   transform: 'translateY(-1px)',
                 }}
+                _focusVisible={{
+                  outline: '2px solid',
+                  outlineColor: 'teal.500',
+                  outlineOffset: '2px',
+                }}
               >
                 <VStack spacing={0} align="flex-start">
                   <Text fontWeight="semibold">{tab.label}</Text>
@@ -135,7 +161,12 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
           </TabList>
           <Spacer />
           <HStack spacing={3} align="center">
-            <Text fontSize="sm" color={descriptionColor} display={{ base: 'none', md: 'block' }}>
+            <Text 
+              fontSize="sm" 
+              color={descriptionColor} 
+              display={{ base: 'none', md: 'block' }}
+              aria-live="polite"
+            >
               {activeTabDetails ? activeTabDetails.helper : 'Explore Ascent features'}
             </Text>
             {actions && <HStack spacing={2} display={{ base: 'none', md: 'flex' }}>{actions}</HStack>}

@@ -9,10 +9,22 @@ interface SantoriniMoveAction {
   clocks?: { creatorMs?: number; opponentMs?: number } | null;
 }
 
+interface UndoAcceptAction {
+  kind: 'undo.accept';
+  moveIndex?: number | null;
+}
+
+interface UndoRejectAction {
+  kind: 'undo.reject';
+  moveIndex?: number | null;
+}
+
+type SupportedAction = SantoriniMoveAction | UndoAcceptAction | UndoRejectAction;
+
 interface SubmitMoveRequest {
   matchId?: string;
   moveIndex?: number;
-  action?: SantoriniMoveAction;
+  action?: SupportedAction;
 }
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -85,11 +97,8 @@ serve(async (req) => {
   if (!payload?.matchId || typeof payload.matchId !== 'string') {
     return jsonResponse({ error: 'Missing match identifier' }, { status: 400 });
   }
-  if (!payload.action || payload.action.kind !== 'santorini.move') {
-    return jsonResponse({ error: 'Unsupported action payload' }, { status: 400 });
-  }
-  if (!Number.isInteger(payload.action.move) || payload.action.move < 0) {
-    return jsonResponse({ error: 'Move must be a non-negative integer' }, { status: 400 });
+  if (!payload.action) {
+    return jsonResponse({ error: 'Missing action payload' }, { status: 400 });
   }
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -142,6 +151,80 @@ serve(async (req) => {
   // Parse last move (if any)
   const lastMove = lastMoveData as any;
 
+  if (payload.action.kind === 'undo.reject') {
+    return jsonResponse({ undone: false, rejected: true });
+  }
+
+  if (payload.action.kind === 'undo.accept') {
+    if (!lastMove) {
+      return jsonResponse({ error: 'No moves available to undo' }, { status: 409 });
+    }
+    const lastMoveActionKind = lastMove?.action?.kind ?? 'santorini.move';
+    if (lastMoveActionKind !== 'santorini.move') {
+      return jsonResponse({ error: 'Only standard moves can be undone' }, { status: 409 });
+    }
+    if (payload.action.moveIndex !== undefined && payload.action.moveIndex !== null) {
+      if (payload.action.moveIndex !== lastMove.move_index) {
+        return jsonResponse({ error: 'Move index mismatch' }, { status: 409 });
+      }
+    }
+    if (payload.moveIndex !== undefined && payload.moveIndex !== lastMove.move_index) {
+      return jsonResponse({ error: 'Move index mismatch' }, { status: 409 });
+    }
+    const { data: previousMoves, error: previousError } = await supabase
+      .from('match_moves')
+      .select('id, move_index, state_snapshot')
+      .eq('match_id', match.id)
+      .lt('move_index', lastMove.move_index)
+      .order('move_index', { ascending: false })
+      .limit(1);
+
+    if (previousError) {
+      console.error('Failed to load previous move snapshot', previousError);
+      return jsonResponse({ error: 'Unable to load previous game state' }, { status: 500 });
+    }
+
+    const previousMove = Array.isArray(previousMoves) && previousMoves.length > 0 ? previousMoves[0] : null;
+
+    const { error: deleteError } = await supabase
+      .from('match_moves')
+      .delete()
+      .eq('id', lastMove.id);
+
+    if (deleteError) {
+      console.error('Failed to delete last move during undo', deleteError);
+      return jsonResponse({ error: 'Failed to remove last move' }, { status: 500 });
+    }
+
+    if (match.status === 'completed' || match.winner_id) {
+      const { error: updateError } = await supabase
+        .from('matches')
+        .update({ status: 'in_progress', winner_id: null })
+        .eq('id', match.id);
+      if (updateError) {
+        console.error('Failed to reset match status after undo', updateError);
+      }
+    }
+
+    const restoredSnapshot = previousMove?.state_snapshot ?? match.initial_state ?? null;
+
+    return jsonResponse({
+      undone: true,
+      moveIndex: lastMove.move_index,
+      snapshot: restoredSnapshot,
+    });
+  }
+
+  if (payload.action.kind !== 'santorini.move') {
+    return jsonResponse({ error: 'Unsupported action payload' }, { status: 400 });
+  }
+
+  if (!Number.isInteger(payload.action.move) || payload.action.move < 0) {
+    return jsonResponse({ error: 'Move must be a non-negative integer' }, { status: 400 });
+  }
+
+  const moveAction = payload.action as SantoriniMoveAction;
+
   let engine: SantoriniEngine;
   let expectedMoveIndex = 0;
 
@@ -175,7 +258,8 @@ serve(async (req) => {
     return jsonResponse({ error: 'Move index out of sequence' }, { status: 409 });
   }
 
-  const actingPlayerIndex = engine.player;
+  const placementContext = engine.getPlacementContext();
+  const actingPlayerIndex = placementContext ? placementContext.player : engine.player;
   if (actingPlayerIndex === 0 && role !== 'creator') {
     return jsonResponse({ error: "It is the creator's turn" }, { status: 403 });
   }
@@ -183,13 +267,13 @@ serve(async (req) => {
     return jsonResponse({ error: "It is the opponent's turn" }, { status: 403 });
   }
 
-  const sanitizedClocks = sanitizeClocks(payload.action.clocks ?? undefined);
+  const sanitizedClocks = sanitizeClocks(moveAction.clocks ?? undefined);
 
   let applyResult;
   try {
-    console.log('Applying move:', payload.action.move, 'for player:', actingPlayerIndex);
+    console.log('Applying move:', moveAction.move, 'for player:', actingPlayerIndex);
     console.log('Engine state before move - player:', engine.player, 'validMoves count:', engine.validMoves.filter(v => v).length);
-    applyResult = engine.applyMove(payload.action.move);
+    applyResult = engine.applyMove(moveAction.move);
     console.log('Move applied successfully, winner:', applyResult.winner);
   } catch (error) {
     console.error('Rejected illegal move', error);
@@ -200,7 +284,7 @@ serve(async (req) => {
 
   const actionRecord: SantoriniMoveAction = {
     kind: 'santorini.move',
-    move: payload.action.move,
+    move: moveAction.move,
     by: actingPlayerIndex === 0 ? 'creator' : 'opponent',
     clocks: sanitizedClocks ?? undefined,
   };

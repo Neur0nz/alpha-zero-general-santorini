@@ -26,6 +26,8 @@ import GamePlayWorkspace from '@components/play/GamePlayWorkspace';
 import AnalyzeWorkspace from '@components/analyze/AnalyzeWorkspace';
 import ProfileWorkspace from '@components/profile/ProfileWorkspace';
 import LeaderboardWorkspace from '@components/leaderboard/LeaderboardWorkspace';
+import { MatchLobbyProvider } from '@hooks/matchLobbyContext';
+import { AuthLoadingScreen } from '@components/auth/AuthLoadingScreen';
 
 const TAB_ORDER: AppTab[] = ['lobby', 'play', 'leaderboard', 'practice', 'analyze', 'profile'];
 const TAB_STORAGE_KEY = 'santorini:lastTab';
@@ -146,30 +148,63 @@ function App() {
   const activeIndex = Math.max(0, tabOrder.indexOf(activeTab));
   const auth = useSupabaseAuth();
 
+  // Initialize tab from URL hash or localStorage
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
+    
+    // Check URL hash first (e.g., #play)
+    const hash = window.location.hash.slice(1) as AppTab;
+    if (hash && tabOrder.includes(hash)) {
+      setActiveTab(hash);
+      return;
+    }
+
+    // Fallback to localStorage
     try {
       const storedTab = window.localStorage.getItem(TAB_STORAGE_KEY) as AppTab | null;
       if (storedTab && tabOrder.includes(storedTab)) {
         setActiveTab(storedTab);
+        // Set the hash to match
+        window.history.replaceState(null, '', `#${storedTab}`);
+      } else {
+        // Set default hash
+        window.history.replaceState(null, '', `#${activeTab}`);
       }
     } catch (error) {
       console.error('Failed to restore last active tab', error);
     }
   }, [tabOrder]);
 
+  // Update URL hash and localStorage when tab changes
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
     try {
+      // Update URL hash
+      window.history.replaceState(null, '', `#${activeTab}`);
+      
+      // Update localStorage
       window.localStorage.setItem(TAB_STORAGE_KEY, activeTab);
     } catch (error) {
       console.error('Failed to persist last active tab', error);
     }
   }, [activeTab]);
+
+  // Listen for browser back/forward navigation
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.slice(1) as AppTab;
+      if (hash && tabOrder.includes(hash)) {
+        setActiveTab(hash);
+      }
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [tabOrder]);
 
   const tabActions = useMemo(() => {
     switch (activeTab) {
@@ -216,59 +251,71 @@ function App() {
   const appBg = useColorModeValue('linear(to-br, gray.50, gray.100)', 'linear(to-br, gray.900, gray.800)');
   const appColor = useColorModeValue('gray.900', 'whiteAlpha.900');
 
+  // Show loading screen during initial authentication
+  if (auth.loading) {
+    const isTemporary = auth.profile?.id.startsWith('temp_');
+    const message = isTemporary 
+      ? 'Almost there...' 
+      : 'Signing you in...';
+    
+    return <AuthLoadingScreen message={message} isTemporary={isTemporary} />;
+  }
+
   return (
-    <Tabs
-      index={activeIndex}
-      onChange={handleTabChange}
-      isLazy
-      variant="unstyled"
-      h="100%"
-      display="flex"
-      flexDirection="column"
-      minH="100vh"
-    >
-      <Flex direction="column" flex="1" minH="100vh" bgGradient={appBg} color={appColor}>
-        <HeaderBar activeTab={activeTab} actions={tabActions} auth={auth} />
-        <Flex flex="1" py={{ base: 6, md: 8 }}>
-          <Container maxW="7xl" flex="1" px={{ base: 3, md: 6 }}>
-            <TabPanels flex="1">
-              <TabPanel px={0}>
-                <LobbyWorkspace
-                  auth={auth}
-                  onNavigateToPlay={() => setActiveTab('play')}
-                  onNavigateToPractice={() => setActiveTab('practice')}
-                  onNavigateToAnalyze={() => setActiveTab('analyze')}
-                  onNavigateToLeaderboard={() => setActiveTab('leaderboard')}
-                />
-              </TabPanel>
-              <TabPanel px={0}>
-                <GamePlayWorkspace auth={auth} />
-              </TabPanel>
-              <TabPanel px={0}>
-                <LeaderboardWorkspace
-                  auth={auth}
-                  onNavigateToPlay={() => setActiveTab('play')}
-                />
-              </TabPanel>
-              <TabPanel px={0}>
-                <SantoriniProvider>
-                  <PracticeTabContent onShowHistory={openHistory} />
-                  <PracticeHistoryModal isOpen={isHistoryOpen} onClose={closeHistory} />
-                </SantoriniProvider>
-              </TabPanel>
-              <TabPanel px={0}>
-                <SantoriniProvider evaluationEnabled={true}>
-                  <AnalyzeWorkspace auth={auth} />
-                </SantoriniProvider>
-              </TabPanel>
-              <TabPanel px={0}>
-                <ProfileWorkspace auth={auth} />
-              </TabPanel>
-            </TabPanels>
-          </Container>
+    <MatchLobbyProvider profile={auth.profile}>
+      <Tabs
+        index={activeIndex}
+        onChange={handleTabChange}
+        isLazy
+        variant="unstyled"
+        h="100%"
+        display="flex"
+        flexDirection="column"
+        minH="100vh"
+      >
+        <Flex direction="column" flex="1" minH="100vh" bgGradient={appBg} color={appColor}>
+          <HeaderBar activeTab={activeTab} actions={tabActions} auth={auth} />
+          <Flex flex="1" py={{ base: 6, md: 8 }}>
+            <Container maxW="7xl" flex="1" px={{ base: 3, md: 6 }}>
+              <TabPanels flex="1">
+                <TabPanel px={0}>
+                  <LobbyWorkspace
+                    auth={auth}
+                    onNavigateToPlay={() => setActiveTab('play')}
+                    onNavigateToPractice={() => setActiveTab('practice')}
+                    onNavigateToAnalyze={() => setActiveTab('analyze')}
+                    onNavigateToLeaderboard={() => setActiveTab('leaderboard')}
+                  />
+                </TabPanel>
+                <TabPanel px={0}>
+                  <GamePlayWorkspace auth={auth} />
+                </TabPanel>
+                <TabPanel px={0}>
+                  <LeaderboardWorkspace
+                    auth={auth}
+                    onNavigateToPlay={() => setActiveTab('play')}
+                  />
+                </TabPanel>
+                <TabPanel px={0}>
+                  <SantoriniProvider>
+                    <PracticeTabContent onShowHistory={openHistory} />
+                    <PracticeHistoryModal isOpen={isHistoryOpen} onClose={closeHistory} />
+                  </SantoriniProvider>
+                </TabPanel>
+                <TabPanel px={0}>
+                  <SantoriniProvider evaluationEnabled={true}>
+                    <AnalyzeWorkspace auth={auth} />
+                  </SantoriniProvider>
+                </TabPanel>
+                <TabPanel px={0}>
+                  <ProfileWorkspace auth={auth} />
+                </TabPanel>
+              </TabPanels>
+            </Container>
+          </Flex>
         </Flex>
-      </Flex>
-    </Tabs>
+      </Tabs>
+    </MatchLobbyProvider>
   );
 }
 

@@ -11,6 +11,7 @@ import {
   SliderTrack,
   Text,
   useColorModeValue,
+  useBreakpointValue,
 } from '@chakra-ui/react';
 import { useEffect, useMemo, useState } from 'react';
 import type { BoardCell, ButtonsState } from '@hooks/useSantorini';
@@ -27,6 +28,9 @@ interface GameBoardProps {
   undoLabel?: string;
   hideRedoButton?: boolean;
   undoDisabledOverride?: boolean;
+  showBoardSizeControl?: boolean;
+  showPrimaryControls?: boolean;
+  undoIsLoading?: boolean;
 }
 
 function GameBoard({
@@ -41,6 +45,9 @@ function GameBoard({
   undoLabel,
   hideRedoButton,
   undoDisabledOverride,
+  showBoardSizeControl = true,
+  showPrimaryControls = true,
+  undoIsLoading = false,
 }: GameBoardProps) {
   const cellBg = useColorModeValue('gray.50', 'gray.700');
   const selectableBg = useColorModeValue('teal.100', 'teal.700');
@@ -53,6 +60,7 @@ function GameBoard({
   const actionBorderColor = useColorModeValue('gray.200', 'whiteAlpha.200');
   const panelTextColor = useColorModeValue('gray.800', 'whiteAlpha.800');
   const buildingColor = useColorModeValue('gray.900', 'whiteAlpha.900');
+  const boardSizeControlVisible = useBreakpointValue({ base: false, md: true });
   const [boardPixels, setBoardPixels] = useState<number>(() => {
     if (typeof window === 'undefined') {
       return 600;
@@ -91,29 +99,31 @@ function GameBoard({
       mx="auto"
     >
       <Flex direction="column" gap={3} w="100%">
-        <Flex align="center" gap={3} w="100%" px={{ base: 0, sm: 1 }}>
-          <Text fontSize="sm" color={labelColor} whiteSpace="nowrap">
-            Board size
-          </Text>
-          <Slider
-            aria-label="Board size"
-            value={boardPixels}
-            onChange={setBoardPixels}
-            min={320}
-            max={960}
-            step={10}
-            colorScheme="teal"
-            flex={1}
-          >
-            <SliderTrack bg={defaultBorderColor}>
-              <SliderFilledTrack />
-            </SliderTrack>
-            <SliderThumb boxSize={5} />
-          </Slider>
-          <Text fontSize="sm" color={subtleLabelColor} w="64px" textAlign="right">
-            {Math.round(boardPixels)}px
-          </Text>
-        </Flex>
+        {showBoardSizeControl && boardSizeControlVisible && (
+          <Flex align="center" gap={3} w="100%" px={{ base: 0, sm: 1 }}>
+            <Text fontSize="sm" color={labelColor} whiteSpace="nowrap">
+              Board size
+            </Text>
+            <Slider
+              aria-label="Board size"
+              value={boardPixels}
+              onChange={setBoardPixels}
+              min={320}
+              max={960}
+              step={10}
+              colorScheme="teal"
+              flex={1}
+            >
+              <SliderTrack bg={defaultBorderColor}>
+                <SliderFilledTrack />
+              </SliderTrack>
+              <SliderThumb boxSize={5} />
+            </Slider>
+            <Text fontSize="sm" color={subtleLabelColor} w="64px" textAlign="right">
+              {Math.round(boardPixels)}px
+            </Text>
+          </Flex>
+        )}
         <AspectRatio ratio={1} w="100%" maxW={boardMaxWidth} mx="auto">
           <Flex
             direction="column"
@@ -199,12 +209,13 @@ function GameBoard({
           </Flex>
         </AspectRatio>
       </Flex>
-      <Flex
-        gap={3}
-        direction={{ base: 'column', sm: 'row' }}
-        w="100%"
-        align="stretch"
-      >
+      {showPrimaryControls && (
+        <Flex
+          gap={3}
+          direction={{ base: 'column', sm: 'row' }}
+          w="100%"
+          align="stretch"
+        >
         <Button
           flex="1"
           w={{ base: '100%', sm: 'auto' }}
@@ -212,26 +223,28 @@ function GameBoard({
           py={{ base: 5, sm: 6 }}
           onClick={undo}
           isDisabled={undoDisabledOverride ?? !buttons.canUndo}
+          isLoading={undoIsLoading}
           colorScheme="blue"
           boxShadow="lg"
         >
-          {undoLabel ?? 'Undo'}
-        </Button>
-        {!hideRedoButton && (
-          <Button
-            flex="1"
-            w={{ base: '100%', sm: 'auto' }}
-            size="lg"
-            py={{ base: 5, sm: 6 }}
-            onClick={redo}
-            isDisabled={!buttons.canRedo}
-            colorScheme="purple"
-            boxShadow="lg"
-          >
-            Redo
+            {undoLabel ?? 'Undo'}
           </Button>
-        )}
-      </Flex>
+          {!hideRedoButton && (
+            <Button
+              flex="1"
+              w={{ base: '100%', sm: 'auto' }}
+              size="lg"
+              py={{ base: 5, sm: 6 }}
+              onClick={redo}
+              isDisabled={!buttons.canRedo}
+              colorScheme="purple"
+              boxShadow="lg"
+            >
+              Redo
+            </Button>
+          )}
+        </Flex>
+      )}
       <Box
         px={4}
         py={3}

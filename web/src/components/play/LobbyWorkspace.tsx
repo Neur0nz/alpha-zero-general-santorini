@@ -37,7 +37,8 @@ import {
 } from '@chakra-ui/react';
 import { AddIcon, ArrowForwardIcon, RepeatIcon, SearchIcon, StarIcon } from '@chakra-ui/icons';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
-import { useMatchLobby, type CreateMatchPayload, type LobbyMatch, type StartingPlayer } from '@hooks/useMatchLobby';
+import type { CreateMatchPayload, LobbyMatch, StartingPlayer } from '@hooks/useMatchLobby';
+import { useMatchLobbyContext } from '@hooks/matchLobbyContext';
 import GoogleIcon from '@components/auth/GoogleIcon';
 
 function formatDate(value: string) {
@@ -95,6 +96,7 @@ function LobbyHero({
             direction={{ base: 'column', sm: 'row' }}
             spacing={{ base: 3, sm: 4 }}
             align={{ base: 'stretch', sm: 'center' }}
+            w={{ base: '100%', sm: 'auto' }}
           >
             <Button
               size="lg"
@@ -102,6 +104,11 @@ function LobbyHero({
               rightIcon={<ArrowForwardIcon />}
               onClick={onQuickMatch}
               isLoading={quickMatchLoading}
+              w={{ base: '100%', sm: 'auto' }}
+              whiteSpace="normal"
+              height="auto"
+              textAlign="center"
+              px={{ base: 4, sm: 6 }}
             >
               Start quick match
             </Button>
@@ -110,6 +117,11 @@ function LobbyHero({
               variant="outline"
               leftIcon={<AddIcon />}
               onClick={onOpenCreate}
+              w={{ base: '100%', sm: 'auto' }}
+              whiteSpace="normal"
+              height="auto"
+              textAlign="center"
+              px={{ base: 4, sm: 6 }}
             >
               Custom match
             </Button>
@@ -117,6 +129,11 @@ function LobbyHero({
               size="lg"
               variant="ghost"
               onClick={onOpenJoin}
+              w={{ base: '100%', sm: 'auto' }}
+              whiteSpace="normal"
+              height="auto"
+              textAlign="center"
+              px={{ base: 4, sm: 6 }}
             >
               Join by code
             </Button>
@@ -174,21 +191,21 @@ function FeatureHighlights({
   const items = [
     {
       title: 'Train with adaptive AI',
-      description: 'Sharpen tactics in Practice with undo, evaluation, and depth controls that mirror lichess studies.',
+      description: 'Sharpen tactics in Practice with undo, evaluation, and depth controls',
       actionLabel: 'Open practice',
       onClick: onNavigateToPractice,
       icon: RepeatIcon,
     },
     {
       title: 'Study every move',
-      description: 'Replay games with engine insights, timelines, and branching lines to find the perfect tower climb.',
+      description: 'Replay games and see what you missed.',
       actionLabel: 'Analyze games',
       onClick: onNavigateToAnalyze,
       icon: SearchIcon,
     },
     {
       title: 'Climb the ladder',
-      description: 'Track top Santorini players, compare ratings, and chase your spot on the Ascent leaderboard.',
+      description: 'Track top Santorini Players on the Site',
       actionLabel: 'See leaderboard',
       onClick: onNavigateToLeaderboard,
       icon: StarIcon,
@@ -614,7 +631,7 @@ function LobbyWorkspace({
   onNavigateToAnalyze: () => void;
   onNavigateToLeaderboard: () => void;
 }) {
-  const lobby = useMatchLobby(auth.profile, { autoConnectOnline: true });
+  const lobby = useMatchLobbyContext();
   const [joiningCode, setJoiningCode] = useState('');
   const { isOpen: isCreateOpen, onOpen: onCreateOpen, onClose: onCreateClose } = useDisclosure();
   const { isOpen: isJoinOpen, onOpen: onJoinOpen, onClose: onJoinClose } = useDisclosure();
@@ -650,13 +667,17 @@ function LobbyWorkspace({
     try {
       await handleCreate({
         visibility: 'public',
-        rated: true,
+        rated: false,
         hasClock: true,
         clockInitialMinutes: 10,
         clockIncrementSeconds: 5,
         startingPlayer: 'random',
       });
-      toast({ title: 'Quick match created', status: 'success', description: 'Waiting for an opponent to join…' });
+      toast({
+        title: 'Quick match created',
+        status: 'success',
+        description: 'Casual game posted to the lobby. Waiting for an opponent to join…',
+      });
     } catch (error) {
       toast({
         title: 'Quick match failed',

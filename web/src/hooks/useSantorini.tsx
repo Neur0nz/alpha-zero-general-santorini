@@ -6,7 +6,7 @@ import { MoveSelector } from '@game/moveSelector';
 import { renderCellSvg, type CellState } from '@game/svg';
 import { GAME_CONSTANTS } from '@game/constants';
 import type { SantoriniStateSnapshot } from '@/types/match';
-import { SantoriniEngine, type SantoriniSnapshot } from '@/lib/santoriniEngine';
+import { SantoriniEngine, SANTORINI_CONSTANTS, type SantoriniSnapshot } from '@/lib/santoriniEngine';
 import { TypeScriptMoveSelector } from '@/lib/moveSelectorTS';
 import { useToast } from '@chakra-ui/react';
 
@@ -31,6 +31,99 @@ const ONNX_OUTPUT_SIZE = 162;
 let onnxSessionPromise: Promise<any> | null = null;
 
 const PRACTICE_STATE_KEY = 'santorini:practiceState';
+
+const COLUMN_LABELS = ['A', 'B', 'C', 'D', 'E'] as const;
+
+const inBounds = (y: number, x: number): boolean =>
+  y >= 0 && y < GAME_CONSTANTS.BOARD_SIZE && x >= 0 && x < GAME_CONSTANTS.BOARD_SIZE;
+
+const formatCoordinate = (position?: [number, number] | null): string => {
+  if (!position) return '—';
+  const [y, x] = position;
+  if (!inBounds(y, x)) return '—';
+  return `${COLUMN_LABELS[x]}${y + 1}`;
+};
+
+const normalizeBoardPayload = (payload: unknown): number[][][] | null => {
+  if (!Array.isArray(payload) || payload.length !== GAME_CONSTANTS.BOARD_SIZE) {
+    return null;
+  }
+  return payload.map((row) => {
+    if (!Array.isArray(row) || row.length !== GAME_CONSTANTS.BOARD_SIZE) {
+      return Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () => [0, 0, 0]);
+    }
+    return row.map((cell) => {
+      if (Array.isArray(cell) && cell.length >= 2) {
+        const worker = Number(cell[0]) || 0;
+        const level = Number(cell[1]) || 0;
+        const meta = Number(cell[2]) || 0;
+        return [worker, level, meta];
+      }
+      return [0, 0, 0];
+    });
+  });
+};
+
+const cloneBoardGrid = (board: number[][][]): number[][][] =>
+  board.map((row) => row.map((cell) => cell.slice() as number[]));
+
+const findWorkerPosition = (board: number[][][], workerId: number): [number, number] | null => {
+  for (let y = 0; y < GAME_CONSTANTS.BOARD_SIZE; y += 1) {
+    for (let x = 0; x < GAME_CONSTANTS.BOARD_SIZE; x += 1) {
+      if (board[y][x][0] === workerId) {
+        return [y, x];
+      }
+    }
+  }
+  return null;
+};
+
+const nextPlacementWorkerId = (player: number, board: number[][][]): number => {
+  const ids = player === 0 ? [1, 2] : [-1, -2];
+  for (const id of ids) {
+    if (!board.some((row) => row.some((cell) => cell[0] === id))) {
+      return id;
+    }
+  }
+  return ids[0];
+};
+
+const applyActionToBoard = (board: number[][][] | null, player: number, action: number | null): number[][][] | null => {
+  if (!board) return null;
+  const next = cloneBoardGrid(board);
+  if (!Number.isInteger(action) || action === null) {
+    return next;
+  }
+  if (action >= 0 && action < GAME_CONSTANTS.BOARD_SIZE * GAME_CONSTANTS.BOARD_SIZE) {
+    const targetY = Math.floor(action / GAME_CONSTANTS.BOARD_SIZE);
+    const targetX = action % GAME_CONSTANTS.BOARD_SIZE;
+    if (inBounds(targetY, targetX)) {
+      const workerId = nextPlacementWorkerId(player, board);
+      next[targetY][targetX][0] = workerId;
+    }
+    return next;
+  }
+  const [workerIndex, _power, moveDirection, buildDirection] = SANTORINI_CONSTANTS.decodeAction(action);
+  const workerId = (workerIndex + 1) * (player === 0 ? 1 : -1);
+  const origin = findWorkerPosition(next, workerId);
+  if (!origin) {
+    return next;
+  }
+  next[origin[0]][origin[1]][0] = 0;
+  const moveDelta = SANTORINI_CONSTANTS.DIRECTIONS[moveDirection];
+  const destination: [number, number] = [origin[0] + moveDelta[0], origin[1] + moveDelta[1]];
+  if (inBounds(destination[0], destination[1])) {
+    next[destination[0]][destination[1]][0] = workerId;
+  }
+  if (buildDirection !== SANTORINI_CONSTANTS.NO_BUILD && inBounds(destination[0], destination[1])) {
+    const buildDelta = SANTORINI_CONSTANTS.DIRECTIONS[buildDirection];
+    const buildTarget: [number, number] = [destination[0] + buildDelta[0], destination[1] + buildDelta[1]];
+    if (inBounds(buildTarget[0], buildTarget[1])) {
+      next[buildTarget[0]][buildTarget[1]][1] = Math.min(4, next[buildTarget[0]][buildTarget[1]][1] + 1);
+    }
+  }
+  return next;
+};
 
 export type BoardCell = CellState & {
   svg: string;
@@ -61,6 +154,12 @@ export type MoveSummary = {
   description: string;
   player: number;
   action: number | null;
+  phase: 'placement' | 'move' | 'unknown';
+  from?: [number, number];
+  to?: [number, number];
+  build?: [number, number] | null;
+  boardBefore?: number[][][] | null;
+  boardAfter?: number[][][] | null;
 };
 
 export type TopMove = {
@@ -650,12 +749,82 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   const refreshHistory = useCallback(() => {
     const game = gameRef.current;
     if (!game || !game.py || !game.py.get_history_snapshot) return;
-    const snapshot = game.py.get_history_snapshot().toJs({ create_proxies: false }) as Array<{
-      player: number;
-      action: number;
-      description: string;
-    }>;
-    setHistory(snapshot);
+    const snapshot = game.py.get_history_snapshot().toJs({ create_proxies: false }) as Array<Record<string, unknown>>;
+    const summaries: MoveSummary[] = snapshot.map((entry) => {
+      const player = typeof entry.player === 'number' ? entry.player : Number(entry.player) || 0;
+      const actionValue = entry.action === null || entry.action === undefined ? null : Number(entry.action);
+      const boardBefore = normalizeBoardPayload((entry as Record<string, unknown>).board);
+      const boardAfter = applyActionToBoard(boardBefore, player, actionValue);
+      const fallbackDescription = typeof entry.description === 'string' ? entry.description : '';
+
+      if (actionValue === null || Number.isNaN(actionValue)) {
+        return {
+          description: fallbackDescription || 'Initial position',
+          player,
+          action: null,
+          phase: 'unknown',
+          boardBefore,
+          boardAfter,
+        };
+      }
+
+      if (actionValue >= 0 && actionValue < GAME_CONSTANTS.BOARD_SIZE * GAME_CONSTANTS.BOARD_SIZE) {
+        const targetY = Math.floor(actionValue / GAME_CONSTANTS.BOARD_SIZE);
+        const targetX = actionValue % GAME_CONSTANTS.BOARD_SIZE;
+        const workerId = boardBefore ? nextPlacementWorkerId(player, boardBefore) : player === 0 ? 1 : -1;
+        const workerLabel = workerId === 1 || workerId === -1 ? 'Worker 1' : 'Worker 2';
+        const playerLabel = player === 0 ? 'Blue' : 'Red';
+        const description = `${playerLabel} ${workerLabel} placed on ${formatCoordinate([targetY, targetX])}.`;
+        return {
+          description,
+          player,
+          action: actionValue,
+          phase: 'placement',
+          from: undefined,
+          to: [targetY, targetX],
+          build: null,
+          boardBefore,
+          boardAfter,
+        };
+      }
+
+      const [workerIndex, _power, moveDirection, buildDirection] = SANTORINI_CONSTANTS.decodeAction(actionValue);
+      const workerId = (workerIndex + 1) * (player === 0 ? 1 : -1);
+      const origin = boardBefore ? findWorkerPosition(boardBefore, workerId) ?? undefined : undefined;
+      const moveDelta = SANTORINI_CONSTANTS.DIRECTIONS[moveDirection];
+      const destination = origin ? ([origin[0] + moveDelta[0], origin[1] + moveDelta[1]] as [number, number]) : undefined;
+      const build =
+        buildDirection === SANTORINI_CONSTANTS.NO_BUILD || !destination
+          ? null
+          : ([destination[0] + SANTORINI_CONSTANTS.DIRECTIONS[buildDirection][0],
+              destination[1] + SANTORINI_CONSTANTS.DIRECTIONS[buildDirection][1]] as [number, number]);
+      const workerLabel = workerIndex === 0 ? 'Worker 1' : 'Worker 2';
+      const playerLabel = player === 0 ? 'Blue' : 'Red';
+      const fromLabel = formatCoordinate(origin);
+      const toLabel = formatCoordinate(destination);
+      const buildLabel = build ? formatCoordinate(build) : null;
+      const descriptionParts = [`${playerLabel} ${workerLabel} moved`];
+      if (fromLabel !== '—') {
+        descriptionParts.push(`from ${fromLabel}`);
+      }
+      descriptionParts.push(`to ${toLabel}`);
+      if (buildLabel && buildLabel !== '—') {
+        descriptionParts.push(`and built ${buildLabel}`);
+      }
+      const description = descriptionParts.join(' ') + '.';
+      return {
+        description,
+        player,
+        action: actionValue,
+        phase: 'move',
+        from: origin,
+        to: destination,
+        build,
+        boardBefore,
+        boardAfter,
+      };
+    });
+    setHistory(summaries);
   }, []);
 
   const refreshEvaluation = useCallback(async () => {
@@ -956,7 +1125,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   );
 
   const onCellClick = useCallback(
-    (y: number, x: number) => {
+    async (y: number, x: number) => {
       // Prevent overlapping move processing
       if (processingMoveRef.current) {
         return;
@@ -970,9 +1139,11 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       if (buttons.setupMode) {
         if (!game || !pythonSelector) return;
         processingMoveRef.current = true;
-        placeWorkerForSetup(y, x).finally(() => {
+        try {
+          await placeWorkerForSetup(y, x);
+        } finally {
           processingMoveRef.current = false;
-        });
+        }
         return;
       }
 
@@ -983,7 +1154,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       const moveSelector = moveSelectorRef.current;
       
       // Placement phase
-      const isPlacementPhase = placement && placement.player === engine.player;
+      const isPlacementPhase = Boolean(placement);
       if (isPlacementPhase) {
         const placementAction = y * 5 + x;
         if (placementAction >= validMoves.length || !validMoves[placementAction]) {
@@ -996,11 +1167,11 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
           const result = engine.applyMove(placementAction);
           engineRef.current = SantoriniEngine.fromSnapshot(result.snapshot);
           moveSelector.reset();
-          syncEngineToUi();
+          await syncEngineToUi();
           
           // Sync to Python engine for AI (async, in background)
           if (game && game.py) {
-            applyMove(placementAction, { triggerAi: true });
+            await applyMove(placementAction, { triggerAi: true });
           }
         } catch (error) {
           console.error('Placement failed:', error);
@@ -1018,10 +1189,12 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
         game.editCell(y, x, pythonSelector.editMode);
         readBoard();
         updateSelectable();
-        updateButtons(false).finally(() => {
-          persistPracticeState();
+        try {
+          await updateButtons(false);
+        } finally {
+          await persistPracticeState();
           processingMoveRef.current = false;
-        });
+        }
         return;
       }
 
@@ -1048,11 +1221,11 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
             const result = engine.applyMove(action);
             engineRef.current = SantoriniEngine.fromSnapshot(result.snapshot);
             moveSelector.reset();
-            syncEngineToUi();
+            await syncEngineToUi();
             
             // Sync to Python engine for AI evaluation (async, in background)
             if (game && game.py) {
-              applyMove(action, { triggerAi: true });
+              await applyMove(action, { triggerAi: true });
             }
           } catch (error) {
             console.error('Move failed:', error);

@@ -295,6 +295,10 @@ export class SantoriniEngine {
     return this.validMoves.slice();
   }
 
+  getPlacementContext(): { player: 0 | 1; workerId: 1 | 2 | -1 | -2 } | null {
+    return this.getNextPlacement();
+  }
+
   private toSnapshot(): SantoriniSnapshot {
     return {
       version: 1,

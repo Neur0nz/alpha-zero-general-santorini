@@ -18,6 +18,11 @@ const DEFAULT_STATE: AuthState = {
   error: null,
 };
 
+const PROFILE_QUERY_FIELDS =
+  'id, auth_user_id, display_name, rating, games_played, created_at, updated_at';
+const PROFILE_FETCH_TIMEOUT = 5000; // Reduced to 5s for faster fallback (matches typical auth delays)
+const PROFILE_RETRY_DELAY = 2000; // Retry after 2s instead of 3s
+
 function getDisplayNameSeed(user: User): string | undefined {
   const metadataName = typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name : undefined;
   if (metadataName && metadataName.trim().length > 0) {
@@ -30,62 +35,45 @@ function getDisplayNameSeed(user: User): string | undefined {
 }
 
 async function ensureProfile(client: SupabaseClient, user: User): Promise<PlayerProfile> {
-  console.log('Ensuring profile for user:', user.id);
-  
-  
   try {
-    const { data, error } = await client
+    const selectPromise = client
       .from('players')
-      .select('*')
+      .select(PROFILE_QUERY_FIELDS)
       .eq('auth_user_id', user.id)
       .maybeSingle();
 
+    const { data, error } = await new Promise<Awaited<typeof selectPromise>>((resolve, reject) => {
+      const timeoutHandle = setTimeout(() => {
+        reject(new Error('Profile fetch timed out'));
+      }, PROFILE_FETCH_TIMEOUT);
+
+      selectPromise.then(
+        (result) => {
+          clearTimeout(timeoutHandle);
+          resolve(result);
+        },
+        (err: unknown) => {
+          clearTimeout(timeoutHandle);
+          reject(err);
+        },
+      );
+    });
+
     if (error) {
-      console.error('Failed to load player profile', error);
       throw error;
     }
 
     if (data) {
-      console.log('Found existing profile:', data);
       return data as PlayerProfile;
     }
-
-    console.log('No existing profile found, creating new one...');
-    const seed = getDisplayNameSeed(user);
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const candidate = generateDisplayName(seed);
-      console.log(`Attempt ${attempt + 1}: Creating profile with display name "${candidate}"`);
-      
-      const { data: insertData, error: insertError } = await client
-        .from('players')
-        .insert({ auth_user_id: user.id, display_name: candidate })
-        .select('*')
-        .single();
-
-      if (!insertError && insertData) {
-        console.log('Successfully created profile:', insertData);
-        return insertData as PlayerProfile;
-      }
-
-      if ((insertError as PostgrestError | null)?.code !== '23505') {
-        console.error('Failed to create player profile', insertError);
-        throw insertError;
-      }
-      
-      console.log(`Display name "${candidate}" already exists, trying again...`);
-    }
-
-    throw new Error('Unable to generate a unique display name. Please try again.');
   } catch (error) {
-    console.error('ensureProfile failed:', error);
-    
-    // If database is completely unavailable, create a temporary fallback profile
-    if (error instanceof Error && 
-        (error.message.includes('fetch') || 
-         error.message.includes('network') ||
-         error.message.includes('timeout') ||
-         error.message.includes('Failed to load player profile'))) {
-      console.warn('Database unavailable, creating temporary profile');
+    if (
+      error instanceof Error &&
+      (error.message.includes('fetch') ||
+        error.message.includes('network') ||
+        error.message.includes('timeout'))
+    ) {
+      console.warn('Profile fetch failed, using temporary fallback profile. Will retry in background.', error.message);
       const fallbackProfile: PlayerProfile = {
         id: `temp_${user.id}`,
         auth_user_id: user.id,
@@ -97,9 +85,59 @@ async function ensureProfile(client: SupabaseClient, user: User): Promise<Player
       };
       return fallbackProfile;
     }
-    
     throw error;
   }
+
+  // No profile exists yet, create one with a deterministic seed.
+  const seed = getDisplayNameSeed(user);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = generateDisplayName(seed);
+    try {
+      const insertPromise = client
+        .from('players')
+        .insert({ auth_user_id: user.id, display_name: candidate })
+        .select(PROFILE_QUERY_FIELDS)
+        .single();
+
+      const { data: insertData, error: insertError } = await new Promise<Awaited<typeof insertPromise>>((resolve, reject) => {
+        const timeoutHandle = setTimeout(() => {
+          reject(new Error('Profile creation timed out'));
+        }, PROFILE_FETCH_TIMEOUT);
+
+      insertPromise.then(
+        (result) => {
+          clearTimeout(timeoutHandle);
+          resolve(result);
+        },
+        (err: unknown) => {
+          clearTimeout(timeoutHandle);
+          reject(err);
+        },
+      );
+      });
+
+      if (!insertError && insertData) {
+        return insertData as PlayerProfile;
+      }
+
+      if ((insertError as PostgrestError | null)?.code !== '23505') {
+        throw insertError;
+      }
+      // Duplicate name, try again.
+      } catch (insertError) {
+        if (
+          insertError instanceof Error &&
+          (insertError.message.includes('fetch') ||
+            insertError.message.includes('network') ||
+            insertError.message.includes('timeout'))
+      ) {
+        continue;
+      }
+      throw insertError;
+    }
+  }
+
+  throw new Error('Unable to generate a unique display name. Please try again.');
 }
 
 // Simple cache for instant auth
@@ -197,13 +235,47 @@ export function useSupabaseAuth() {
         console.log('Loading profile for session user:', session.user.id);
         
         // Add a timeout wrapper for the profile loading
-        const profilePromise = ensureProfile(client, session.user);
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('Profile loading timed out')), 10000);
-        });
+        const profile = await ensureProfile(client, session.user);
         
-        const profile = await Promise.race([profilePromise, timeoutPromise]);
-        console.log('Profile loaded successfully:', profile);
+        // If we got a temporary profile, schedule a retry in the background
+        if (profile.id.startsWith('temp_')) {
+          console.log(`Received temporary profile, scheduling retry in ${PROFILE_RETRY_DELAY}ms...`);
+          setTimeout(async () => {
+            try {
+              console.log('Retrying profile load after temporary fallback...');
+              const retryProfile = await ensureProfile(client, session.user);
+              if (!retryProfile.id.startsWith('temp_')) {
+                console.log('✅ Successfully upgraded from temporary to real profile');
+                const newState = { session, profile: retryProfile, loading: false, error: null };
+                setState(newState);
+                cacheAuthState(session, retryProfile);
+                cachedStateRef.current = { session, profile: retryProfile };
+              } else {
+                // First retry still got temp profile, try one more time after another delay
+                console.log('First retry still got temporary profile, scheduling second retry...');
+                setTimeout(async () => {
+                  try {
+                    const secondRetry = await ensureProfile(client, session.user);
+                    if (!secondRetry.id.startsWith('temp_')) {
+                      console.log('✅ Second retry successful - upgraded to real profile');
+                      const newState = { session, profile: secondRetry, loading: false, error: null };
+                      setState(newState);
+                      cacheAuthState(session, secondRetry);
+                      cachedStateRef.current = { session, profile: secondRetry };
+                    } else {
+                      console.warn('Second retry still got temporary profile, giving up');
+                    }
+                  } catch (secondRetryError) {
+                    console.warn('Second retry failed', secondRetryError);
+                  }
+                }, PROFILE_RETRY_DELAY);
+              }
+            } catch (retryError) {
+              console.warn('Retry failed, will keep temporary profile', retryError);
+            }
+          }, PROFILE_RETRY_DELAY);
+        }
+        
         const newState = { session, profile, loading: false, error: null };
         setState(newState);
         cacheAuthState(session, profile);
@@ -407,16 +479,41 @@ export function useSupabaseAuth() {
   const signOut = useCallback(async () => {
     const client = supabase;
     if (!client) return;
-    const { error } = await client.auth.signOut();
-    if (error) {
-      console.error('Failed to sign out', error);
-      throw error;
+    
+    try {
+      const { error } = await client.auth.signOut();
+      if (error) {
+        // If sign out fails due to stale/missing session, clear local state anyway
+        console.warn('Sign out failed on server, clearing local state anyway', error);
+        if (error.message.includes('session') || error.message.includes('missing') || error.message.includes('403')) {
+          // Session already invalid on server, just clear local state
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(CACHE_KEY);
+          }
+          cachedStateRef.current = null;
+          setState({ session: null, profile: null, loading: false, error: null });
+          return;
+        }
+        // For other errors, still throw
+        throw error;
+      }
+    } catch (error) {
+      // Even if sign out completely fails, clear local state so user isn't stuck
+      console.error('Sign out error, clearing local state anyway', error);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(CACHE_KEY);
+      }
+      cachedStateRef.current = null;
+      setState({ session: null, profile: null, loading: false, error: null });
+      return;
     }
-    // Clear cache on sign out
+    
+    // Successful sign out - clear cache
     if (typeof window !== 'undefined') {
       localStorage.removeItem(CACHE_KEY);
     }
     cachedStateRef.current = null;
+    setState({ session: null, profile: null, loading: false, error: null });
   }, []);
 
   const userId = state.session?.user.id ?? null;

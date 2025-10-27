@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
   Badge,
   Box,
   Button,
@@ -8,6 +12,7 @@ import {
   CardBody,
   CardHeader,
   Center,
+  CloseButton,
   Flex,
   Grid,
   GridItem,
@@ -23,7 +28,8 @@ import {
   VStack,
 } from '@chakra-ui/react';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
-import { useMatchLobby, type LobbyMatch } from '@hooks/useMatchLobby';
+import type { LobbyMatch, UndoRequestState, UseMatchLobbyReturn } from '@hooks/useMatchLobby';
+import { useMatchLobbyContext } from '@hooks/matchLobbyContext';
 import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
 import { SantoriniProvider } from '@hooks/useSantorini';
 import { useLocalSantorini } from '@hooks/useLocalSantorini';
@@ -126,6 +132,7 @@ function LocalMatchContent({
                 buttons={buttons}
                 undo={undo}
                 redo={redo}
+                showPrimaryControls={false}
               />
             )}
           </Box>
@@ -156,15 +163,23 @@ function ActiveMatchContent({
   onLeave,
   onOfferRematch,
   onGameComplete,
+  undoState,
+  onRequestUndo,
+  onRespondUndo,
+  onClearUndo,
 }: {
   match: LobbyMatch | null;
   role: 'creator' | 'opponent' | null;
-  moves: ReturnType<typeof useMatchLobby>['moves'];
+  moves: UseMatchLobbyReturn['moves'];
   joinCode: string | null;
-  onSubmitMove: ReturnType<typeof useMatchLobby>['submitMove'];
+  onSubmitMove: UseMatchLobbyReturn['submitMove'];
   onLeave: (matchId?: string | null) => Promise<void>;
-  onOfferRematch: ReturnType<typeof useMatchLobby>['offerRematch'];
+  onOfferRematch: UseMatchLobbyReturn['offerRematch'];
   onGameComplete: (status: MatchStatus, payload?: { winner_id?: string | null }) => Promise<void>;
+  undoState?: UndoRequestState;
+  onRequestUndo: UseMatchLobbyReturn['requestUndo'];
+  onRespondUndo: UseMatchLobbyReturn['respondUndo'];
+  onClearUndo: () => void;
 }) {
   const toast = useToast();
   const [offerBusy, setOfferBusy] = useBoolean();
@@ -235,6 +250,150 @@ function ActiveMatchContent({
   const opponentClock = santorini.formatClock(santorini.opponentClockMs);
   const creatorTurnActive = santorini.currentTurn === 'creator';
   const opponentTurnActive = santorini.currentTurn === 'opponent';
+  const [requestingUndo, setRequestingUndo] = useBoolean(false);
+  const [respondingUndo, setRespondingUndo] = useBoolean(false);
+
+  const undoRequestedByMe = undoState && undoState.requestedBy === role;
+  const undoPending = undoState?.status === 'pending';
+  const undoMoveNumber = undoState ? undoState.moveIndex + 1 : null;
+  const canRequestUndo = Boolean(
+    match?.status === 'in_progress' &&
+      role &&
+      moves.length > 0 &&
+      (!undoState || undoState.status === 'rejected' || undoState.status === 'applied')
+  );
+  const undoDisabledOverride = !canRequestUndo || requestingUndo || undoPending;
+
+  useEffect(() => {
+    if (!undoState) {
+      return undefined;
+    }
+    if (undoState.status === 'applied' || undoState.status === 'rejected') {
+      const timer = setTimeout(() => {
+        onClearUndo();
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [undoState, onClearUndo]);
+
+  const handleRequestUndo = useCallback(async () => {
+    setRequestingUndo.on();
+    try {
+      await onRequestUndo();
+      toast({ title: 'Undo request sent', status: 'info', duration: 3000 });
+    } catch (error) {
+      toast({
+        title: 'Unable to request undo',
+        status: 'error',
+        description: error instanceof Error ? error.message : 'Please try again in a moment.',
+      });
+    } finally {
+      setRequestingUndo.off();
+    }
+  }, [onRequestUndo, setRequestingUndo, toast]);
+
+  const handleRespondUndo = useCallback(async (accepted: boolean) => {
+    setRespondingUndo.on();
+    try {
+      await onRespondUndo(accepted);
+      toast({
+        title: accepted ? 'Undo request accepted' : 'Undo request declined',
+        status: accepted ? 'success' : 'info',
+        duration: 3000,
+      });
+    } catch (error) {
+      toast({
+        title: 'Unable to respond to undo request',
+        status: 'error',
+        description: error instanceof Error ? error.message : 'Please try again.',
+      });
+    } finally {
+      setRespondingUndo.off();
+    }
+  }, [onRespondUndo, setRespondingUndo, toast]);
+
+  const undoBanner = useMemo(() => {
+    if (!undoState || undoMoveNumber === null) {
+      return null;
+    }
+    if (undoState.status === 'pending') {
+      if (undoRequestedByMe) {
+        return (
+          <Alert status="info" variant="left-accent" borderRadius="md" mt={4}>
+            <AlertIcon />
+            <Stack spacing={1} flex="1">
+              <AlertTitle>Undo request sent</AlertTitle>
+              <AlertDescription>Waiting for your opponent to respond…</AlertDescription>
+            </Stack>
+          </Alert>
+        );
+      }
+      return (
+        <Alert status="warning" variant="left-accent" borderRadius="md" mt={4} alignItems="center">
+          <AlertIcon />
+          <Stack spacing={1} flex="1">
+            <AlertTitle>Undo requested</AlertTitle>
+            <AlertDescription>Opponent wants to undo move #{undoMoveNumber}.</AlertDescription>
+          </Stack>
+          <ButtonGroup size="sm" ml={{ base: 2, md: 4 }} display="flex">
+            <Button
+              colorScheme="teal"
+              onClick={() => handleRespondUndo(true)}
+              isLoading={respondingUndo}
+              isDisabled={respondingUndo}
+            >
+              Allow
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => handleRespondUndo(false)}
+              isLoading={respondingUndo}
+              isDisabled={respondingUndo}
+            >
+              Decline
+            </Button>
+          </ButtonGroup>
+        </Alert>
+      );
+    }
+    if (undoState.status === 'accepted') {
+      return (
+        <Alert status="info" variant="left-accent" borderRadius="md" mt={4}>
+          <AlertIcon />
+          <Stack spacing={1} flex="1">
+            <AlertTitle>Undo accepted</AlertTitle>
+            <AlertDescription>Restoring position…</AlertDescription>
+          </Stack>
+        </Alert>
+      );
+    }
+    if (undoState.status === 'applied') {
+      return (
+        <Alert status="success" variant="left-accent" borderRadius="md" mt={4} alignItems="center">
+          <AlertIcon />
+          <Stack spacing={1} flex="1">
+            <AlertTitle>Move undone</AlertTitle>
+            <AlertDescription>Move #{undoMoveNumber} has been undone.</AlertDescription>
+          </Stack>
+          <CloseButton position="relative" onClick={onClearUndo} />
+        </Alert>
+      );
+    }
+    if (undoState.status === 'rejected') {
+      return (
+        <Alert status="warning" variant="left-accent" borderRadius="md" mt={4} alignItems="center">
+          <AlertIcon />
+          <Stack spacing={1} flex="1">
+            <AlertTitle>Undo declined</AlertTitle>
+            <AlertDescription>Your opponent declined the undo request.</AlertDescription>
+          </Stack>
+          <CloseButton position="relative" onClick={onClearUndo} />
+        </Alert>
+      );
+    }
+    return null;
+  }, [undoState, undoMoveNumber, undoRequestedByMe, respondingUndo, handleRespondUndo, onClearUndo]);
 
   const handleLeave = async () => {
     setLeaveBusy.on();
@@ -354,13 +513,16 @@ function ActiveMatchContent({
             onCellHover={santorini.onCellHover}
             onCellLeave={santorini.onCellLeave}
             buttons={santorini.buttons}
-            undo={santorini.undo}
+            undo={handleRequestUndo}
             redo={santorini.redo}
             undoLabel="Request undo"
             hideRedoButton
-            undoDisabledOverride
+            undoDisabledOverride={undoDisabledOverride}
+            undoIsLoading={requestingUndo}
           />
         </Box>
+
+        {undoBanner}
 
         {/* Player Clocks - Below board - PROMINENT */}
         <Stack
@@ -386,7 +548,7 @@ function ActiveMatchContent({
                 {role === 'creator' ? '🟢 YOUR CLOCK' : 'Player 1 (Blue)'}
               </Text>
               <Heading 
-                size="3xl" 
+                size={{ base: '2xl', md: '3xl' }} 
                 color={creatorTurnActive ? accentHeading : strongText}
                 fontFamily="mono"
                 letterSpacing="tight"
@@ -412,7 +574,7 @@ function ActiveMatchContent({
                 {role === 'opponent' ? '🟢 YOUR CLOCK' : 'Player 2 (Red)'}
               </Text>
               <Heading 
-                size="3xl" 
+                size={{ base: '2xl', md: '3xl' }} 
                 color={opponentTurnActive ? accentHeading : strongText}
                 fontFamily="mono"
                 letterSpacing="tight"
@@ -447,9 +609,17 @@ function NoActiveGamePrompt() {
 }
 
 function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
-  const lobby = useMatchLobby(auth.profile, { autoConnectOnline: true });
+  const lobby = useMatchLobbyContext();
   const sessionMode = lobby.sessionMode ?? 'online';
   const { cardBg, cardBorder } = useSurfaceTokens();
+  const { activeMatchId, clearUndoRequest, undoRequests } = lobby;
+  const activeUndoState = activeMatchId ? undoRequests[activeMatchId] : undefined;
+
+  const handleClearUndoState = useCallback(() => {
+    if (activeMatchId) {
+      clearUndoRequest(activeMatchId);
+    }
+  }, [activeMatchId, clearUndoRequest]);
 
   // Auto-select first in-progress game if none is selected
   useEffect(() => {
@@ -529,6 +699,10 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
             onLeave={lobby.leaveMatch}
             onOfferRematch={lobby.offerRematch}
             onGameComplete={lobby.updateMatchStatus}
+            undoState={activeUndoState}
+            onRequestUndo={lobby.requestUndo}
+            onRespondUndo={lobby.respondUndo}
+            onClearUndo={handleClearUndoState}
           />
         </SantoriniProvider>
       )}
@@ -539,4 +713,3 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
 }
 
 export default GamePlayWorkspace;
-
