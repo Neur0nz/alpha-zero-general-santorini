@@ -296,6 +296,10 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         toast({ title: 'Join a match first', status: 'info' });
         return;
       }
+      if (match.status !== 'in_progress') {
+        toast({ title: 'Waiting for opponent', status: 'info' });
+        return;
+      }
       if (currentTurn !== role) {
         toast({ title: "It's not your turn", status: 'warning' });
         return;
