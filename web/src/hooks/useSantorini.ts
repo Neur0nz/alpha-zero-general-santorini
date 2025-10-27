@@ -43,6 +43,10 @@ export type ButtonsState = {
   setupTurn: number;
 };
 
+type PlacementContext =
+  | { phase: 'placement'; player: 0 | 1; workerId: 1 | 2 | -1 | -2 }
+  | { phase: 'play' };
+
 export type EvaluationState = {
   value: number;
   advantage: string;
@@ -462,12 +466,70 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     setBoard(nextBoard);
   }, []);
 
+  const getPlacementContext = useCallback((): PlacementContext => {
+    const game = gameRef.current;
+    if (!game || !game.py || typeof game.py._findWorker !== 'function') {
+      return { phase: 'play' };
+    }
+
+    const readWorkerPosition = (workerId: number): [number, number] | null => {
+      try {
+        const result = game.py._findWorker(workerId);
+        if (!result) {
+          return null;
+        }
+        const coords =
+          typeof result.toJs === 'function'
+            ? (result.toJs({ create_proxies: false }) as unknown)
+            : result;
+        if (typeof result.destroy === 'function') {
+          result.destroy();
+        }
+        if (Array.isArray(coords) && coords.length >= 2) {
+          const y = Number(coords[0]);
+          const x = Number(coords[1]);
+          if (Number.isInteger(y) && Number.isInteger(x) && y >= 0 && x >= 0) {
+            return [y, x];
+          }
+        }
+      } catch (_error) {
+        // Ignore lookup errors; treat as missing worker.
+      }
+      return null;
+    };
+
+    if (!readWorkerPosition(1)) {
+      return { phase: 'placement', player: 0, workerId: 1 };
+    }
+    if (!readWorkerPosition(2)) {
+      return { phase: 'placement', player: 0, workerId: 2 };
+    }
+    if (!readWorkerPosition(-1)) {
+      return { phase: 'placement', player: 1, workerId: -1 };
+    }
+    if (!readWorkerPosition(-2)) {
+      return { phase: 'placement', player: 1, workerId: -2 };
+    }
+    return { phase: 'play' };
+  }, []);
+
   const updateSelectable = useCallback(() => {
     const selector = selectorRef.current;
-    if (!selector) return;
+    const game = gameRef.current;
+    if (!selector || !game || !game.py) return;
     selector.selectRelevantCells();
+    const placement = getPlacementContext();
+    if (placement.phase === 'placement') {
+      const cells = Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, (_, y) =>
+        Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, (_, x) =>
+          game.py._read_worker(y, x) === 0,
+        ),
+      );
+      setSelectable(cells);
+      return;
+    }
     setSelectable(selector.cells.map((row) => row.slice()));
-  }, []);
+  }, [getPlacementContext]);
 
   const updateButtons = useCallback(async (loadingState = false) => {
     const game = gameRef.current;
@@ -483,26 +545,36 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
       canRedo = py.get_redo_count() > 0;
     }
     const stage = selector.stage;
-    let status = '';
-    if (stage <= 0) {
-      status = 'Ready. Select a worker to start your move.';
-    } else if (stage === 1) {
-      status = 'Step 1/3: Select destination for the worker.';
-    } else if (stage === 2) {
-      status = 'Step 2/3: Select a build square.';
-    } else {
-      status = 'Confirming build.';
-    }
-    setButtons(prev => ({
-      ...prev,
-      loading: loadingState,
-      canUndo,
-      canRedo,
-      editMode: selector.editMode,
-      status,
-    }));
+    const placement = getPlacementContext();
+
+    setButtons((prev) => {
+      let status = prev.status;
+      if (!prev.setupMode && placement.phase === 'placement') {
+        const pieceNumber = placement.workerId === 1 || placement.workerId === -1 ? 1 : 2;
+        const playerLabel = placement.player === 0 ? 'Green' : 'Red';
+        status = `Setup: Place ${playerLabel} worker ${pieceNumber}`;
+      } else if (!prev.setupMode) {
+        if (stage <= 0) {
+          status = 'Ready. Select a worker to start your move.';
+        } else if (stage === 1) {
+          status = 'Step 1/3: Select destination for the worker.';
+        } else if (stage === 2) {
+          status = 'Step 2/3: Select a build square.';
+        } else {
+          status = 'Confirming build.';
+        }
+      }
+      return {
+        ...prev,
+        loading: loadingState,
+        canUndo,
+        canRedo,
+        editMode: selector.editMode,
+        status,
+      };
+    });
     setNextPlayer(typeof game.nextPlayer === 'number' ? game.nextPlayer : 0);
-  }, []);
+  }, [getPlacementContext]);
 
   const refreshHistory = useCallback(() => {
     const game = gameRef.current;
@@ -799,6 +871,25 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
         return;
       }
 
+      const placement = getPlacementContext();
+      if (placement.phase === 'placement') {
+        if (placement.player !== game.nextPlayer) {
+          await updateButtons(false);
+          return;
+        }
+        if (game.py && game.py._read_worker(y, x) !== 0) {
+          await updateButtons(false);
+          return;
+        }
+        const moveIndex = y * GAME_CONSTANTS.BOARD_SIZE + x;
+        if (Array.isArray(game.validMoves) && game.validMoves[moveIndex]) {
+          await applyMove(moveIndex);
+        } else {
+          await updateButtons(false);
+        }
+        return;
+      }
+
       if (selector.editMode === 1 || selector.editMode === 2) {
         game.editCell(y, x, selector.editMode);
         readBoard();
@@ -825,6 +916,7 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
       placeWorkerForSetup,
       persistPracticeState,
       readBoard,
+      getPlacementContext,
     ],
   );
 

@@ -109,23 +109,6 @@ function cloneBoardState(state: InternalBoardState): InternalBoardState {
   };
 }
 
-function generateInitialPlacements(): Array<{ y: number; x: number; workerId: number }> {
-  const indices = Array.from({ length: BOARD_SIZE * BOARD_SIZE }, (_, index) => index);
-  for (let i = indices.length - 1; i > 0; i -= 1) {
-    const randomBuffer = new Uint32Array(1);
-    crypto.getRandomValues(randomBuffer);
-    const j = randomBuffer[0] % (i + 1);
-    const temp = indices[i];
-    indices[i] = indices[j];
-    indices[j] = temp;
-  }
-  const workerIds = [1, -1, 2, -2];
-  return workerIds.map((workerId, idx) => {
-    const place = indices[idx];
-    return { y: Math.floor(place / BOARD_SIZE), x: place % BOARD_SIZE, workerId };
-  });
-}
-
 export class SantoriniEngine {
   private workers: number[][];
   private levels: number[][];
@@ -149,10 +132,6 @@ export class SantoriniEngine {
     const workers = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
     const levels = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
     const round = 0;
-    const placements = generateInitialPlacements();
-    placements.forEach(({ y, x, workerId }) => {
-      workers[y][x] = workerId;
-    });
     const baseState: InternalBoardState = { workers, levels, round };
     const engine = new SantoriniEngine(baseState, 0, Array(ACTION_SIZE).fill(false), [0, 0]);
     engine.validMoves = engine.computeValidMoves(0);
@@ -214,6 +193,47 @@ export class SantoriniEngine {
     if (!Number.isInteger(action) || action < 0 || action >= ACTION_SIZE) {
       throw new Error('Action out of bounds');
     }
+    const placement = this.getNextPlacement();
+    if (placement) {
+      if (!this.validMoves[action]) {
+        throw new Error('Illegal placement for current position');
+      }
+      const targetY = Math.floor(action / BOARD_SIZE);
+      const targetX = action % BOARD_SIZE;
+      if (targetY < 0 || targetY >= BOARD_SIZE || targetX < 0 || targetX >= BOARD_SIZE) {
+        throw new Error('Placement move out of bounds');
+      }
+      if (this.workers[targetY][targetX] !== 0) {
+        throw new Error('Cannot place a worker on an occupied tile');
+      }
+
+      this.history.push({
+        player: this.currentPlayer,
+        board: cloneBoardState({ workers: this.workers, levels: this.levels, round: this.round }),
+        action,
+      });
+
+      this.workers[targetY][targetX] = placement.workerId;
+
+      if (placement.workerId === 1 || placement.workerId === -1) {
+        this.currentPlayer = placement.player;
+      } else {
+        this.currentPlayer = (1 - placement.player) as 0 | 1;
+      }
+
+      this.validMoves = this.computeValidMoves(this.currentPlayer);
+      this.gameEnded = this.computeGameEnded(this.currentPlayer);
+
+      let winner: 0 | 1 | null = null;
+      if (this.gameEnded[0] === 1) {
+        winner = 0;
+      } else if (this.gameEnded[1] === 1) {
+        winner = 1;
+      }
+
+      return { snapshot: this.toSnapshot(), winner };
+    }
+
     if (!this.validMoves[action]) {
       throw new Error('Illegal move for current position');
     }
@@ -289,7 +309,18 @@ export class SantoriniEngine {
   }
 
   private computeValidMoves(player: number): boolean[] {
+    const placement = this.getNextPlacement();
     const actions = Array(ACTION_SIZE).fill(false) as boolean[];
+    if (placement) {
+      for (let y = 0; y < BOARD_SIZE; y += 1) {
+        for (let x = 0; x < BOARD_SIZE; x += 1) {
+          if (this.workers[y][x] === 0) {
+            actions[y * BOARD_SIZE + x] = true;
+          }
+        }
+      }
+      return actions;
+    }
     for (let worker = 0; worker < 2; worker += 1) {
       const workerId = (worker + 1) * (player === 0 ? 1 : -1);
       const position = this.findWorker(workerId);
@@ -321,6 +352,9 @@ export class SantoriniEngine {
   }
 
   private computeGameEnded(nextPlayer: number): [number, number] {
+    if (this.getNextPlacement()) {
+      return [0, 0];
+    }
     const scores: [number, number] = [this.getScore(0), this.getScore(1)];
     if (scores[0] === 3) {
       return [1, -1];
@@ -399,6 +433,23 @@ export class SantoriniEngine {
           return [y, x];
         }
       }
+    }
+    return null;
+  }
+
+  private getNextPlacement(): { player: 0 | 1; workerId: 1 | 2 | -1 | -2 } | null {
+    const hasWorker = (id: number) => this.findWorker(id) !== null;
+    if (!hasWorker(1)) {
+      return { player: 0, workerId: 1 };
+    }
+    if (!hasWorker(2)) {
+      return { player: 0, workerId: 2 };
+    }
+    if (!hasWorker(-1)) {
+      return { player: 1, workerId: -1 };
+    }
+    if (!hasWorker(-2)) {
+      return { player: 1, workerId: -2 };
     }
     return null;
   }
