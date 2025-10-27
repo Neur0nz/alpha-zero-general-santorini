@@ -141,7 +141,7 @@ function EvaluationPanel({
                   onClick={movesDisclosure.onToggle}
                   leftIcon={movesDisclosure.isOpen ? <ChevronDownIcon /> : <ChevronRightIcon />}
                 >
-                  {movesDisclosure.isOpen ? 'Hide list' : 'Show list'}
+                  {movesDisclosure.isOpen ? 'Hide' : 'Show'}
                 </Button>
                 <Select
                   size="sm"
@@ -164,7 +164,7 @@ function EvaluationPanel({
                   onClick={calculateOptions}
                   isLoading={calcOptionsBusy}
                 >
-                  Calc options
+                  Analyze
                 </Button>
               </HStack>
             </Flex>
@@ -175,38 +175,49 @@ function EvaluationPanel({
                     Run a calculation to see detailed options.
                   </Text>
                 )}
-                {topMoves.map((move) => (
-                  <Box
-                    key={move.action}
-                    borderWidth="1px"
-                    borderRadius="md"
-                    borderColor="whiteAlpha.200"
-                    p={3}
-                    bg="whiteAlpha.100"
-                  >
-                    <Text fontWeight="medium">{move.text}</Text>
-                    <Flex align="center" justify="space-between" mt={2} gap={3}>
-                      <Progress
-                        value={move.prob * 100}
-                        colorScheme="teal"
-                        borderRadius="full"
-                        flex="1"
-                        height="6px"
-                      />
-                      <Text fontSize="sm" color="whiteAlpha.800" minW="48px" textAlign="right">
-                        {(move.prob * 100).toFixed(0)}%
-                      </Text>
-                    </Flex>
-                    {typeof move.eval === 'number' && (
-                      <Text fontSize="sm" color="whiteAlpha.700" mt={2}>
-                        Eval: {move.eval >= 0 ? `+${move.eval.toFixed(2)}` : move.eval.toFixed(2)}
-                        {typeof move.delta === 'number' && Math.abs(move.delta) >= 0.005
-                          ? ` (Δ ${move.delta >= 0 ? '+' : ''}${move.delta.toFixed(2)})`
-                          : ''}
-                      </Text>
-                    )}
-                  </Box>
-                ))}
+                {topMoves.map((move) => {
+                  const clampedProb = Math.max(0, Math.min(move.prob, 1));
+                  const percentValue = clampedProb * 100;
+                  const percentLabel =
+                    percentValue >= 0.1
+                      ? `${percentValue.toFixed(1)}%`
+                      : percentValue > 0
+                      ? '<0.1%'
+                      : '0%';
+
+                  return (
+                    <Box
+                      key={move.action}
+                      borderWidth="1px"
+                      borderRadius="md"
+                      borderColor="whiteAlpha.200"
+                      p={3}
+                      bg="whiteAlpha.100"
+                    >
+                      <Text fontWeight="medium">{move.text}</Text>
+                      <Flex align="center" justify="space-between" mt={2} gap={3}>
+                        <Progress
+                          value={percentValue}
+                          colorScheme="teal"
+                          borderRadius="full"
+                          flex="1"
+                          height="6px"
+                        />
+                        <Text fontSize="sm" color="whiteAlpha.800" minW="48px" textAlign="right">
+                          {percentLabel}
+                        </Text>
+                      </Flex>
+                      {typeof move.eval === 'number' && (
+                        <Text fontSize="sm" color="whiteAlpha.700" mt={2}>
+                          Eval: {move.eval >= 0 ? `+${move.eval.toFixed(2)}` : move.eval.toFixed(2)}
+                          {typeof move.delta === 'number' && Math.abs(move.delta) >= 0.005
+                            ? ` (Δ ${move.delta >= 0 ? '+' : ''}${move.delta.toFixed(2)})`
+                            : ''}
+                        </Text>
+                      )}
+                    </Box>
+                  );
+                })}
               </Stack>
             </Collapse>
           </Box>
