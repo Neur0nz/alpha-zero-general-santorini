@@ -17,6 +17,13 @@ interface ClockState {
   opponentMs: number;
 }
 
+/**
+ * Synchronizes the shared Santorini board with a remote Supabase-powered match.
+ *
+ * This hook should only be instantiated when an online match is active. Local matches
+ * should render directly against the base `useSantorini` store via `SantoriniProvider`.
+ */
+
 const TICK_INTERVAL = 1000;
 
 function deriveInitialClocks(match: LobbyMatch | null): ClockState {

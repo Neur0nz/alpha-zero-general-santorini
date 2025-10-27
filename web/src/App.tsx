@@ -13,7 +13,7 @@ import {
 } from '@chakra-ui/react';
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import { SearchIcon } from '@chakra-ui/icons';
-import { useSantorini } from '@hooks/useSantorini';
+import { SantoriniProvider, useSantorini } from '@hooks/useSantorini';
 import { useSupabaseAuth } from '@hooks/useSupabaseAuth';
 import HeaderBar, { type AppTab } from '@components/HeaderBar';
 import GameBoard from '@components/GameBoard';
@@ -27,7 +27,7 @@ import ProfileWorkspace from '@components/profile/ProfileWorkspace';
 const TAB_ORDER: AppTab[] = ['play', 'practice', 'analyze', 'profile'];
 const TAB_STORAGE_KEY = 'santorini:lastTab';
 
-function App() {
+function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
   const {
     loading,
     initialize,
@@ -40,17 +40,108 @@ function App() {
     evaluation,
     topMoves,
     controls,
-    history,
     redo,
     undo,
     calcOptionsBusy,
   } = useSantorini();
+  const [, startInitializeTransition] = useTransition();
+
+  useEffect(() => {
+    // Initialize game engine in background without blocking urgent UI updates
+    startInitializeTransition(() => {
+      initialize().catch(console.error);
+    });
+  }, [initialize, startInitializeTransition]);
+
+  return (
+    <Flex direction="column" gap={{ base: 6, md: 8 }}>
+      <PracticeToolbar
+        controls={controls}
+        onReset={controls.reset}
+        onShowHistory={onShowHistory}
+        buttons={buttons}
+      />
+      <Flex
+        direction={{ base: 'column', lg: 'row' }}
+        align={{ base: 'center', lg: 'flex-start' }}
+        justify={{ base: 'center', lg: 'space-between' }}
+        gap={{ base: 6, lg: 8 }}
+        flexWrap="nowrap"
+        w="100%"
+      >
+        <Box
+          flex="1 1 0"
+          display="flex"
+          justifyContent="center"
+          w="100%"
+          minW={{ base: '280px', sm: '360px' }}
+          maxW="960px"
+        >
+          {loading ? (
+            <Flex
+              align="center"
+              justify="center"
+              h={{ base: '300px', sm: '400px', md: '500px', lg: '600px' }}
+              w="100%"
+              maxW="960px"
+              minH={{ base: '300px', sm: '360px' }}
+              minW={{ base: '280px', sm: '360px' }}
+            >
+              <Spinner size="xl" color="teal.300" thickness="4px" />
+            </Flex>
+          ) : (
+            <GameBoard
+              board={board}
+              selectable={selectable}
+              onCellClick={onCellClick}
+              onCellHover={onCellHover}
+              onCellLeave={onCellLeave}
+              buttons={buttons}
+              undo={undo}
+              redo={redo}
+            />
+          )}
+        </Box>
+        <Box
+          flex={{ base: '0 0 auto', lg: '0 0 auto' }}
+          minW={{ base: '100%', lg: '320px' }}
+          maxW={{ base: '100%', lg: '420px' }}
+          width={{ base: '100%', lg: '420px' }}
+          order={{ base: -1, lg: 0 }}
+        >
+          <EvaluationPanel
+            loading={loading}
+            evaluation={evaluation}
+            topMoves={topMoves}
+            calcOptionsBusy={calcOptionsBusy}
+            refreshEvaluation={controls.refreshEvaluation}
+            calculateOptions={controls.calculateOptions}
+            updateDepth={controls.updateCalcDepth}
+          />
+        </Box>
+      </Flex>
+    </Flex>
+  );
+}
+
+function PracticeHistoryModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const { history, controls } = useSantorini();
+  return (
+    <HistoryModal
+      isOpen={isOpen}
+      onClose={onClose}
+      history={history}
+      jumpToMove={controls.jumpToMove}
+    />
+  );
+}
+
+function App() {
   const { isOpen: isHistoryOpen, onOpen: openHistory, onClose: closeHistory } = useDisclosure();
   const tabOrder = TAB_ORDER;
   const [activeTab, setActiveTab] = useState<AppTab>('play');
   const activeIndex = Math.max(0, tabOrder.indexOf(activeTab));
   const auth = useSupabaseAuth();
-  const [, startInitializeTransition] = useTransition();
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -65,13 +156,6 @@ function App() {
       console.error('Failed to restore last active tab', error);
     }
   }, [tabOrder]);
-
-  useEffect(() => {
-    // Initialize game engine in background without blocking urgent UI updates
-    startInitializeTransition(() => {
-      initialize().catch(console.error);
-    });
-  }, [initialize, startInitializeTransition]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -134,73 +218,10 @@ function App() {
                 <PlayWorkspace auth={auth} />
               </TabPanel>
               <TabPanel px={0}>
-                <Flex direction="column" gap={{ base: 6, md: 8 }}>
-                  <PracticeToolbar
-                    controls={controls}
-                    onReset={controls.reset}
-                    onShowHistory={openHistory}
-                    buttons={buttons}
-                  />
-                  <Flex
-                    direction={{ base: 'column', lg: 'row' }}
-                    align={{ base: 'center', lg: 'flex-start' }}
-                    justify={{ base: 'center', lg: 'space-between' }}
-                    gap={{ base: 6, lg: 8 }}
-                    flexWrap="nowrap"
-                    w="100%"
-                  >
-                    <Box
-                      flex="1 1 0"
-                      display="flex"
-                      justifyContent="center"
-                      w="100%"
-                      minW={{ base: '280px', sm: '360px' }}
-                      maxW="960px"
-                    >
-                      {loading ? (
-                        <Flex
-                          align="center"
-                          justify="center"
-                          h={{ base: '300px', sm: '400px', md: '500px', lg: '600px' }}
-                          w="100%"
-                          maxW="960px"
-                          minH={{ base: '300px', sm: '360px' }}
-                          minW={{ base: '280px', sm: '360px' }}
-                        >
-                          <Spinner size="xl" color="teal.300" thickness="4px" />
-                        </Flex>
-                      ) : (
-                        <GameBoard
-                          board={board}
-                          selectable={selectable}
-                          onCellClick={onCellClick}
-                          onCellHover={onCellHover}
-                          onCellLeave={onCellLeave}
-                          buttons={buttons}
-                          undo={undo}
-                          redo={redo}
-                        />
-                      )}
-                    </Box>
-                    <Box
-                      flex={{ base: '0 0 auto', lg: '0 0 auto' }}
-                      minW={{ base: '100%', lg: '320px' }}
-                      maxW={{ base: '100%', lg: '420px' }}
-                      width={{ base: '100%', lg: '420px' }}
-                      order={{ base: -1, lg: 0 }}
-                    >
-                      <EvaluationPanel
-                        loading={loading}
-                        evaluation={evaluation}
-                        topMoves={topMoves}
-                        calcOptionsBusy={calcOptionsBusy}
-                        refreshEvaluation={controls.refreshEvaluation}
-                        calculateOptions={controls.calculateOptions}
-                        updateDepth={controls.updateCalcDepth}
-                      />
-                    </Box>
-                  </Flex>
-                </Flex>
+                <SantoriniProvider>
+                  <PracticeTabContent onShowHistory={openHistory} />
+                  <PracticeHistoryModal isOpen={isHistoryOpen} onClose={closeHistory} />
+                </SantoriniProvider>
               </TabPanel>
               <TabPanel px={0}>
                 <AnalyzeWorkspace />
@@ -211,12 +232,6 @@ function App() {
             </TabPanels>
           </Container>
         </Flex>
-        <HistoryModal
-          isOpen={isHistoryOpen}
-          onClose={closeHistory}
-          history={history}
-          jumpToMove={controls.jumpToMove}
-        />
       </Flex>
     </Tabs>
   );
