@@ -5,6 +5,11 @@
   Cross-Origin-Embedder-Policy: require-corp
   Cross-Origin-Opener-Policy: same-origin
 
-# Ensure proper content type for ONNX files
+# Cache Python sources aggressively for faster repeat loads
+/*.py
+  Cache-Control: public, max-age=86400, immutable
+
+# Ensure proper content type and caching for ONNX files
 /*.onnx
   Content-Type: application/octet-stream
+  Cache-Control: public, max-age=86400, immutable
