@@ -118,7 +118,7 @@ function App() {
       <Flex direction="column" flex="1" minH="100vh" bgGradient="linear(to-br, gray.900, gray.800)" color="whiteAlpha.900">
         <HeaderBar activeTab={activeTab} actions={tabActions} auth={auth} />
         <Flex flex="1" py={{ base: 6, md: 8 }}>
-          <Container maxW="7xl" flex="1">
+          <Container maxW="7xl" flex="1" px={{ base: 3, md: 6 }}>
             <TabPanels flex="1">
               <TabPanel px={0}>
                 <PlayWorkspace auth={auth} />
@@ -140,22 +140,22 @@ function App() {
                     w="100%"
                   >
                     <Box
-                      flexShrink={0}
-                      flexBasis={{ base: '100%', lg: 'auto' }}
+                      flex="1 1 0"
                       display="flex"
                       justifyContent="center"
-                      w={{ base: '100%', sm: '400px', md: '500px', lg: '550px' }}
-                      minW={{ base: '300px', sm: '400px', md: '500px', lg: '550px' }}
-                      maxW={{ base: '100%', sm: '400px', md: '500px', lg: '550px' }}
+                      w="100%"
+                      minW={{ base: '280px', sm: '360px' }}
+                      maxW="960px"
                     >
                       {loading ? (
                         <Flex
                           align="center"
                           justify="center"
-                          h={{ base: '300px', sm: '400px', md: '500px', lg: '550px' }}
-                          w={{ base: '100%', sm: '400px', md: '500px', lg: '550px' }}
-                          minH={{ base: '300px', sm: '400px', md: '500px', lg: '550px' }}
-                          minW={{ base: '300px', sm: '400px', md: '500px', lg: '550px' }}
+                          h={{ base: '300px', sm: '400px', md: '500px', lg: '600px' }}
+                          w="100%"
+                          maxW="960px"
+                          minH={{ base: '300px', sm: '360px' }}
+                          minW={{ base: '280px', sm: '360px' }}
                         >
                           <Spinner size="xl" color="teal.300" thickness="4px" />
                         </Flex>

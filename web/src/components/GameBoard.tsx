@@ -12,7 +12,7 @@ import {
   Text,
   useColorModeValue,
 } from '@chakra-ui/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { BoardCell, ButtonsState } from '@hooks/useSantorini';
 
 interface GameBoardProps {
@@ -61,6 +61,8 @@ function GameBoard({
   const boardColumns = Math.max(1, board[0]?.length ?? board.length);
   const gridTemplateColumns = `repeat(${boardColumns}, 1fr)`;
 
+  const boardMaxWidth = useMemo(() => `min(${boardPixels}px, calc(100vw - 24px))`, [boardPixels]);
+
   return (
     <Flex
       direction="column"
@@ -70,7 +72,7 @@ function GameBoard({
       mx="auto"
     >
       <Flex direction="column" gap={3} w="100%">
-        <Flex align="center" gap={3} w="100%" px={{ base: 1, sm: 2 }}>
+        <Flex align="center" gap={3} w="100%" px={{ base: 0, sm: 1 }}>
           <Text fontSize="sm" color="whiteAlpha.700" whiteSpace="nowrap">
             Board size
           </Text>
@@ -93,13 +95,13 @@ function GameBoard({
             {Math.round(boardPixels)}px
           </Text>
         </Flex>
-        <AspectRatio ratio={1} w="100%" maxW={`${boardPixels}px`} mx="auto">
+        <AspectRatio ratio={1} w="100%" maxW={boardMaxWidth} mx="auto">
           <Flex
             direction="column"
             w="100%"
             h="100%"
             bg="blackAlpha.500"
-            p={{ base: 4, sm: 5, md: 6 }}
+            p={{ base: 2, sm: 4, md: 6 }}
             borderRadius="xl"
             boxShadow="2xl"
           >
