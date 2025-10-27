@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.76.1';
 import { SantoriniEngine } from '../_shared/santorini.ts';
 
 type MatchVisibility = 'public' | 'private';
+type StartingPlayer = 'creator' | 'opponent' | 'random';
 
 interface CreateMatchRequest {
   visibility?: MatchVisibility;
@@ -10,6 +11,7 @@ interface CreateMatchRequest {
   hasClock?: boolean;
   clockInitialMinutes?: number;
   clockIncrementSeconds?: number;
+  startingPlayer?: StartingPlayer;
 }
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -100,6 +102,19 @@ serve(async (req) => {
   const hasClock = normalizeBoolean(payload.hasClock, true);
   const initialMinutes = normalizeNumber(payload.clockInitialMinutes, 10);
   const incrementSeconds = normalizeNumber(payload.clockIncrementSeconds, 5);
+  
+  // Determine starting player
+  let startingPlayerOption = payload.startingPlayer || 'creator';
+  if (!['creator', 'opponent', 'random'].includes(startingPlayerOption)) {
+    startingPlayerOption = 'creator';
+  }
+  
+  let startingPlayerIndex = 0; // 0 = creator, 1 = opponent
+  if (startingPlayerOption === 'opponent') {
+    startingPlayerIndex = 1;
+  } else if (startingPlayerOption === 'random') {
+    startingPlayerIndex = Math.random() < 0.5 ? 0 : 1;
+  }
 
   const clockInitialSeconds = hasClock ? Math.max(0, Math.round(initialMinutes * 60)) : 0;
   const clockIncrementSeconds = hasClock ? Math.max(0, Math.round(incrementSeconds)) : 0;
@@ -127,7 +142,8 @@ serve(async (req) => {
 
   const joinCode = visibility === 'private' ? generateJoinCode() : null;
 
-  const { snapshot } = SantoriniEngine.createInitial();
+  const { snapshot } = SantoriniEngine.createInitial(startingPlayerIndex);
+  console.log('Creating match with starting player:', startingPlayerIndex, 'from option:', startingPlayerOption);
 
   const insertPayload = {
     creator_id: profile.id,

@@ -53,6 +53,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   });
   const pendingLocalMoveRef = useRef<{ expectedHistoryLength: number; expectedMoveIndex: number } | null>(null);
   const gameCompletedRef = useRef<string | null>(null); // Track which match has been marked complete
+  const submissionLockRef = useRef<boolean>(false); // Prevent overlapping move submissions
   
   const resetMatch = useCallback(async () => {
     if (!match) {
@@ -162,6 +163,8 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     if (!match || base.loading) {
       if (!match) {
         lastSyncedStateRef.current = { matchId: null, snapshotMoveIndex: -1, appliedMoveCount: 0 };
+      } else if (base.loading) {
+        console.log('useOnlineSantorini: Waiting for engine to load before syncing match', match.id);
       }
       return;
     }
@@ -303,6 +306,12 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     if (!pending || !match || !role) {
       return;
     }
+    
+    // Prevent overlapping submissions
+    if (submissionLockRef.current) {
+      console.log('useOnlineSantorini: Submission already in progress, skipping');
+      return;
+    }
 
     // Check if the local history has grown (new move was made)
     if (base.history.length <= pending.expectedHistoryLength) {
@@ -358,7 +367,13 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       by: role 
     });
 
+    // Lock submissions
+    submissionLockRef.current = true;
+
     onSubmitMove(match, expectedMoveIndex, movePayload)
+      .then(() => {
+        console.log('useOnlineSantorini: Move submitted successfully');
+      })
       .catch((error) => {
         console.error('useOnlineSantorini: Failed to submit move', error);
         toast({
@@ -366,9 +381,10 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           status: 'error',
           description: error instanceof Error ? error.message : 'Unknown error',
         });
-        
-        // On error, we might want to retry or reset the local state
-        // For now, just log it - the user can retry by making the move again
+      })
+      .finally(() => {
+        // Unlock submissions
+        submissionLockRef.current = false;
       });
   }, [base.history, clock, clockEnabled, match, moves, onSubmitMove, role, toast]);
 
@@ -402,12 +418,19 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       // Don't allow moves while state is still syncing
       const lastSynced = lastSyncedStateRef.current;
       if (lastSynced.matchId !== match.id || lastSynced.appliedMoveCount !== moves.length) {
+        console.log('useOnlineSantorini: Cannot make move - state not synced', {
+          lastSynced,
+          currentMatchId: match.id,
+          currentMovesLength: moves.length,
+          engineLoading: base.loading
+        });
         toast({ title: 'Please wait - syncing game state', status: 'info' });
         return;
       }
 
-      // Calculate the correct move index based on existing moves
-      const nextMoveIndex = moves.length;
+      // Calculate the correct move index based on existing moves + pending moves
+      const pendingCount = pendingLocalMoveRef.current ? 1 : 0;
+      const nextMoveIndex = moves.length + pendingCount;
       const historyLengthBeforeMove = base.history.length;
       
       // Set pending move ref BEFORE making the move

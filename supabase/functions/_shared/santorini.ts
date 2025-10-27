@@ -128,12 +128,13 @@ export class SantoriniEngine {
     this.history = [];
   }
 
-  static createInitial(): { engine: SantoriniEngine; snapshot: SantoriniSnapshot } {
+  static createInitial(startingPlayer: number = 0): { engine: SantoriniEngine; snapshot: SantoriniSnapshot } {
     const workers = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
     const levels = Array.from({ length: BOARD_SIZE }, () => Array(BOARD_SIZE).fill(0));
     const round = 0;
     const baseState: InternalBoardState = { workers, levels, round };
-    const engine = new SantoriniEngine(baseState, 0, Array(ACTION_SIZE).fill(false), [0, 0]);
+    const player = startingPlayer === 1 ? 1 : 0; // Ensure it's 0 or 1
+    const engine = new SantoriniEngine(baseState, player, Array(ACTION_SIZE).fill(false), [0, 0]);
     engine.validMoves = engine.computeValidMoves(0);
     engine.gameEnded = engine.computeGameEnded(0);
     engine.history = [];

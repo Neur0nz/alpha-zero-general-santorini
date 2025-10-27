@@ -12,12 +12,15 @@ import type {
   SantoriniStateSnapshot,
 } from '@/types/match';
 
+export type StartingPlayer = 'creator' | 'opponent' | 'random';
+
 export interface CreateMatchPayload {
   visibility: MatchVisibility;
   rated: boolean;
   hasClock: boolean;
   clockInitialMinutes: number;
   clockIncrementSeconds: number;
+  startingPlayer: StartingPlayer;
 }
 
 export interface LobbyMatch extends MatchRecord {
@@ -536,11 +539,12 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         'postgres_changes',
         { event: '*', schema: 'public', table: 'match_moves', filter: `match_id=eq.${matchId}` },
         (payload: RealtimePostgresChangesPayload<MatchMoveRecord>) => {
+          const newMove = payload.new as MatchMoveRecord;
           console.log('useMatchLobby: Real-time move received', { 
             eventType: payload.eventType, 
             matchId, 
-            moveId: (payload.new as MatchMoveRecord)?.id,
-            moveIndex: (payload.new as MatchMoveRecord)?.move_index 
+            moveId: newMove?.id,
+            moveIndex: newMove?.move_index 
           });
           setState((prev) => {
             if (prev.activeMatchId !== matchId) {
