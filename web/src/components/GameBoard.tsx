@@ -5,9 +5,14 @@ import {
   Flex,
   Grid,
   GridItem,
+  Slider,
+  SliderFilledTrack,
+  SliderThumb,
+  SliderTrack,
   Text,
   useColorModeValue,
 } from '@chakra-ui/react';
+import { useEffect, useState } from 'react';
 import type { BoardCell, ButtonsState } from '@hooks/useSantorini';
 
 interface GameBoardProps {
@@ -34,98 +39,144 @@ function GameBoard({
   const cellBg = useColorModeValue('gray.50', 'gray.700');
   const selectableBg = useColorModeValue('teal.100', 'teal.700');
   const setupSelectableBg = useColorModeValue('blue.100', 'blue.700');
+  const [boardPixels, setBoardPixels] = useState<number>(() => {
+    if (typeof window === 'undefined') {
+      return 600;
+    }
+    const stored = window.localStorage.getItem('santorini:boardSize');
+    const parsed = Number(stored);
+    if (Number.isFinite(parsed) && parsed >= 320 && parsed <= 960) {
+      return parsed;
+    }
+    return 600;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.setItem('santorini:boardSize', String(boardPixels));
+  }, [boardPixels]);
+
+  const boardColumns = Math.max(1, board[0]?.length ?? board.length);
+  const gridTemplateColumns = `repeat(${boardColumns}, 1fr)`;
 
   return (
     <Flex
       direction="column"
       gap={{ base: 6, md: 7 }}
       w="100%"
-      maxW={{ base: '100%', sm: '600px', md: '740px', lg: '880px', xl: '960px' }}
+      maxW="100%"
       mx="auto"
     >
-      <AspectRatio ratio={1} w="100%" maxW="min(100%, 960px)">
-        <Flex
-          direction="column"
-          w="100%"
-          h="100%"
-          bg="blackAlpha.500"
-          p={{ base: 4, sm: 5, md: 6 }}
-          borderRadius="xl"
-          boxShadow="2xl"
-        >
-          <Grid
-            templateColumns="repeat(5, 1fr)"
-            gap={{ base: 1, sm: 2, md: 3 }}
-            w="100%"
-            h="100%"
+      <Flex direction="column" gap={3} w="100%">
+        <Flex align="center" gap={3} w="100%" px={{ base: 1, sm: 2 }}>
+          <Text fontSize="sm" color="whiteAlpha.700" whiteSpace="nowrap">
+            Board size
+          </Text>
+          <Slider
+            aria-label="Board size"
+            value={boardPixels}
+            onChange={setBoardPixels}
+            min={320}
+            max={960}
+            step={10}
+            colorScheme="teal"
             flex={1}
           >
-            {board.map((row, y) =>
-              row.map((cell, x) => {
-                const isSelectable = selectable[y]?.[x];
-                const isSetupSelectable = buttons.setupMode && cell.worker === 0; // Empty cells during setup
-                const highlight = cell.highlight;
-                const canClick = isSelectable || isSetupSelectable;
-                return (
-                  <GridItem key={`${y}-${x}`}>
-                    <AspectRatio ratio={1} w="100%">
-                      <Box
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Cell ${y},${x}`}
-                        onClick={() => onCellClick(y, x)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' || event.key === ' ') {
-                            event.preventDefault();
-                            onCellClick(y, x);
-                          }
-                        }}
-                        onMouseEnter={() => onCellHover(y, x)}
-                        onMouseLeave={() => onCellLeave(y, x)}
-                        cursor={canClick ? 'pointer' : 'default'}
-                        borderRadius="lg"
-                        borderWidth={highlight ? '3px' : '1px'}
-                        borderColor={highlight ? 'yellow.300' : 'whiteAlpha.300'}
-                        bg={
-                          isSetupSelectable
-                            ? setupSelectableBg
-                            : isSelectable
-                              ? selectableBg
-                              : cellBg
-                        }
-                        display="flex"
-                        alignItems="center"
-                        justifyContent="center"
-                        transition="all 0.2s ease"
-                        position="relative"
-                        _hover={{ boxShadow: canClick ? 'dark-lg' : undefined }}
-                      >
+            <SliderTrack bg="whiteAlpha.200">
+              <SliderFilledTrack />
+            </SliderTrack>
+            <SliderThumb boxSize={5} />
+          </Slider>
+          <Text fontSize="sm" color="whiteAlpha.600" w="64px" textAlign="right">
+            {Math.round(boardPixels)}px
+          </Text>
+        </Flex>
+        <AspectRatio ratio={1} w="100%" maxW={`${boardPixels}px`} mx="auto">
+          <Flex
+            direction="column"
+            w="100%"
+            h="100%"
+            bg="blackAlpha.500"
+            p={{ base: 4, sm: 5, md: 6 }}
+            borderRadius="xl"
+            boxShadow="2xl"
+          >
+            <Grid
+              templateColumns={gridTemplateColumns}
+              gap={{ base: 1, sm: 2, md: 3 }}
+              w="100%"
+              h="100%"
+              flex={1}
+            >
+              {board.map((row, y) =>
+                row.map((cell, x) => {
+                  const isSelectable = selectable[y]?.[x];
+                  const isSetupSelectable = buttons.setupMode && cell.worker === 0; // Empty cells during setup
+                  const highlight = cell.highlight;
+                  const canClick = isSelectable || isSetupSelectable;
+                  return (
+                    <GridItem key={`${y}-${x}`}>
+                      <AspectRatio ratio={1} w="100%">
                         <Box
-                          pointerEvents="none"
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Cell ${y},${x}`}
+                          onClick={() => onCellClick(y, x)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              onCellClick(y, x);
+                            }
+                          }}
+                          onMouseEnter={() => onCellHover(y, x)}
+                          onMouseLeave={() => onCellLeave(y, x)}
+                          cursor={canClick ? 'pointer' : 'default'}
+                          borderRadius="lg"
+                          borderWidth={highlight ? '3px' : '1px'}
+                          borderColor={highlight ? 'yellow.300' : 'whiteAlpha.300'}
+                          bg={
+                            isSetupSelectable
+                              ? setupSelectableBg
+                              : isSelectable
+                                ? selectableBg
+                                : cellBg
+                          }
                           display="flex"
                           alignItems="center"
                           justifyContent="center"
-                          w="100%"
-                          h="100%"
-                          sx={{
-                            '& svg': {
-                              width: '88%',
-                              height: '88%',
-                              maxWidth: '88%',
-                              maxHeight: '88%',
-                            },
-                          }}
-                          dangerouslySetInnerHTML={{ __html: cell.svg }}
-                        />
-                      </Box>
-                    </AspectRatio>
-                  </GridItem>
-                );
-              }),
-            )}
-          </Grid>
-        </Flex>
-      </AspectRatio>
+                          transition="all 0.2s ease"
+                          position="relative"
+                          _hover={{ boxShadow: canClick ? 'dark-lg' : undefined }}
+                        >
+                          <Box
+                            pointerEvents="none"
+                            display="flex"
+                            alignItems="center"
+                            justifyContent="center"
+                            w="100%"
+                            h="100%"
+                            sx={{
+                              '& svg': {
+                                width: '88%',
+                                height: '88%',
+                                maxWidth: '88%',
+                                maxHeight: '88%',
+                              },
+                            }}
+                            dangerouslySetInnerHTML={{ __html: cell.svg }}
+                          />
+                        </Box>
+                      </AspectRatio>
+                    </GridItem>
+                  );
+                }),
+              )}
+            </Grid>
+          </Flex>
+        </AspectRatio>
+      </Flex>
       <Flex
         gap={3}
         direction={{ base: 'column', sm: 'row' }}
