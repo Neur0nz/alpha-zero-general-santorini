@@ -107,11 +107,38 @@ const toPlainValue = (value: unknown): unknown => {
       try {
         const plain = candidate.toJs({ create_proxies: false });
         candidate.destroy?.();
+        if (plain !== value) {
+          return toPlainValue(plain);
+        }
         return plain;
       } catch {
         // Fall through and try other conversions
       }
     }
+
+    if (value instanceof Map) {
+      const plainObject: Record<string, unknown> = {};
+      value.forEach((mapValue, key) => {
+        if (typeof key === 'string' || typeof key === 'number' || typeof key === 'boolean') {
+          plainObject[String(key)] = toPlainValue(mapValue);
+        }
+      });
+      return plainObject;
+    }
+
+    if (Array.isArray(value)) {
+      return value.map((item) => toPlainValue(item));
+    }
+
+    if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+      const iterableCandidate = value as { [Symbol.iterator]?: () => Iterator<unknown> };
+      if (typeof iterableCandidate[Symbol.iterator] !== 'function') {
+        return value;
+      }
+      const items = Array.from(iterableCandidate as unknown as Iterable<unknown>, (item) => toPlainValue(item));
+      return items.length === 1 ? items[0] : items;
+    }
+
     if (typeof candidate.valueOf === 'function') {
       try {
         const plain = candidate.valueOf();
@@ -606,6 +633,7 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     if (!game || !game.py) return;
     
     try {
+      // Always calculate evaluation first to ensure last_probs is populated
       if (game.py.calculate_eval_for_current_position) {
         const resultProxy = await game.py.calculate_eval_for_current_position();
         const result = Array.isArray(resultProxy)
@@ -618,10 +646,31 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
           setEvaluation({ value, label, advantage });
         }
       }
+      
+      // Now get the moves (last_probs should be populated from the evaluation above)
       if (game.py.list_current_moves) {
         const movesProxy = game.py.list_current_moves(10);
         const moves = movesProxy.toJs({ create_proxies: false });
-        setTopMoves(normalizeTopMoves(moves));
+        const normalizedMoves = normalizeTopMoves(moves);
+        
+        // If no moves or all moves have 0 probability, try the advanced version
+        if (normalizedMoves.length === 0 || normalizedMoves.every(move => move.prob === 0)) {
+          console.log('No moves or zero probabilities from list_current_moves, trying list_current_moves_with_adv...');
+          if (game.py.list_current_moves_with_adv) {
+            try {
+              const advMovesProxy = await game.py.list_current_moves_with_adv(6);
+              const advMoves = advMovesProxy.toJs({ create_proxies: false });
+              setTopMoves(normalizeTopMoves(advMoves));
+            } catch (advError) {
+              console.error('Failed to get advanced moves:', advError);
+              setTopMoves(normalizedMoves);
+            }
+          } else {
+            setTopMoves(normalizedMoves);
+          }
+        } else {
+          setTopMoves(normalizedMoves);
+        }
       }
     } catch (error) {
       console.error('Failed to refresh evaluation:', error);

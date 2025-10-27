@@ -68,7 +68,12 @@ class MCTS():
             counts = adjusted_counts
 
         probs = np.array(counts)
-        probs = probs / probs.sum()
+        prob_sum = probs.sum()
+        if prob_sum > 0:
+            probs = probs / prob_sum
+        else:
+            # If no simulations have been run, return uniform probabilities
+            probs = np.ones_like(counts) / len(counts)
 
         # Clean search tree from very old moves = less memory footprint and less keys to search into
         if not self.args.no_mem_optim:
