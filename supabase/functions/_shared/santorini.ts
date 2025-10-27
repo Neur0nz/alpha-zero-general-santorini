@@ -135,8 +135,10 @@ export class SantoriniEngine {
     const baseState: InternalBoardState = { workers, levels, round };
     const player = startingPlayer === 1 ? 1 : 0; // Ensure it's 0 or 1
     const engine = new SantoriniEngine(baseState, player, Array(ACTION_SIZE).fill(false), [0, 0]);
-    engine.validMoves = engine.computeValidMoves(0);
-    engine.gameEnded = engine.computeGameEnded(0);
+    // BUG FIX: Compute valid moves for the ACTUAL starting player, not always player 0
+    const placementPlayer = engine.getNextPlacement()?.player ?? 0;
+    engine.validMoves = engine.computeValidMoves(placementPlayer);
+    engine.gameEnded = engine.computeGameEnded(placementPlayer);
     engine.history = [];
     return { engine, snapshot: engine.toSnapshot() };
   }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SantoriniEngine, type SantoriniSnapshot } from '@/lib/santoriniEngine';
+import { renderCellSvg } from '@game/svg';
 import type { LobbyMatch } from './useMatchLobby';
 import type { MatchAction, MatchMoveRecord, SantoriniMoveAction } from '@/types/match';
 import { useToast } from '@chakra-ui/react';
@@ -52,12 +53,13 @@ function engineToBoard(snapshot: SantoriniSnapshot): BoardCell[][] {
     const row: BoardCell[] = [];
     for (let x = 0; x < 5; x++) {
       const cell = snapshot.board[y][x];
+      const worker = cell[0] || 0;
       const level = cell[1] || 0;
       row.push({
-        worker: cell[0] || 0,
+        worker,
         level,
         levels: level,
-        svg: '',
+        svg: renderCellSvg({ levels: level, worker }),
         highlight: false,
       });
     }
@@ -66,28 +68,26 @@ function engineToBoard(snapshot: SantoriniSnapshot): BoardCell[][] {
   return board;
 }
 
-function computeSelectable(validMoves: boolean[]): boolean[][] {
+function computeSelectable(validMoves: boolean[], snapshot: SantoriniSnapshot): boolean[][] {
   const selectable: boolean[][] = Array.from({ length: 5 }, () => Array(5).fill(false));
   
-  // During placement phase (first 25 moves are placement)
-  for (let i = 0; i < 25; i++) {
-    if (validMoves[i]) {
-      const y = Math.floor(i / 5);
-      const x = i % 5;
-      selectable[y][x] = true;
+  // During placement phase (first 25 actions are placements)
+  const hasPlacementMoves = validMoves.slice(0, 25).some(v => v);
+  if (hasPlacementMoves) {
+    for (let i = 0; i < 25; i++) {
+      if (validMoves[i]) {
+        const y = Math.floor(i / 5);
+        const x = i % 5;
+        selectable[y][x] = true;
+      }
     }
+    return selectable;
   }
   
-  // During game phase, we need to highlight valid moves
-  // For now, mark cells with valid actions (simplified)
-  for (let i = 25; i < validMoves.length; i++) {
-    if (validMoves[i]) {
-      // This is a complex decoding - for now just enable all adjacent cells
-      // A proper implementation would decode the action to get exact cells
-      // But this provides basic highlighting
-      break;
-    }
-  }
+  // During game phase: Don't auto-highlight cells
+  // The move selection requires clicking a worker first, then showing valid moves/builds
+  // This would require move selector state which we'll skip for now
+  // Just return empty selectable - user can still click cells and the engine will validate
   
   return selectable;
 }
@@ -100,7 +100,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   // Game engine state - pure TypeScript!
   const [engine, setEngine] = useState<SantoriniEngine>(() => SantoriniEngine.createInitial().engine);
   const [board, setBoard] = useState<BoardCell[][]>(() => engineToBoard(engine.snapshot));
-  const [selectable, setSelectable] = useState<boolean[][]>(() => computeSelectable(engine.getValidMoves()));
+  const [selectable, setSelectable] = useState<boolean[][]>(() => computeSelectable(engine.getValidMoves(), engine.snapshot));
   
   // Clock state
   const [clock, setClock] = useState<ClockState>(() => deriveInitialClocks(match));
@@ -124,7 +124,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       const newEngine = SantoriniEngine.fromSnapshot(match.initial_state);
       setEngine(newEngine);
       setBoard(engineToBoard(newEngine.snapshot));
-      setSelectable(computeSelectable(newEngine.getValidMoves()));
+      setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot));
       
       lastSyncedStateRef.current = { 
         matchId: match.id, 
@@ -249,7 +249,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       // Update engine and board state
       setEngine(newEngine);
       setBoard(engineToBoard(newEngine.snapshot));
-      setSelectable(computeSelectable(newEngine.getValidMoves()));
+      setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot));
       
       // Update clock states from all moves
       setClock(deriveInitialClocks(match));
@@ -449,7 +449,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
           setEngine(newEngine);
           setBoard(engineToBoard(newEngine.snapshot));
-          setSelectable(computeSelectable(newEngine.getValidMoves()));
+          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot));
           
           // Calculate the correct move index
           const pendingCount = pendingLocalMoveRef.current ? 1 : 0;

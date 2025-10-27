@@ -39,6 +39,7 @@ import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import { useMatchLobby, type CreateMatchPayload, type LobbyMatch, type StartingPlayer } from '@hooks/useMatchLobby';
 import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
 import { SantoriniProvider, useSantorini } from '@hooks/useSantorini';
+import { useLocalSantorini } from '@hooks/useLocalSantorini';
 import GameBoard from '@components/GameBoard';
 import GoogleIcon from '@components/auth/GoogleIcon';
 import type { SantoriniMoveAction, MatchStatus } from '@/types/match';
@@ -303,11 +304,7 @@ function MatchModeSelector({
 
 function LocalMatchPanel({ onExit }: { onExit: () => void }) {
   const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
-  return (
-    <SantoriniProvider evaluationEnabled={false}>
-      <LocalMatchContent onExit={onExit} cardBg={cardBg} cardBorder={cardBorder} mutedText={mutedText} />
-    </SantoriniProvider>
-  );
+  return <LocalMatchContent onExit={onExit} cardBg={cardBg} cardBorder={cardBorder} mutedText={mutedText} />;
 }
 
 function LocalMatchContent({
@@ -334,7 +331,7 @@ function LocalMatchContent({
     redo,
     nextPlayer,
     controls,
-  } = useSantorini({ evaluationEnabled: false });
+  } = useLocalSantorini();
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {

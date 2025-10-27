@@ -147,8 +147,10 @@ export class SantoriniEngine {
     const baseState: InternalBoardState = { workers, levels, round };
     const player = startingPlayer === 1 ? 1 : 0;
     const engine = new SantoriniEngine(baseState, player, Array(ACTION_SIZE).fill(false), [0, 0]);
-    engine.validMoves = engine.computeValidMoves(0);
-    engine.gameEnded = engine.computeGameEnded(0);
+    // BUG FIX: Compute valid moves for the ACTUAL starting player, not always player 0
+    const placementPlayer = engine.getNextPlacement()?.player ?? 0;
+    engine.validMoves = engine.computeValidMoves(placementPlayer);
+    engine.gameEnded = engine.computeGameEnded(placementPlayer);
     engine.history = [];
     return { engine, snapshot: engine.toSnapshot() };
   }
@@ -167,8 +169,10 @@ export class SantoriniEngine {
       Array.isArray(snapshot.gameEnded) ? Number(snapshot.gameEnded[1]) || 0 : 0,
     ];
     const engine = new SantoriniEngine(board, player, validMoves, gameEnded);
-    engine.validMoves = engine.computeValidMoves(player);
-    engine.gameEnded = engine.computeGameEnded(player);
+    // BUG FIX: During placement, compute valid moves for the player who should place, not currentPlayer
+    const placementPlayer = engine.getNextPlacement()?.player ?? player;
+    engine.validMoves = engine.computeValidMoves(placementPlayer);
+    engine.gameEnded = engine.computeGameEnded(placementPlayer);
     const historyEntries: HistoryEntry[] = [];
     if (Array.isArray(snapshot.history)) {
       for (const entry of snapshot.history) {
