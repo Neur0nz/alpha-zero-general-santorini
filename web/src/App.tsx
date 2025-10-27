@@ -11,7 +11,7 @@ import {
   useDisclosure,
 } from '@chakra-ui/react';
 import { useEffect, useMemo, useState } from 'react';
-import { TimeIcon, SearchIcon } from '@chakra-ui/icons';
+import { SearchIcon } from '@chakra-ui/icons';
 import { useSantorini } from '@hooks/useSantorini';
 import { useSupabaseAuth } from '@hooks/useSupabaseAuth';
 import HeaderBar, { type AppTab } from '@components/HeaderBar';
@@ -54,18 +54,7 @@ function App() {
   const tabActions = useMemo(() => {
     switch (activeTab) {
       case 'practice':
-        return (
-          <Tooltip label="Jump to history" hasArrow>
-            <IconButton
-              aria-label="History"
-              icon={<TimeIcon />}
-              size="sm"
-              variant="outline"
-              colorScheme="blue"
-              onClick={openHistory}
-            />
-          </Tooltip>
-        );
+        return null;
       case 'play':
         return null;
       case 'analyze':
