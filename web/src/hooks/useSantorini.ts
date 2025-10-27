@@ -619,15 +619,9 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     }
     
     const setupTurn = buttons.setupTurn;
-    const placingGreen = (setupTurn === 0 || setupTurn === 1);
     
-    // editCell mode 2 cycles: 0 -> +1 -> -1 -> 0 ...
-    if (placingGreen) {
-      game.editCell(y, x, 2); // 0 -> +1
-    } else {
-      game.editCell(y, x, 2); // 0 -> +1
-      game.editCell(y, x, 2); // +1 -> -1
-    }
+    // Place workers using editCell mode 2, then reassign IDs with mode 0
+    game.editCell(y, x, 2); // Place worker (0 -> +1 for green, or 0 -> +1 -> -1 for red)
     
     const newSetupTurn = setupTurn + 1;
     const steps = ['Place Green piece 1', 'Place Green piece 2', 'Place Red piece 1', 'Place Red piece 2'];
@@ -643,6 +637,9 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     await persistPracticeState();
 
     if (newSetupTurn >= 4) {
+      // Reassign worker IDs to ensure we have [1, 2, -1, -2]
+      game.editCell(0, 0, 0); // This reassigns all worker IDs properly
+      
       setButtons((prev) => ({
         ...prev,
         setupMode: false,
