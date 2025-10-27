@@ -26,7 +26,9 @@ export interface LobbyMatch extends MatchRecord {
 
 export interface UseMatchLobbyState {
   matches: LobbyMatch[];
+  myMatches: LobbyMatch[];
   loading: boolean;
+  activeMatchId: string | null;
   activeMatch: LobbyMatch | null;
   moves: MatchMoveRecord<MatchAction>[];
   joinCode: string | null;
@@ -34,11 +36,15 @@ export interface UseMatchLobbyState {
 
 const INITIAL_STATE: UseMatchLobbyState = {
   matches: [],
+  myMatches: [],
   loading: false,
+  activeMatchId: null,
   activeMatch: null,
   moves: [],
   joinCode: null,
 };
+
+const TRACKED_MATCH_STATUSES: MatchStatus[] = ['waiting_for_opponent', 'in_progress'];
 
 const MATCH_WITH_PROFILES =
   '*, creator:creator_id (id, auth_user_id, display_name, rating, games_played, created_at, updated_at), '
@@ -51,13 +57,32 @@ function normalizeAction(action: unknown): MatchAction {
   return { kind: 'unknown' } as MatchAction;
 }
 
+function upsertMatch(list: LobbyMatch[], match: LobbyMatch): LobbyMatch[] {
+  const index = list.findIndex((item) => item.id === match.id);
+  if (index >= 0) {
+    const next = [...list];
+    next[index] = { ...next[index], ...match };
+    return next;
+  }
+  return [match, ...list];
+}
+
+function removeMatch(list: LobbyMatch[], matchId: string): LobbyMatch[] {
+  return list.filter((match) => match.id !== matchId);
+}
+
+function selectPreferredMatch(matches: LobbyMatch[]): LobbyMatch | null {
+  if (!matches.length) return null;
+  return matches.find((match) => match.status === 'in_progress') ?? matches[0] ?? null;
+}
+
 export function useMatchLobby(profile: PlayerProfile | null) {
   const [state, setState] = useState<UseMatchLobbyState>(INITIAL_STATE);
   const channelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
   const playersRef = useRef<Record<string, PlayerProfile>>({});
   const [playersVersion, setPlayersVersion] = useState(0);
 
-  const matchId = state.activeMatch?.id ?? null;
+  const matchId = state.activeMatchId;
 
   const mergePlayers = useCallback((records: PlayerProfile[]): void => {
     if (!records.length) return;
@@ -250,12 +275,131 @@ export function useMatchLobby(profile: PlayerProfile | null) {
 
   useEffect(() => {
     const client = supabase;
+    if (!client || !profile) {
+      setState((prev) => ({ ...prev, myMatches: [], activeMatchId: null, activeMatch: null }));
+      return undefined;
+    }
+
+    let isMounted = true;
+
+    const fetchMyMatches = async () => {
+      const { data, error } = await client
+        .from('matches')
+        .select(MATCH_WITH_PROFILES)
+        .in('status', TRACKED_MATCH_STATUSES)
+        .or(`creator_id.eq.${profile.id},opponent_id.eq.${profile.id}`)
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        console.error('Failed to fetch player matches', error);
+        return;
+      }
+
+      if (!isMounted) return;
+
+      const rawRecords = Array.isArray(data) ? data : [];
+      const records = rawRecords as unknown as Array<MatchRecord & Partial<LobbyMatch>>;
+      const profilesToCache: PlayerProfile[] = [];
+      records.forEach((record) => {
+        if (record.creator) profilesToCache.push(record.creator);
+        if (record.opponent) profilesToCache.push(record.opponent);
+      });
+      mergePlayers(profilesToCache);
+      const hydrated = records.map((record) => attachProfiles(record) ?? { ...record, creator: null, opponent: null });
+
+      setState((prev) => {
+        const myMatches = hydrated;
+        const activeMatchId = (() => {
+          if (prev.activeMatchId && myMatches.some((match) => match.id === prev.activeMatchId)) {
+            return prev.activeMatchId;
+          }
+          const preferred = selectPreferredMatch(myMatches);
+          return preferred?.id ?? null;
+        })();
+        const activeMatch = activeMatchId
+          ? myMatches.find((match) => match.id === activeMatchId) ?? prev.activeMatch
+          : null;
+        return {
+          ...prev,
+          myMatches,
+          activeMatchId,
+          activeMatch,
+          joinCode: activeMatchId ? activeMatch?.private_join_code ?? prev.joinCode : null,
+        };
+      });
+
+      void ensurePlayersLoaded(records.flatMap((match) => [match.creator_id, match.opponent_id ?? undefined]));
+    };
+
+    fetchMyMatches();
+
+    const channel = client
+      .channel(`public:my_matches:${profile.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'matches',
+          filter: `or=(creator_id.eq.${profile.id},opponent_id.eq.${profile.id})`,
+        },
+        (payload: RealtimePostgresChangesPayload<MatchRecord>) => {
+          const updated = payload.eventType === 'DELETE' ? (payload.old as MatchRecord) : (payload.new as MatchRecord);
+          const isTracked = TRACKED_MATCH_STATUSES.includes(updated.status as MatchStatus);
+
+          setState((prev) => {
+            let myMatches = prev.myMatches;
+            if (payload.eventType === 'DELETE' || !isTracked) {
+              myMatches = removeMatch(prev.myMatches, updated.id);
+            } else {
+              const hydrated = attachProfiles({
+                ...(prev.myMatches.find((match) => match.id === updated.id) ?? {}),
+                ...updated,
+              });
+              const matchRecord = hydrated ?? { ...updated, creator: null, opponent: null };
+              myMatches = upsertMatch(prev.myMatches, matchRecord);
+            }
+
+            let activeMatchId = prev.activeMatchId;
+            let activeMatch = prev.activeMatch;
+            if (activeMatchId && activeMatchId === updated.id) {
+              if (payload.eventType === 'DELETE' || !isTracked) {
+                const fallback = selectPreferredMatch(myMatches);
+                activeMatchId = fallback?.id ?? null;
+                activeMatch = fallback ?? null;
+              } else {
+                activeMatch = myMatches.find((match) => match.id === updated.id) ?? null;
+              }
+            } else if (!activeMatchId && isTracked && myMatches.length > 0) {
+              const fallback = selectPreferredMatch(myMatches);
+              activeMatchId = fallback?.id ?? null;
+              activeMatch = fallback ?? null;
+            }
+
+            const joinCode = activeMatch ? activeMatch.private_join_code ?? null : null;
+
+            return { ...prev, myMatches, activeMatchId, activeMatch, joinCode };
+          });
+
+          void ensurePlayersLoaded([updated.creator_id, updated.opponent_id ?? undefined]);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      client.removeChannel(channel);
+    };
+  }, [attachProfiles, ensurePlayersLoaded, mergePlayers, profile]);
+
+  useEffect(() => {
+    const client = supabase;
     if (!client || !matchId) {
       if (channelRef.current) {
         client?.removeChannel(channelRef.current);
         channelRef.current = null;
       }
-      setState((prev) => ({ ...prev, moves: [] }));
+      setState((prev) => ({ ...prev, moves: [], activeMatch: null, joinCode: null }));
       return undefined;
     }
 
@@ -275,7 +419,16 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       if (record?.creator) mergePlayers([record.creator]);
       if (record?.opponent) mergePlayers([record.opponent]);
       const hydrated = attachProfiles(record);
-      setState((prev) => ({ ...prev, activeMatch: hydrated }));
+      setState((prev) => {
+        if (prev.activeMatchId !== matchId) {
+          return prev;
+        }
+        return {
+          ...prev,
+          activeMatch: hydrated,
+          joinCode: record?.private_join_code ?? prev.joinCode,
+        };
+      });
       if (record) {
         void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
       }
@@ -293,13 +446,18 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         return;
       }
 
-      setState((prev) => ({
-        ...prev,
-        moves: (data ?? []).map((move: MatchMoveRecord) => ({
-          ...move,
-          action: normalizeAction(move.action),
-        })),
-      }));
+      setState((prev) => {
+        if (prev.activeMatchId !== matchId) {
+          return prev;
+        }
+        return {
+          ...prev,
+          moves: (data ?? []).map((move: MatchMoveRecord) => ({
+            ...move,
+            action: normalizeAction(move.action),
+          })),
+        };
+      });
     };
 
     fetchMatch();
@@ -312,14 +470,19 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` },
         (payload: RealtimePostgresChangesPayload<MatchRecord>) => {
           const updated = payload.new as MatchRecord;
-          setState((prev) => ({
-            ...prev,
-            activeMatch:
-              attachProfiles({ ...prev.activeMatch, ...updated }) ??
-              (prev.activeMatch
-                ? { ...prev.activeMatch, ...updated }
-                : { ...updated, creator: null, opponent: null }),
-          }));
+          setState((prev) => {
+            if (prev.activeMatchId !== matchId) {
+              return prev;
+            }
+            return {
+              ...prev,
+              activeMatch:
+                attachProfiles({ ...prev.activeMatch, ...updated }) ??
+                (prev.activeMatch
+                  ? { ...prev.activeMatch, ...updated }
+                  : { ...updated, creator: null, opponent: null }),
+            };
+          });
           void ensurePlayersLoaded([updated.creator_id, updated.opponent_id ?? undefined]);
         },
       )
@@ -328,6 +491,9 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         { event: '*', schema: 'public', table: 'match_moves', filter: `match_id=eq.${matchId}` },
         (payload: RealtimePostgresChangesPayload<MatchMoveRecord>) => {
           setState((prev) => {
+            if (prev.activeMatchId !== matchId) {
+              return prev;
+            }
             if (payload.eventType === 'INSERT') {
               const newMove = payload.new as MatchMoveRecord;
               const moveRecord: MatchMoveRecord<MatchAction> = {
@@ -383,7 +549,14 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       if (record.creator) mergePlayers([record.creator]);
       const enriched = attachProfiles(record) ?? { ...record, creator: profile, opponent: null };
       const joinCode = record.private_join_code ?? null;
-      setState((prev) => ({ ...prev, activeMatch: enriched, joinCode, moves: [] }));
+      setState((prev) => ({
+        ...prev,
+        activeMatchId: enriched.id,
+        activeMatch: enriched,
+        joinCode,
+        moves: [],
+        myMatches: upsertMatch(prev.myMatches, enriched),
+      }));
       void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
       return enriched;
     },
@@ -438,7 +611,14 @@ export function useMatchLobby(profile: PlayerProfile | null) {
 
       const selfMatch = attachProfiles(targetMatch) ?? { ...targetMatch, creator: null, opponent: null };
       if (targetMatch.creator_id === profile.id) {
-        setState((prev) => ({ ...prev, activeMatch: selfMatch, joinCode: targetMatch.private_join_code, moves: [] }));
+        setState((prev) => ({
+          ...prev,
+          activeMatchId: selfMatch.id,
+          activeMatch: selfMatch,
+          joinCode: targetMatch.private_join_code,
+          moves: [],
+          myMatches: upsertMatch(prev.myMatches, selfMatch),
+        }));
         void ensurePlayersLoaded([targetMatch.creator_id, targetMatch.opponent_id ?? undefined]);
         return selfMatch;
       }
@@ -470,31 +650,69 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         creator: selfMatch.creator,
         opponent: profile,
       };
-      setState((prev) => ({ ...prev, activeMatch: enriched, joinCode: targetMatch.private_join_code, moves: [] }));
+      setState((prev) => ({
+        ...prev,
+        activeMatchId: enriched.id,
+        activeMatch: enriched,
+        joinCode: targetMatch.private_join_code,
+        moves: [],
+        myMatches: upsertMatch(prev.myMatches, enriched),
+      }));
       void ensurePlayersLoaded([joined.creator_id, joined.opponent_id ?? undefined]);
       return enriched;
     },
     [attachProfiles, ensurePlayersLoaded, mergePlayers, profile],
   );
 
-  const leaveMatch = useCallback(async () => {
-    const client = supabase;
-    const active = state.activeMatch;
-    if (client && active && profile) {
+  const leaveMatch = useCallback(
+    async (matchId?: string | null) => {
+      const client = supabase;
+      if (!client || !profile) {
+        setState((prev) => ({ ...prev, activeMatchId: null, activeMatch: null, moves: [], joinCode: null }));
+        return;
+      }
+
+      const targetId = matchId ?? state.activeMatchId;
+      if (!targetId) {
+        setState((prev) => ({ ...prev, activeMatchId: null, activeMatch: null, moves: [], joinCode: null }));
+        return;
+      }
+
+      const candidate =
+        state.activeMatch && state.activeMatch.id === targetId
+          ? state.activeMatch
+          : state.myMatches.find((match) => match.id === targetId) ?? null;
+
       const updates: Partial<MatchRecord> = { status: 'abandoned' };
-      if (active.status === 'in_progress') {
-        const opponentId = profile.id === active.creator_id ? active.opponent_id : active.creator_id;
+      if (candidate?.status === 'in_progress') {
+        const opponentId = profile.id === candidate.creator_id ? candidate.opponent_id : candidate.creator_id;
         if (opponentId) {
           updates.winner_id = opponentId;
         }
       }
-      const { error } = await client.from('matches').update(updates).eq('id', active.id);
+
+      const { error } = await client.from('matches').update(updates).eq('id', targetId);
       if (error) {
         console.error('Failed to mark match as abandoned', error);
+        return;
       }
-    }
-    setState((prev) => ({ ...prev, activeMatch: null, moves: [], joinCode: null }));
-  }, [profile, state.activeMatch]);
+
+      setState((prev) => {
+        const remaining = removeMatch(prev.myMatches, targetId);
+        const wasActive = prev.activeMatchId === targetId;
+        const fallback = wasActive ? selectPreferredMatch(remaining) : null;
+        return {
+          ...prev,
+          myMatches: remaining,
+          activeMatchId: wasActive ? fallback?.id ?? null : prev.activeMatchId,
+          activeMatch: wasActive ? fallback ?? null : prev.activeMatch,
+          moves: wasActive ? [] : prev.moves,
+          joinCode: wasActive && fallback ? fallback.private_join_code ?? null : wasActive ? null : prev.joinCode,
+        };
+      });
+    },
+    [profile, state.activeMatch, state.activeMatchId, state.myMatches],
+  );
 
   const submitMove = useCallback(
     async (match: LobbyMatch, moveIndex: number, movePayload: SantoriniMoveAction) => {
@@ -519,15 +737,15 @@ export function useMatchLobby(profile: PlayerProfile | null) {
 
   const updateMatchStatus = useCallback(async (status: MatchStatus, payload?: { winner_id?: string | null }) => {
     const client = supabase;
-    if (!client || !state.activeMatch) return;
+    if (!client || !state.activeMatchId) return;
     const { error } = await client
       .from('matches')
       .update({ status, winner_id: payload?.winner_id ?? null })
-      .eq('id', state.activeMatch.id);
+      .eq('id', state.activeMatchId);
     if (error) {
       console.error('Failed to update match status', error);
     }
-  }, [state.activeMatch]);
+  }, [state.activeMatchId]);
 
   const offerRematch = useCallback(
     async () => {
@@ -555,11 +773,41 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       if (record.opponent) cachedProfiles.push(record.opponent);
       mergePlayers(cachedProfiles);
       const enriched = attachProfiles(record) ?? { ...record, creator: profile, opponent: null };
-      setState((prev) => ({ ...prev, activeMatch: enriched, moves: [], joinCode: record.private_join_code }));
+      setState((prev) => ({
+        ...prev,
+        activeMatchId: enriched.id,
+        activeMatch: enriched,
+        moves: [],
+        joinCode: record.private_join_code,
+        myMatches: upsertMatch(prev.myMatches, enriched),
+      }));
       void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
       return enriched;
     },
     [attachProfiles, ensurePlayersLoaded, mergePlayers, profile, state.activeMatch],
+  );
+
+  const setActiveMatch = useCallback(
+    (matchId: string | null) => {
+      setState((prev) => {
+        if (!matchId) {
+          return { ...prev, activeMatchId: null, activeMatch: null, moves: [], joinCode: null };
+        }
+        const nextMatch =
+          prev.myMatches.find((match) => match.id === matchId) ??
+          (prev.activeMatch?.id === matchId ? prev.activeMatch : null);
+        const hydrated = nextMatch ? attachProfiles(nextMatch) ?? nextMatch : null;
+        const sameMatch = prev.activeMatchId === matchId;
+        return {
+          ...prev,
+          activeMatchId: matchId,
+          activeMatch: hydrated,
+          moves: sameMatch ? prev.moves : [],
+          joinCode: hydrated?.private_join_code ?? (sameMatch ? prev.joinCode : null),
+        };
+      });
+    },
+    [attachProfiles],
   );
 
   const activeRole = useMemo<'creator' | 'opponent' | null>(() => {
@@ -568,6 +816,15 @@ export function useMatchLobby(profile: PlayerProfile | null) {
     if (state.activeMatch.opponent_id === profile.id) return 'opponent';
     return null;
   }, [profile, state.activeMatch]);
+
+  const myMatchesWithProfiles = useMemo(
+    () =>
+      state.myMatches.map((match) => {
+        const enriched = attachProfiles(match);
+        return enriched ?? { ...match, creator: null, opponent: null };
+      }),
+    [attachProfiles, state.myMatches],
+  );
 
   const matchesWithProfiles = useMemo(
     () =>
@@ -582,11 +839,14 @@ export function useMatchLobby(profile: PlayerProfile | null) {
 
   return {
     matches: matchesWithProfiles,
+    myMatches: myMatchesWithProfiles,
     loading: state.loading,
+    activeMatchId: state.activeMatchId,
     activeMatch: activeMatchWithProfiles,
     moves: state.moves,
     joinCode: state.joinCode,
     activeRole,
+    setActiveMatch,
     createMatch,
     joinMatch,
     leaveMatch,
