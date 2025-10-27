@@ -30,6 +30,7 @@ function deriveInitialClocks(match: LobbyMatch | null): ClockState {
 export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const { match, moves, role, onSubmitMove, onGameComplete } = options;
   const base = useSantorini({ evaluationEnabled: false });
+  const matchId = match?.id ?? null;
   const lockedControls = useMemo(
     () => ({
       ...base.controls,
@@ -47,6 +48,34 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appliedMovesRef = useRef(0);
   const pendingLocalMoveRef = useRef<{ expectedHistoryLength: number } | null>(null);
+
+  useEffect(() => {
+    if (!matchId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        await base.initialize();
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        console.error('Failed to initialize Santorini engine', error);
+        toast({
+          title: 'Failed to load game engine',
+          status: 'error',
+          description: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [base.initialize, matchId, toast]);
 
   const currentTurn = useMemo<'creator' | 'opponent'>(() => {
     if (!match) return 'creator';
