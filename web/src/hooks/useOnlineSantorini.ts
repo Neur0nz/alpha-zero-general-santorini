@@ -532,7 +532,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         }
       }
     },
-    [currentTurn, engine, match, moves.length, role, toast],
+    [currentTurn, engine, isMyTurn, match, moves.length, role, toast],
   );
 
   // Game completion detection
