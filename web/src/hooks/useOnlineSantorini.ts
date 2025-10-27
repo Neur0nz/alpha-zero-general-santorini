@@ -3,7 +3,7 @@ import { SantoriniEngine, type SantoriniSnapshot } from '@/lib/santoriniEngine';
 import { TypeScriptMoveSelector } from '@/lib/moveSelectorTS';
 import { renderCellSvg } from '@game/svg';
 import type { LobbyMatch } from './useMatchLobby';
-import type { MatchAction, MatchMoveRecord, SantoriniMoveAction, SantoriniStateSnapshot } from '@/types/match';
+import type { MatchAction, MatchMoveRecord, SantoriniMoveAction } from '@/types/match';
 import { useToast } from '@chakra-ui/react';
 
 export interface UseOnlineSantoriniOptions {
@@ -129,8 +129,6 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     expectedHistoryLength: number; 
     expectedMoveIndex: number; 
     moveAction?: number;
-    state_snapshot?: SantoriniStateSnapshot;
-    winner?: number | null;
   } | null>(null);
   const gameCompletedRef = useRef<string | null>(null);
   const submissionLockRef = useRef<boolean>(false);
@@ -396,17 +394,12 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       move: moveAction,
       by: role,
       clocks: updatedClock,
-      // Include state snapshot and winner for direct WebSocket inserts
-      state_snapshot: pending.state_snapshot,
-      winner: pending.winner,
     };
 
-    console.log('useOnlineSantorini: Submitting move via WebSocket (direct insert)', { 
+    console.log('useOnlineSantorini: Submitting move for server validation', { 
       moveIndex: expectedMoveIndex, 
       move: moveAction,
       by: role,
-      hasSnapshot: !!pending.state_snapshot,
-      winner: pending.winner,
     });
 
     submissionLockRef.current = true;
@@ -509,16 +502,11 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           const pendingCount = pendingLocalMoveRef.current ? 1 : 0;
           const nextMoveIndex = moves.length + pendingCount;
           
-          // Store pending move with state snapshot for WebSocket insert
-          const [p0Score, p1Score] = newEngine.getGameEnded();
-          const winner = p0Score === 1 ? 0 : p1Score === 1 ? 1 : null;
-          
+          // Store pending move (server will compute state)
           pendingLocalMoveRef.current = { 
             expectedHistoryLength: 0, // Not used in TS version
             expectedMoveIndex: nextMoveIndex,
             moveAction: placementAction,
-            state_snapshot: result.snapshot,
-            winner,
           };
         } catch (error) {
           console.error('useOnlineSantorini: Move failed', error);
@@ -559,20 +547,14 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
           setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelector, myTurn));
           
-          // Calculate move index and submit
+          // Calculate move index and submit (server will compute state)
           const pendingCount = pendingLocalMoveRef.current ? 1 : 0;
           const nextMoveIndex = moves.length + pendingCount;
-          
-          // Include state snapshot and winner for WebSocket insert
-          const [p0Score, p1Score] = newEngine.getGameEnded();
-          const winner = p0Score === 1 ? 0 : p1Score === 1 ? 1 : null;
           
           pendingLocalMoveRef.current = {
             expectedHistoryLength: 0,
             expectedMoveIndex: nextMoveIndex,
             moveAction: action,
-            state_snapshot: result.snapshot,
-            winner,
           };
         } catch (error) {
           console.error('useOnlineSantorini: Move failed', error);

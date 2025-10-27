@@ -56,9 +56,6 @@ export type SantoriniMoveAction = {
     creatorMs: number;
     opponentMs: number;
   };
-  // For direct WebSocket inserts (bypassing edge function)
-  state_snapshot?: SantoriniStateSnapshot;
-  winner?: number | null; // 0 = creator, 1 = opponent, null = no winner yet
 };
 
 export type RematchOfferAction = {
