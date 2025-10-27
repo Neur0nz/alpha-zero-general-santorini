@@ -590,6 +590,7 @@ function ActiveMatchPanel({
                   display="flex"
                   justifyContent="center"
                 >
+                  {/* TODO: Implement online undo request flow */}
                   <GameBoard
                     board={santorini.board}
                     selectable={santorini.selectable}
@@ -599,6 +600,9 @@ function ActiveMatchPanel({
                     buttons={santorini.buttons}
                     undo={santorini.undo}
                     redo={santorini.redo}
+                    undoLabel="Request undo"
+                    hideRedoButton
+                    undoDisabledOverride
                   />
                 </Box>
                 <Stack
