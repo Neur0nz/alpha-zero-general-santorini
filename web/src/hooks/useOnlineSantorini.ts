@@ -110,17 +110,19 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const toast = useToast();
   
   // Game engine state - pure TypeScript!
-  const [engine, setEngine] = useState<SantoriniEngine>(() => SantoriniEngine.createInitial().engine);
-  const engineRef = useRef<SantoriniEngine>(engine); // Track current engine for fast path
-  const [board, setBoard] = useState<BoardCell[][]>(() => engineToBoard(engine.snapshot));
+  // NOTE: engineRef is the SINGLE SOURCE OF TRUTH for game state
+  // The state variables are only for triggering React re-renders
+  const engineRef = useRef<SantoriniEngine>(SantoriniEngine.createInitial().engine);
+  const [engineVersion, setEngineVersion] = useState(0); // Trigger re-renders when engine changes
+  const [board, setBoard] = useState<BoardCell[][]>(() => engineToBoard(engineRef.current.snapshot));
   const moveSelectorRef = useRef<TypeScriptMoveSelector>(new TypeScriptMoveSelector());
   const [selectable, setSelectable] = useState<boolean[][]>(() =>
     computeSelectable(
-      engine.getValidMoves(),
-      engine.snapshot,
+      engineRef.current.getValidMoves(),
+      engineRef.current.snapshot,
       moveSelectorRef.current,
       false,
-      engine.getPlacementContext(),
+      engineRef.current.getPlacementContext(),
     ),
   );
   
@@ -129,7 +131,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const [clockEnabled, setClockEnabled] = useState(match?.clock_initial_seconds ? match.clock_initial_seconds > 0 : false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
-  // Sync tracking
+  // Sync tracking and locks
   const lastSyncedStateRef = useRef<{ matchId: string | null; snapshotMoveIndex: number; appliedMoveCount: number }>({ 
     matchId: null, 
     snapshotMoveIndex: -1,
@@ -142,31 +144,38 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   } | null>(null);
   const gameCompletedRef = useRef<string | null>(null);
   const submissionLockRef = useRef<boolean>(false);
+  const syncInProgressRef = useRef<boolean>(false); // NEW: Prevent moves during sync
   
-  // Update engineRef whenever engine state changes
-  useEffect(() => {
-    engineRef.current = engine;
-  }, [engine]);
+  // Helper function to atomically update engine and derived state
+  const updateEngineState = useCallback((newEngine: SantoriniEngine, myTurn: boolean) => {
+    engineRef.current = newEngine;
+    const newBoard = engineToBoard(newEngine.snapshot);
+    const newSelectable = myTurn 
+      ? computeSelectable(
+          newEngine.getValidMoves(),
+          newEngine.snapshot,
+          moveSelectorRef.current,
+          true,
+          newEngine.getPlacementContext()
+        )
+      : Array.from({ length: 5 }, () => Array(5).fill(false));
+    
+    // Batch all state updates together to prevent intermediate renders
+    setBoard(newBoard);
+    setSelectable(newSelectable);
+    setEngineVersion(v => v + 1);
+  }, []);
   
   const resetMatch = useCallback(() => {
     if (!match) return;
     
     try {
       const newEngine = SantoriniEngine.fromSnapshot(match.initial_state);
-      engineRef.current = newEngine; // Update ref immediately
-      setEngine(newEngine);
-      setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
       const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
-      setSelectable(
-        computeSelectable(
-          newEngine.getValidMoves(),
-          newEngine.snapshot,
-          moveSelectorRef.current,
-          myTurn,
-          newEngine.getPlacementContext(),
-        ),
-      );
+      
+      // Atomically update all state
+      updateEngineState(newEngine, myTurn);
       
       lastSyncedStateRef.current = { 
         matchId: match.id, 
@@ -178,7 +187,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     } catch (error) {
       console.error('Failed to reset match to server snapshot', error);
     }
-  }, [match]);
+  }, [match, role, updateEngineState]);
 
   const previousMatchRef = useRef<{
     id: string | null;
@@ -224,6 +233,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   useEffect(() => {
     if (!match) {
       lastSyncedStateRef.current = { matchId: null, snapshotMoveIndex: -1, appliedMoveCount: 0 };
+      syncInProgressRef.current = false;
       return;
     }
 
@@ -234,8 +244,12 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       lastSynced.appliedMoveCount !== moves.length;
 
     if (!needsResync) {
+      syncInProgressRef.current = false;
       return;
     }
+
+    // Mark sync as in progress to block user moves
+    syncInProgressRef.current = true;
 
     const syncStart = performance.now();
     console.log('useOnlineSantorini: Syncing state', { 
@@ -261,23 +275,19 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           const result = currentEngine.applyMove(action.move);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
           
-          // Update ref immediately to prevent race conditions
-          engineRef.current = newEngine;
-          
-          // Batch state updates
-          setEngine(newEngine);
-          setBoard(engineToBoard(newEngine.snapshot));
           moveSelectorRef.current.reset();
           
-          // Only compute selectable if it's our turn (saves 50-100ms)
+          // Atomically update all state
           const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
-          setSelectable(myTurn ? computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current, true) : []);
+          updateEngineState(newEngine, myTurn);
           
           lastSyncedStateRef.current = { 
             matchId: match.id, 
             snapshotMoveIndex: lastSynced.snapshotMoveIndex,
             appliedMoveCount: moves.length
           };
+          
+          syncInProgressRef.current = false;
           
           const syncElapsed = performance.now() - syncStart;
           console.log(`⚡ FAST PATH: State sync complete in ${syncElapsed.toFixed(0)}ms`);
@@ -304,6 +314,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       snapshotSource?.state_snapshot ?? match.initial_state ?? null;
     if (!snapshot) {
       console.warn('useOnlineSantorini: No snapshot available');
+      syncInProgressRef.current = false;
       return;
     }
 
@@ -335,15 +346,11 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         }
       }
       
-      // Update engine and board state
-      engineRef.current = newEngine; // Update ref immediately
-      setEngine(newEngine);
-      setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
       
-      // Only compute selectable if it's our turn (saves 50-100ms)
+      // Atomically update all state
       const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
-      setSelectable(myTurn ? computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current, true) : []);
+      updateEngineState(newEngine, myTurn);
       
       // Update clock states from all moves (only process last clock update for speed)
       setClock(deriveInitialClocks(match));
@@ -361,18 +368,22 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         appliedMoveCount: moves.length
       };
       
+      syncInProgressRef.current = false;
+      
       const syncElapsed = performance.now() - syncStart;
       console.log(`useOnlineSantorini: State sync complete in ${syncElapsed.toFixed(0)}ms`);
     } catch (error) {
       console.error('useOnlineSantorini: Failed to synchronize board with server', error);
+      syncInProgressRef.current = false;
     }
-  }, [clockEnabled, match, moves, role]); // Removed 'engine' - using engineRef instead
+  }, [clockEnabled, match, moves, role, updateEngineState]);
 
   // Clock tick effect
+  // Use engineVersion as dependency to recompute when engine changes
   const currentTurn = useMemo(() => {
     if (!match) return null;
-    return engine.player === 0 ? 'creator' : 'opponent';
-  }, [engine, match]);
+    return engineRef.current.player === 0 ? 'creator' : 'opponent';
+  }, [engineVersion, match]);
   
   const isMyTurn = useMemo(() => {
     return role !== null && currentTurn === role;
@@ -508,6 +519,14 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         toast({ title: 'Waiting for opponent', status: 'info' });
         return;
       }
+      
+      // Block moves during sync (critical guard!)
+      if (syncInProgressRef.current) {
+        console.log('useOnlineSantorini: Cannot make move - sync in progress');
+        toast({ title: 'Please wait - syncing game state', status: 'info' });
+        return;
+      }
+      
       if (pendingLocalMoveRef.current) {
         toast({ title: 'Please wait - syncing previous move', status: 'info' });
         return;
@@ -529,7 +548,8 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         return;
       }
 
-      // Find valid move for this cell click
+      // ALWAYS use engineRef.current for latest state (not closure variable)
+      const engine = engineRef.current;
       const validMoves = engine.getValidMoves();
       const placement = engine.getPlacementContext();
       const isPlacementPhase = placement && placement.player === engine.player;
@@ -562,19 +582,11 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         try {
           const result = engine.applyMove(placementAction);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
-          setEngine(newEngine);
-          setBoard(engineToBoard(newEngine.snapshot));
           moveSelectorRef.current.reset();
+          
+          // Atomically update state
           const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
-          setSelectable(
-            computeSelectable(
-              newEngine.getValidMoves(),
-              newEngine.snapshot,
-              moveSelectorRef.current,
-              myTurn,
-              newEngine.getPlacementContext(),
-            ),
-          );
+          updateEngineState(newEngine, myTurn);
           
           // Calculate the correct move index
           const pendingCount = pendingLocalMoveRef.current ? 1 : 0;
@@ -627,19 +639,11 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         try {
           const result = engine.applyMove(action);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
-          setEngine(newEngine);
-          setBoard(engineToBoard(newEngine.snapshot));
           moveSelector.reset();
+          
+          // Atomically update state
           const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
-          setSelectable(
-            computeSelectable(
-              newEngine.getValidMoves(),
-              newEngine.snapshot,
-              moveSelector,
-              myTurn,
-              newEngine.getPlacementContext(),
-            ),
-          );
+          updateEngineState(newEngine, myTurn);
           
           // Calculate move index and submit (server will compute state)
           const pendingCount = pendingLocalMoveRef.current ? 1 : 0;
@@ -654,6 +658,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           console.error('useOnlineSantorini: Move failed', error);
           toast({ title: 'Move failed', status: 'error' });
           moveSelector.reset();
+          // Restore selectable state on error
           setSelectable(
             computeSelectable(
               validMoves,
@@ -666,7 +671,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         }
       }
     },
-    [currentTurn, engine, isMyTurn, match, moves.length, role, toast],
+    [currentTurn, isMyTurn, match, moves.length, role, toast, updateEngineState],
   );
 
   // Game completion detection
@@ -682,7 +687,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       return;
     }
 
-    const [p0Score, p1Score] = engine.getGameEnded();
+    const [p0Score, p1Score] = engineRef.current.getGameEnded();
     if (p0Score === 0 && p1Score === 0) {
       return;
     }
@@ -696,7 +701,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     // DON'T call onGameComplete here! The server already updates match status
     // when it processes the winning move in submit-move edge function.
     // Calling it from client causes 409 Conflict race condition.
-  }, [engine, match]);
+  }, [engineVersion, match, onGameComplete]);
 
   // Clock timeout detection
   useEffect(() => {
@@ -739,7 +744,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     creatorClockMs: clock.creatorMs,
     opponentClockMs: clock.opponentMs,
     formatClock,
-    gameEnded: engine.getGameEnded(),
+    gameEnded: engineRef.current.getGameEnded(),
     buttons: { loading: false, canUndo: false, canRedo: false, status: '', editMode: 0, setupMode: false, setupTurn: 0 },
     undo,
     redo,

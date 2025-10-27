@@ -73,47 +73,57 @@ export function useLocalSantorini() {
   const toast = useToast();
   
   // Game state
-  const [engine, setEngine] = useState<SantoriniEngine>(() => SantoriniEngine.createInitial().engine);
-  const [board, setBoard] = useState<BoardCell[][]>(() => engineToBoard(engine.snapshot));
+  // NOTE: engineRef is the SINGLE SOURCE OF TRUTH for game state
+  const engineRef = useRef<SantoriniEngine>(SantoriniEngine.createInitial().engine);
+  const [engineVersion, setEngineVersion] = useState(0);
+  const [board, setBoard] = useState<BoardCell[][]>(() => engineToBoard(engineRef.current.snapshot));
   const moveSelectorRef = useRef<TypeScriptMoveSelector>(new TypeScriptMoveSelector());
   const [selectable, setSelectable] = useState<boolean[][]>(() =>
     computeSelectable(
-      engine.getValidMoves(),
-      engine.snapshot,
+      engineRef.current.getValidMoves(),
+      engineRef.current.snapshot,
       moveSelectorRef.current,
-      engine.getPlacementContext(),
+      engineRef.current.getPlacementContext(),
     ),
   );
   const [history, setHistory] = useState<Array<{ action: number; description: string }>>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const processingMoveRef = useRef<boolean>(false);
   
-  const nextPlayer = useMemo(() => engine.player, [engine]);
+  // Helper function to atomically update engine and derived state
+  const updateEngineState = useCallback((newEngine: SantoriniEngine) => {
+    engineRef.current = newEngine;
+    const newBoard = engineToBoard(newEngine.snapshot);
+    const newSelectable = computeSelectable(
+      newEngine.getValidMoves(),
+      newEngine.snapshot,
+      moveSelectorRef.current,
+      newEngine.getPlacementContext()
+    );
+    
+    // Batch all state updates together
+    setBoard(newBoard);
+    setSelectable(newSelectable);
+    setEngineVersion(v => v + 1);
+  }, []);
+  
+  const nextPlayer = useMemo(() => engineRef.current.player, [engineVersion]);
   
   const gameEnded = useMemo(() => {
-    const [p0Score, p1Score] = engine.getGameEnded();
+    const [p0Score, p1Score] = engineRef.current.getGameEnded();
     return p0Score !== 0 || p1Score !== 0;
-  }, [engine]);
+  }, [engineVersion]);
   
   const canUndo = historyIndex >= 0;
   const canRedo = historyIndex < history.length - 1;
 
   const initialize = useCallback(async () => {
     const { engine: newEngine } = SantoriniEngine.createInitial();
-    setEngine(newEngine);
-    setBoard(engineToBoard(newEngine.snapshot));
     moveSelectorRef.current.reset();
-    setSelectable(
-      computeSelectable(
-        newEngine.getValidMoves(),
-        newEngine.snapshot,
-        moveSelectorRef.current,
-        newEngine.getPlacementContext(),
-      ),
-    );
+    updateEngineState(newEngine);
     setHistory([]);
     setHistoryIndex(-1);
-  }, []);
+  }, [updateEngineState]);
 
   const reset = useCallback(async () => {
     await initialize();
@@ -132,6 +142,8 @@ export function useLocalSantorini() {
         return;
       }
 
+      // ALWAYS use engineRef.current for latest state
+      const engine = engineRef.current;
       const validMoves = engine.getValidMoves();
       const placement = engine.getPlacementContext();
 
@@ -147,18 +159,10 @@ export function useLocalSantorini() {
         try {
           const result = engine.applyMove(placementAction);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
-
-          setEngine(newEngine);
-          setBoard(engineToBoard(newEngine.snapshot));
           moveSelectorRef.current.reset();
-          setSelectable(
-            computeSelectable(
-              newEngine.getValidMoves(),
-              newEngine.snapshot,
-              moveSelectorRef.current,
-              newEngine.getPlacementContext(),
-            ),
-          );
+
+          // Atomically update state
+          updateEngineState(newEngine);
 
           // Update history
           const newHistory = history.slice(0, historyIndex + 1);
@@ -199,18 +203,10 @@ export function useLocalSantorini() {
         try {
           const result = engine.applyMove(action);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
-          
-          setEngine(newEngine);
-          setBoard(engineToBoard(newEngine.snapshot));
           moveSelector.reset();
-          setSelectable(
-            computeSelectable(
-              newEngine.getValidMoves(),
-              newEngine.snapshot,
-              moveSelector,
-              newEngine.getPlacementContext(),
-            ),
-          );
+          
+          // Atomically update state
+          updateEngineState(newEngine);
           
           // Update history
           const newHistory = history.slice(0, historyIndex + 1);
@@ -232,7 +228,7 @@ export function useLocalSantorini() {
         }
       }
     },
-    [engine, gameEnded, history, historyIndex, toast],
+    [gameEnded, history, historyIndex, toast, updateEngineState],
   );
 
   const undo = useCallback(async () => {
@@ -249,23 +245,14 @@ export function useLocalSantorini() {
         currentEngine = SantoriniEngine.fromSnapshot(result.snapshot);
       }
       
-      setEngine(currentEngine);
-      setBoard(engineToBoard(currentEngine.snapshot));
       moveSelectorRef.current.reset();
-      setSelectable(
-        computeSelectable(
-          currentEngine.getValidMoves(),
-          currentEngine.snapshot,
-          moveSelectorRef.current,
-          currentEngine.getPlacementContext(),
-        ),
-      );
+      updateEngineState(currentEngine);
       setHistoryIndex(newIndex);
     } catch (error) {
       console.error('Undo failed:', error);
       toast({ title: 'Undo failed', status: 'error' });
     }
-  }, [canUndo, historyIndex, history, toast]);
+  }, [canUndo, historyIndex, history, toast, updateEngineState]);
 
   const redo = useCallback(async () => {
     if (!canRedo) return;
@@ -274,26 +261,17 @@ export function useLocalSantorini() {
       const newIndex = historyIndex + 1;
       const move = history[newIndex];
       
-      const result = engine.applyMove(move.action);
+      const result = engineRef.current.applyMove(move.action);
       const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
       
-      setEngine(newEngine);
-      setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
-      setSelectable(
-        computeSelectable(
-          newEngine.getValidMoves(),
-          newEngine.snapshot,
-          moveSelectorRef.current,
-          newEngine.getPlacementContext(),
-        ),
-      );
+      updateEngineState(newEngine);
       setHistoryIndex(newIndex);
     } catch (error) {
       console.error('Redo failed:', error);
       toast({ title: 'Redo failed', status: 'error' });
     }
-  }, [canRedo, historyIndex, history, engine, toast]);
+  }, [canRedo, historyIndex, history, toast, updateEngineState]);
 
   // Stub functions for compatibility
   const onCellHover = useCallback(async () => {}, []);
