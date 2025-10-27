@@ -156,6 +156,7 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
   const gameRef = useRef<Santorini>();
   const selectorRef = useRef<MoveSelector>();
   const aiPromiseRef = useRef<Promise<void>>(Promise.resolve());
+  const guidedSetupPlacementsRef = useRef<Array<[number, number]>>([]);
 
   const persistPracticeState = useCallback(async () => {
     if (typeof window === 'undefined') {
@@ -577,34 +578,61 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     if (!game || !selector) return;
 
     try {
-      // Exit edit mode and normalize worker IDs
       selector.setEditMode(0);
 
-      // Tell backend to finalize setup and refresh state triplet
-      if (game.py && game.py.end_setup) {
-        const data_tuple = game.py.end_setup().toJs({ create_proxies: false });
-        if (Array.isArray(data_tuple) && data_tuple.length >= 3) {
-          [game.nextPlayer, game.gameEnded, game.validMoves] = data_tuple;
-          setNextPlayer(typeof game.nextPlayer === 'number' ? game.nextPlayer : 0);
+      const py = game.py;
+      let dataTuple: unknown = null;
+      const placements = guidedSetupPlacementsRef.current;
+      const hasRecordedPlacements =
+        placements.length >= 4 &&
+        placements
+          .slice(0, 4)
+          .every((coords) => Array.isArray(coords) && coords.length === 2);
+
+      if (py) {
+        if (hasRecordedPlacements && typeof py.force_guided_setup === 'function') {
+          const [green1, green2, red1, red2] = placements.slice(0, 4) as Array<[number, number]>;
+          const resultProxy = py.force_guided_setup(green1, green2, red1, red2);
+          if (resultProxy && typeof resultProxy.toJs === 'function') {
+            dataTuple = resultProxy.toJs({ create_proxies: false });
+          }
+        } else if (typeof py.end_setup === 'function') {
+          const resultProxy = py.end_setup();
+          if (resultProxy && typeof resultProxy.toJs === 'function') {
+            dataTuple = resultProxy.toJs({ create_proxies: false });
+          }
         }
       }
 
-      // Reset selector so normal move selection can resume
+      if (Array.isArray(dataTuple) && dataTuple.length >= 3) {
+        [game.nextPlayer, game.gameEnded, game.validMoves] = dataTuple;
+        setNextPlayer(typeof game.nextPlayer === 'number' ? game.nextPlayer : 0);
+      } else if (hasRecordedPlacements) {
+        throw new Error('Unable to finalize guided setup after placing workers');
+      }
+
       selector.resetAndStart();
 
-      // Refresh UI state from the finalized setup
+      if (hasRecordedPlacements) {
+        guidedSetupPlacementsRef.current = [];
+      }
+
       await syncUi();
       await refreshEvaluation();
 
-      // Exit setup mode and show completion message
-      setButtons(prev => ({
+      setButtons((prev) => ({
         ...prev,
         setupMode: false,
         setupTurn: 0,
-        status: 'Setup complete. Ready to play!'
+        status: 'Setup complete. Ready to play!',
       }));
     } catch (error) {
       console.error('Failed to finalize setup:', error);
+      setButtons((prev) => ({
+        ...prev,
+        setupMode: true,
+        status: 'Setup incomplete. Please place the workers again.',
+      }));
     }
   }, [refreshEvaluation, syncUi]);
 
@@ -612,16 +640,28 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     const game = gameRef.current;
     if (!game || !game.py) return;
 
+    const setupTurn = buttons.setupTurn;
+    if (setupTurn >= 4) {
+      return;
+    }
+
     const current = game.py._read_worker(y, x);
     if (current !== 0) {
       // Only allow placing on empty cells during setup
       return;
     }
-    
-    const setupTurn = buttons.setupTurn;
-    
-    // Place workers using editCell mode 2, then reassign IDs with mode 0
-    game.editCell(y, x, 2); // Place worker (0 -> +1 for green, or 0 -> +1 -> -1 for red)
+
+    // Place workers with proper cycling: green workers first (turns 0,1), then red workers (turns 2,3)
+    if (setupTurn < 2) {
+      // Green workers: just place with +1
+      game.editCell(y, x, 2); // 0 -> +1
+    } else {
+      // Red workers: cycle to -1
+      game.editCell(y, x, 2); // 0 -> +1
+      game.editCell(y, x, 2); // +1 -> -1
+    }
+
+    guidedSetupPlacementsRef.current[setupTurn] = [y, x];
     
     const newSetupTurn = setupTurn + 1;
     const steps = ['Place Green piece 1', 'Place Green piece 2', 'Place Red piece 1', 'Place Red piece 2'];
@@ -637,12 +677,8 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     await persistPracticeState();
 
     if (newSetupTurn >= 4) {
-      // Reassign worker IDs to ensure we have [1, 2, -1, -2]
-      game.editCell(0, 0, 0); // This reassigns all worker IDs properly
-      
       setButtons((prev) => ({
         ...prev,
-        setupMode: false,
         status: 'Finalizing setup...'
       }));
       try {
@@ -834,6 +870,8 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     const game = gameRef.current;
     const selector = selectorRef.current;
     if (!game || !selector) return;
+
+    guidedSetupPlacementsRef.current = [];
 
     // Enter setup mode
     setButtons(prev => ({
