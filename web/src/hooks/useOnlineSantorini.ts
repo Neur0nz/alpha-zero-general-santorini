@@ -52,6 +52,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     appliedMoveCount: 0
   });
   const pendingLocalMoveRef = useRef<{ expectedHistoryLength: number; expectedMoveIndex: number } | null>(null);
+  const gameCompletedRef = useRef<string | null>(null); // Track which match has been marked complete
   
   const resetMatch = useCallback(async () => {
     if (!match) {
@@ -434,12 +435,25 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   // Game completion detection effect
   useEffect(() => {
     if (!match || !onGameComplete || match.status !== 'in_progress') {
+      // Reset completion tracker when match changes or is no longer in progress
+      if (!match || match.status !== 'in_progress') {
+        gameCompletedRef.current = null;
+      }
+      return;
+    }
+    
+    // Prevent duplicate completion calls for the same match
+    if (gameCompletedRef.current === match.id) {
       return;
     }
     
     // Check if game has ended based on game engine state
     const [p0Score, p1Score] = base.gameEnded;
     if (p0Score !== 0 || p1Score !== 0) {
+      // Mark this match as completed BEFORE calling onGameComplete
+      // This prevents the effect from firing again before the DB update propagates
+      gameCompletedRef.current = match.id;
+      
       // Game ended - determine winner
       let winnerId: string | null = null;
       if (p0Score > 0) {
@@ -459,14 +473,25 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       return;
     }
     
+    // Prevent duplicate timeout calls
+    if (gameCompletedRef.current === match.id) {
+      return;
+    }
+    
     // Check if either clock has run out (with small buffer to avoid floating point issues)
     if (clock.creatorMs <= 100 && currentTurn === 'creator') {
+      // Mark as completed before calling
+      gameCompletedRef.current = match.id;
+      
       // Creator ran out of time, opponent wins
       console.log('useOnlineSantorini: Creator ran out of time, opponent wins');
       if (match.opponent_id) {
         onGameComplete(match.opponent_id);
       }
     } else if (clock.opponentMs <= 100 && currentTurn === 'opponent') {
+      // Mark as completed before calling
+      gameCompletedRef.current = match.id;
+      
       // Opponent ran out of time, creator wins
       console.log('useOnlineSantorini: Opponent ran out of time, creator wins');
       onGameComplete(match.creator_id);
