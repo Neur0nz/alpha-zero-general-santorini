@@ -104,30 +104,28 @@ serve(async (req) => {
   }
   console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Auth verified`);
 
-  const { data: profile, error: profileError } = await supabase
-    .from('players')
-    .select('id')
-    .eq('auth_user_id', authData.user.id)
+  // OPTIMIZATION: Combined query - profile + match + last move in ONE RPC call!
+  const { data: moveData, error: moveDataError } = await supabase
+    .rpc('get_move_submission_data', {
+      p_auth_user_id: authData.user.id,
+      p_match_id: payload.matchId,
+    })
     .maybeSingle();
+  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Combined data loaded (profile + match + last move)`);
 
-  if (profileError || !profile) {
-    console.error('Player profile missing for auth user', profileError);
-    return jsonResponse({ error: 'Player profile not found' }, { status: 403 });
-  }
-  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Profile loaded`);
-
-  const { data: match, error: matchError } = await supabase
-    .from('matches')
-    .select('id, creator_id, opponent_id, status, winner_id, initial_state')
-    .eq('id', payload.matchId)
-    .maybeSingle();
-  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Match loaded`);
-
-  if (matchError || !match) {
-    console.error('Unable to load match', matchError);
-    return jsonResponse({ error: 'Match not found' }, { status: 404 });
+  if (moveDataError || !moveData) {
+    console.error('Failed to load move submission data', moveDataError);
+    return jsonResponse({ error: 'Unable to load match data' }, { status: 404 });
   }
 
+  const { player_id: playerId, player_role: role, match_data: matchData, last_move_data: lastMoveData } = moveData;
+
+  if (!role) {
+    return jsonResponse({ error: 'You are not a participant in this match' }, { status: 403 });
+  }
+
+  // Parse match data
+  const match = matchData as any;
   if (!match.opponent_id) {
     return jsonResponse({ error: 'Match has not been joined yet' }, { status: 409 });
   }
@@ -136,32 +134,13 @@ serve(async (req) => {
     return jsonResponse({ error: 'Match can no longer accept moves' }, { status: 409 });
   }
 
-  const playerId = profile.id as string;
-  const isCreator = playerId === match.creator_id;
-  const isOpponent = playerId === match.opponent_id;
-  if (!isCreator && !isOpponent) {
-    return jsonResponse({ error: 'You are not a participant in this match' }, { status: 403 });
-  }
-
   if (!match.initial_state) {
     console.error('Match is missing initial state snapshot');
     return jsonResponse({ error: 'Match state is unavailable' }, { status: 500 });
   }
 
-  // OPTIMIZATION: Load from LAST move's snapshot instead of replaying all history!
-  const { data: lastMove, error: lastMoveError } = await supabase
-    .from('match_moves')
-    .select('move_index, state_snapshot')
-    .eq('match_id', match.id)
-    .order('move_index', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Last move snapshot loaded`);
-
-  if (lastMoveError) {
-    console.error('Failed to load last move', lastMoveError);
-    return jsonResponse({ error: 'Unable to load match state' }, { status: 500 });
-  }
+  // Parse last move (if any)
+  const lastMove = lastMoveData as any;
 
   let engine: SantoriniEngine;
   let expectedMoveIndex = 0;
@@ -197,10 +176,10 @@ serve(async (req) => {
   }
 
   const actingPlayerIndex = engine.player;
-  if (actingPlayerIndex === 0 && !isCreator) {
+  if (actingPlayerIndex === 0 && role !== 'creator') {
     return jsonResponse({ error: "It is the creator's turn" }, { status: 403 });
   }
-  if (actingPlayerIndex === 1 && !isOpponent) {
+  if (actingPlayerIndex === 1 && role !== 'opponent') {
     return jsonResponse({ error: "It is the opponent's turn" }, { status: 403 });
   }
 
