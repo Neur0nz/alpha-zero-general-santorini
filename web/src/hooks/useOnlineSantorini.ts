@@ -171,23 +171,30 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       return;
     }
 
-    const latestMove = moves.length > 0 ? moves[moves.length - 1] : null;
+    let snapshotSource: MatchMoveRecord<MatchAction> | null = null;
+    for (let index = moves.length - 1; index >= 0; index -= 1) {
+      const candidate = moves[index];
+      if (candidate?.state_snapshot) {
+        snapshotSource = candidate;
+        break;
+      }
+    }
     const snapshot: SantoriniStateSnapshot | null =
-      latestMove?.state_snapshot ?? match.initial_state ?? null;
+      snapshotSource?.state_snapshot ?? match.initial_state ?? null;
     if (!snapshot) {
       return;
     }
 
-    const latestIndex = latestMove ? latestMove.move_index : -1;
     const lastSynced = lastSyncedRef.current;
-    if (lastSynced.matchId === match.id && lastSynced.moveIndex === latestIndex) {
+    const targetIndex = snapshotSource ? snapshotSource.move_index : -1;
+    if (lastSynced.matchId === match.id && lastSynced.moveIndex === targetIndex) {
       return;
     }
 
     (async () => {
       try {
         await base.importState(snapshot);
-        lastSyncedRef.current = { matchId: match.id, moveIndex: latestIndex };
+        lastSyncedRef.current = { matchId: match.id, moveIndex: targetIndex };
       } catch (error) {
         console.error('Failed to synchronize board with server snapshot', error);
       }

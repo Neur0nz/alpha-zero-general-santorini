@@ -312,10 +312,13 @@ export class SantoriniEngine {
     const placement = this.getNextPlacement();
     const actions = Array(ACTION_SIZE).fill(false) as boolean[];
     if (placement) {
-      for (let y = 0; y < BOARD_SIZE; y += 1) {
-        for (let x = 0; x < BOARD_SIZE; x += 1) {
-          if (this.workers[y][x] === 0) {
-            actions[y * BOARD_SIZE + x] = true;
+      // Only allow the correct player to place their worker
+      if (placement.player === player) {
+        for (let y = 0; y < BOARD_SIZE; y += 1) {
+          for (let x = 0; x < BOARD_SIZE; x += 1) {
+            if (this.workers[y][x] === 0) {
+              actions[y * BOARD_SIZE + x] = true;
+            }
           }
         }
       }

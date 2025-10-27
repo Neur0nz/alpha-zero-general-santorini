@@ -14,7 +14,7 @@ from SantoriniConstants import (
 # 0: 2x2 workers set at an arbitrary position before 1st move
 # 1: 2x2 workers set at a random position before 1st move
 # 2: No worker pre-set, each player has to chose their position
-INIT_METHOD = 1
+INIT_METHOD = 2
 
 
 DIRECTIONS = [
@@ -75,10 +75,13 @@ class Board:
 
     def valid_moves(self, player):
         actions = np.zeros(action_size(), dtype=np.bool_)
-        if INIT_METHOD == 2 and np.abs(self.workers).sum() != 6:
-            for index, value in np.ndenumerate(self.workers):
-                actions[5 * index[0] + index[1]] = value == 0
-            return actions
+        placement = None
+        if INIT_METHOD == 2:
+            placement = self._next_placement()
+            if placement is not None:
+                for index, value in np.ndenumerate(self.workers):
+                    actions[5 * index[0] + index[1]] = value == 0
+                return actions
 
         for worker in range(2):
             worker_id = (worker + 1) * (1 if player == 0 else -1)
@@ -101,18 +104,26 @@ class Board:
         return actions
 
     def make_move(self, move, player, deterministic):
-        if INIT_METHOD == 2 and np.abs(self.workers).sum() != 6:
-            sum_workers = np.abs(self.workers).sum()
-            if sum_workers in (0, 1):
-                worker_to_place = 1 if player == 0 else -1
-            elif sum_workers in (2, 4):
-                worker_to_place = 2 if player == 0 else -2
+        placement = None
+        if INIT_METHOD == 2:
+            placement = self._next_placement()
+            if placement is not None:
+                placement_player, worker_to_place = placement
+                if placement_player != player:
+                    raise ValueError('Unexpected player attempting to place a worker')
+                y, x = divmod(move, 5)
+                if not (0 <= y < 5 and 0 <= x < 5):
+                    raise ValueError('Placement move is out of bounds')
+                if self.workers[y, x] != 0:
+                    raise ValueError('Cannot place a worker on an occupied tile')
+                self.workers[y, x] = worker_to_place
+                if worker_to_place in (1, -1):
+                    next_player = placement_player
+                else:
+                    next_player = 1 - placement_player
             else:
-                raise ValueError('Unexpected worker count while placing')
-            y, x = divmod(move, 5)
-            self.workers[y, x] = worker_to_place
-            next_player = player if worker_to_place in (1, -1) else 1 - player
-        else:
+                placement = None
+        if INIT_METHOD != 2 or placement is None:
             worker, power, move_direction, build_direction = _decode_action(move)
             if power != NO_GOD:
                 raise ValueError('God powers are disabled in this build')
@@ -134,7 +145,7 @@ class Board:
         return next_player
 
     def check_end_game(self, next_player):
-        if INIT_METHOD == 2 and np.abs(self.workers).sum() != 6:
+        if INIT_METHOD == 2 and self._next_placement() is not None:
             return np.array([0, 0], dtype=np.float32)
         if self.get_score(0) == 3:
             return np.array([1, -1], dtype=np.float32)
@@ -182,7 +193,7 @@ class Board:
         symmetries.append((self.state.copy(), flipped_policy, flipped_actions))
         self.state[:, :, :] = state_backup.copy()
 
-        if INIT_METHOD == 2 and np.abs(self.workers).sum() != 6:
+        if INIT_METHOD == 2 and self._next_placement() is not None:
             return symmetries
 
         def _swap_workers(array, half_size):
@@ -214,6 +225,19 @@ class Board:
         self.workers = self.state[:, :, 0]
         self.levels = self.state[:, :, 1]
         self.meta = self.state[:, :, 2]
+
+    def _next_placement(self):
+        if INIT_METHOD != 2:
+            return None
+        if self._get_worker_position(1) == (-1, -1):
+            return (0, 1)
+        if self._get_worker_position(2) == (-1, -1):
+            return (0, 2)
+        if self._get_worker_position(-1) == (-1, -1):
+            return (1, -1)
+        if self._get_worker_position(-2) == (-1, -1):
+            return (1, -2)
+        return None
 
     def _get_worker_position(self, searched_worker):
         locations = np.argwhere(self.workers == searched_worker)
