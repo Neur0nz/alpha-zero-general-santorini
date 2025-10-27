@@ -137,7 +137,8 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       setEngine(newEngine);
       setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
-      setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current));
+      const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+      setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current, myTurn));
       
       lastSyncedStateRef.current = { 
         matchId: match.id, 
@@ -300,6 +301,10 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     if (!match) return null;
     return engine.player === 0 ? 'creator' : 'opponent';
   }, [engine, match]);
+  
+  const isMyTurn = useMemo(() => {
+    return role !== null && currentTurn === role;
+  }, [role, currentTurn]);
 
   useEffect(() => {
     if (timerRef.current) {
