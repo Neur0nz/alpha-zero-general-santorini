@@ -230,7 +230,9 @@ function App() {
                 </SantoriniProvider>
               </TabPanel>
               <TabPanel px={0}>
-                <AnalyzeWorkspace />
+                <SantoriniProvider evaluationEnabled={true}>
+                  <AnalyzeWorkspace auth={auth} />
+                </SantoriniProvider>
               </TabPanel>
               <TabPanel px={0}>
                 <ProfileWorkspace auth={auth} />

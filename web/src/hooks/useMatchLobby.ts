@@ -123,14 +123,43 @@ function selectPreferredMatch(matches: LobbyMatch[]): LobbyMatch | null {
   return matches.find((match) => match.status === 'in_progress') ?? matches[0] ?? null;
 }
 
+const ACTIVE_MATCH_STORAGE_KEY = 'santorini:activeMatchId';
+
 export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLobbyOptions = {}) {
-  const [state, setState] = useState<UseMatchLobbyState>(INITIAL_STATE);
+  const [state, setState] = useState<UseMatchLobbyState>(() => {
+    // Restore active match ID from localStorage
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = window.localStorage.getItem(ACTIVE_MATCH_STORAGE_KEY);
+        if (stored) {
+          return { ...INITIAL_STATE, activeMatchId: stored };
+        }
+      } catch (error) {
+        console.error('Failed to restore active match from localStorage', error);
+      }
+    }
+    return INITIAL_STATE;
+  });
   const [onlineEnabled, setOnlineEnabled] = useState<boolean>(options.autoConnectOnline ?? false);
   const channelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
   const playersRef = useRef<Record<string, PlayerProfile>>({});
   const [playersVersion, setPlayersVersion] = useState(0);
 
   const matchId = state.activeMatchId;
+  
+  // Persist active match ID to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (state.activeMatchId) {
+        window.localStorage.setItem(ACTIVE_MATCH_STORAGE_KEY, state.activeMatchId);
+      } else {
+        window.localStorage.removeItem(ACTIVE_MATCH_STORAGE_KEY);
+      }
+    } catch (error) {
+      console.error('Failed to persist active match to localStorage', error);
+    }
+  }, [state.activeMatchId]);
 
   const mergePlayers = useCallback((records: PlayerProfile[]): void => {
     if (!records.length) return;
