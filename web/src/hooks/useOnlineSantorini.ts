@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SantoriniEngine, type SantoriniSnapshot } from '@/lib/santoriniEngine';
+import { SantoriniEngine, type SantoriniSnapshot, type PlacementContext } from '@/lib/santoriniEngine';
 import { TypeScriptMoveSelector } from '@/lib/moveSelectorTS';
 import { renderCellSvg } from '@game/svg';
 import type { LobbyMatch } from './useMatchLobby';
@@ -70,21 +70,22 @@ function engineToBoard(snapshot: SantoriniSnapshot): BoardCell[][] {
 }
 
 function computeSelectable(
-  validMoves: boolean[], 
+  validMoves: boolean[],
   snapshot: SantoriniSnapshot,
   moveSelector: TypeScriptMoveSelector | null,
-  isMyTurn: boolean
+  isMyTurn: boolean,
+  placement: PlacementContext | null,
 ): boolean[][] {
   const selectable: boolean[][] = Array.from({ length: 5 }, () => Array(5).fill(false));
-  
+
   // If it's not my turn, don't highlight anything!
   if (!isMyTurn) {
     return selectable;
   }
-  
-  // During placement phase (first 25 actions are placements)
-  const hasPlacementMoves = validMoves.slice(0, 25).some(v => v);
-  if (hasPlacementMoves) {
+
+  // During placement phase highlight available empty squares
+  const isPlacementPhase = placement && placement.player === snapshot.player;
+  if (isPlacementPhase) {
     for (let i = 0; i < 25; i++) {
       if (validMoves[i]) {
         const y = Math.floor(i / 5);
@@ -112,7 +113,15 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const [engine, setEngine] = useState<SantoriniEngine>(() => SantoriniEngine.createInitial().engine);
   const [board, setBoard] = useState<BoardCell[][]>(() => engineToBoard(engine.snapshot));
   const moveSelectorRef = useRef<TypeScriptMoveSelector>(new TypeScriptMoveSelector());
-  const [selectable, setSelectable] = useState<boolean[][]>(() => computeSelectable(engine.getValidMoves(), engine.snapshot, moveSelectorRef.current, false));
+  const [selectable, setSelectable] = useState<boolean[][]>(() =>
+    computeSelectable(
+      engine.getValidMoves(),
+      engine.snapshot,
+      moveSelectorRef.current,
+      false,
+      engine.getPlacementContext(),
+    ),
+  );
   
   // Clock state
   const [clock, setClock] = useState<ClockState>(() => deriveInitialClocks(match));
@@ -142,7 +151,15 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
       const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
-      setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current, myTurn));
+      setSelectable(
+        computeSelectable(
+          newEngine.getValidMoves(),
+          newEngine.snapshot,
+          moveSelectorRef.current,
+          myTurn,
+          newEngine.getPlacementContext(),
+        ),
+      );
       
       lastSyncedStateRef.current = { 
         matchId: match.id, 
@@ -269,7 +286,15 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
       const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
-      setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current, myTurn));
+      setSelectable(
+        computeSelectable(
+          newEngine.getValidMoves(),
+          newEngine.snapshot,
+          moveSelectorRef.current,
+          myTurn,
+          newEngine.getPlacementContext(),
+        ),
+      );
       
       // Update clock states from all moves
       setClock(deriveInitialClocks(match));
@@ -464,16 +489,15 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
 
       // Find valid move for this cell click
       const validMoves = engine.getValidMoves();
-      
-      // Check if we're in placement phase (first 25 valid moves are placements)
-      const hasPlacementMoves = validMoves.slice(0, 25).some(v => v);
+      const placement = engine.getPlacementContext();
+      const isPlacementPhase = placement && placement.player === engine.player;
       
       console.log('🎯 onCellClick Debug:', {
         y, x,
         role,
         enginePlayer: engine.player,
         currentTurn,
-        hasPlacementMoves,
+        isPlacementPhase,
         moveSelector: {
           stage: moveSelectorRef.current.stage,
           workerIndex: moveSelectorRef.current.workerIndex,
@@ -488,7 +512,11 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       
       // During placement phase ONLY - apply placement moves
       const placementAction = y * 5 + x;
-      if (hasPlacementMoves && placementAction < 25 && validMoves[placementAction]) {
+      if (isPlacementPhase) {
+        if (placementAction >= validMoves.length || !validMoves[placementAction]) {
+          toast({ title: 'Invalid placement', status: 'warning' });
+          return;
+        }
         try {
           const result = engine.applyMove(placementAction);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
@@ -496,7 +524,15 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           setBoard(engineToBoard(newEngine.snapshot));
           moveSelectorRef.current.reset();
           const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
-          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current, myTurn));
+          setSelectable(
+            computeSelectable(
+              newEngine.getValidMoves(),
+              newEngine.snapshot,
+              moveSelectorRef.current,
+              myTurn,
+              newEngine.getPlacementContext(),
+            ),
+          );
           
           // Calculate the correct move index
           const pendingCount = pendingLocalMoveRef.current ? 1 : 0;
@@ -532,7 +568,15 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       }
       
       // Update highlighting for next stage
-      setSelectable(computeSelectable(validMoves, engine.snapshot, moveSelector, isMyTurn));
+      setSelectable(
+        computeSelectable(
+          validMoves,
+          engine.snapshot,
+          moveSelector,
+          isMyTurn,
+          engine.getPlacementContext(),
+        ),
+      );
       
       // Check if move is complete
       const action = moveSelector.getAction();
@@ -545,7 +589,15 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           setBoard(engineToBoard(newEngine.snapshot));
           moveSelector.reset();
           const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
-          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelector, myTurn));
+          setSelectable(
+            computeSelectable(
+              newEngine.getValidMoves(),
+              newEngine.snapshot,
+              moveSelector,
+              myTurn,
+              newEngine.getPlacementContext(),
+            ),
+          );
           
           // Calculate move index and submit (server will compute state)
           const pendingCount = pendingLocalMoveRef.current ? 1 : 0;
@@ -560,7 +612,15 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           console.error('useOnlineSantorini: Move failed', error);
           toast({ title: 'Move failed', status: 'error' });
           moveSelector.reset();
-          setSelectable(computeSelectable(validMoves, engine.snapshot, moveSelector, isMyTurn));
+          setSelectable(
+            computeSelectable(
+              validMoves,
+              engine.snapshot,
+              moveSelector,
+              isMyTurn,
+              engine.getPlacementContext(),
+            ),
+          );
         }
       }
     },
