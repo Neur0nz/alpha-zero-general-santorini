@@ -390,18 +390,43 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         return;
       }
       if (pendingLocalMoveRef.current) {
-        toast({ title: 'Syncing previous move', status: 'info' });
+        toast({ title: 'Please wait - syncing previous move', status: 'info' });
         return;
       }
       if (currentTurn !== role) {
         toast({ title: "It's not your turn", status: 'warning' });
         return;
       }
+      
+      // Don't allow moves while state is still syncing
+      const lastSynced = lastSyncedStateRef.current;
+      if (lastSynced.matchId !== match.id || lastSynced.appliedMoveCount !== moves.length) {
+        toast({ title: 'Please wait - syncing game state', status: 'info' });
+        return;
+      }
 
       // Calculate the correct move index based on existing moves
       const nextMoveIndex = moves.length;
-      pendingLocalMoveRef.current = { expectedHistoryLength: base.history.length, expectedMoveIndex: nextMoveIndex };
-      await base.onCellClick(y, x);
+      const historyLengthBeforeMove = base.history.length;
+      
+      // Set pending move ref BEFORE making the move
+      pendingLocalMoveRef.current = { 
+        expectedHistoryLength: historyLengthBeforeMove, 
+        expectedMoveIndex: nextMoveIndex 
+      };
+      
+      try {
+        await base.onCellClick(y, x);
+        
+        // If the move didn't add to history (e.g., invalid move), clear the pending ref
+        if (base.history.length === historyLengthBeforeMove) {
+          pendingLocalMoveRef.current = null;
+        }
+      } catch (error) {
+        // If move failed, clear the pending ref
+        pendingLocalMoveRef.current = null;
+        console.error('useOnlineSantorini: Move failed', error);
+      }
     },
     [base, currentTurn, match, moves.length, role, toast],
   );
