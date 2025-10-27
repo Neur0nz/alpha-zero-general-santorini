@@ -510,7 +510,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     fetchMoves();
 
     const channel = client
-      .channel(`public:match:${matchId}`)
+      .channel(`match-${matchId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` },
@@ -536,6 +536,12 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         'postgres_changes',
         { event: '*', schema: 'public', table: 'match_moves', filter: `match_id=eq.${matchId}` },
         (payload: RealtimePostgresChangesPayload<MatchMoveRecord>) => {
+          console.log('useMatchLobby: Real-time move received', { 
+            eventType: payload.eventType, 
+            matchId, 
+            moveId: payload.new?.id,
+            moveIndex: payload.new?.move_index 
+          });
           setState((prev) => {
             if (prev.activeMatchId !== matchId) {
               return prev;
@@ -548,15 +554,27 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
               };
               const exists = prev.moves.some((move) => move.id === moveRecord.id);
               if (exists) {
+                console.log('useMatchLobby: Move already exists, skipping');
                 return prev;
               }
+              console.log('useMatchLobby: Adding new move', { 
+                moveId: moveRecord.id, 
+                moveIndex: moveRecord.move_index,
+                totalMoves: prev.moves.length + 1 
+              });
               return { ...prev, moves: [...prev.moves, moveRecord] };
             }
             return prev;
           });
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('useMatchLobby: Real-time subscription status', { 
+          matchId, 
+          status,
+          channel: channel.topic 
+        });
+      });
 
     channelRef.current = channel;
 
@@ -857,6 +875,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           clock_initial_seconds: state.activeMatch.clock_initial_seconds,
           clock_increment_seconds: state.activeMatch.clock_increment_seconds,
           rematch_parent_id: state.activeMatch.id,
+          initial_state: state.activeMatch.initial_state, // Include the initial state from the parent match
         })
         .select(MATCH_WITH_PROFILES)
         .single();

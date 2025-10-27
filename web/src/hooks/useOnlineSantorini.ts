@@ -178,6 +178,12 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       return;
     }
 
+    console.log('useOnlineSantorini: Processing moves', { 
+      matchId: match.id, 
+      movesCount: moves.length, 
+      moves: moves.map(m => ({ index: m.move_index, action: m.action }))
+    });
+
     let snapshotSource: MatchMoveRecord<MatchAction> | null = null;
     for (let index = moves.length - 1; index >= 0; index -= 1) {
       const candidate = moves[index];
@@ -189,19 +195,28 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     const snapshot: SantoriniStateSnapshot | null =
       snapshotSource?.state_snapshot ?? match.initial_state ?? null;
     if (!snapshot) {
+      console.log('useOnlineSantorini: No snapshot available');
       return;
     }
 
     const lastSynced = lastSyncedRef.current;
     const targetIndex = snapshotSource ? snapshotSource.move_index : -1;
+    console.log('useOnlineSantorini: Sync check', { 
+      lastSynced, 
+      targetIndex, 
+      shouldSync: !(lastSynced.matchId === match.id && lastSynced.moveIndex === targetIndex)
+    });
+    
     if (lastSynced.matchId === match.id && lastSynced.moveIndex === targetIndex) {
       return;
     }
 
     (async () => {
       try {
+        console.log('useOnlineSantorini: Importing state', { targetIndex, snapshotSource: !!snapshotSource });
         await base.importState(snapshot);
         lastSyncedRef.current = { matchId: match.id, moveIndex: targetIndex };
+        console.log('useOnlineSantorini: State imported successfully');
       } catch (error) {
         console.error('Failed to synchronize board with server snapshot', error);
       }
@@ -260,7 +275,23 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       return;
     }
 
-    const nextIndex = pending.expectedMoveIndex;
+    // Check if this move has already been received via real-time
+    const expectedMoveIndex = pending.expectedMoveIndex;
+    const hasReceivedMove = moves.length > expectedMoveIndex;
+    
+    if (hasReceivedMove) {
+      console.log('useOnlineSantorini: Move already received via real-time, skipping submission', {
+        expectedMoveIndex,
+        receivedMoves: moves.length
+      });
+      pendingLocalMoveRef.current = null;
+      return;
+    }
+
+    // Clear the pending move immediately to prevent duplicate submissions
+    pendingLocalMoveRef.current = null;
+
+    const nextIndex = expectedMoveIndex;
     const updatedClock = clockEnabled
       ? {
           creatorMs: clock.creatorMs,
@@ -275,6 +306,12 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       clocks: updatedClock,
     };
 
+    console.log('useOnlineSantorini: Submitting move', { 
+      moveIndex: nextIndex, 
+      move: lastMove.action,
+      by: role 
+    });
+
     onSubmitMove(match, nextIndex, movePayload)
       .catch((error) => {
         console.error('Failed to submit move', error);
@@ -283,11 +320,8 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           status: 'error',
           description: error instanceof Error ? error.message : 'Unknown error',
         });
-      })
-      .finally(() => {
-        pendingLocalMoveRef.current = null;
       });
-  }, [base.history, clock, clockEnabled, match, onSubmitMove, role, toast]);
+  }, [base.history, clock, clockEnabled, match, moves.length, onSubmitMove, role, toast]);
 
   const formatClock = useCallback((ms: number) => {
     if (!clockEnabled) return '--:--';
@@ -316,7 +350,9 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         return;
       }
 
-      pendingLocalMoveRef.current = { expectedHistoryLength: base.history.length, expectedMoveIndex: moves.length };
+      // Calculate the correct move index based on existing moves
+      const nextMoveIndex = moves.length;
+      pendingLocalMoveRef.current = { expectedHistoryLength: base.history.length, expectedMoveIndex: nextMoveIndex };
       await base.onCellClick(y, x);
     },
     [base, currentTurn, match, moves.length, role, toast],

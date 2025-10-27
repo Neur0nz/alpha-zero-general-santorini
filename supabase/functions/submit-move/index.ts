@@ -141,9 +141,12 @@ serve(async (req) => {
 
   let engine: SantoriniEngine;
   try {
+    console.log('Building engine from initial state:', JSON.stringify(match.initial_state, null, 2));
     engine = SantoriniEngine.fromSnapshot(match.initial_state as SantoriniStateSnapshot);
+    console.log('Engine created successfully, current player:', engine.player);
   } catch (error) {
     console.error('Failed to build engine from initial state', error);
+    console.error('Initial state was:', JSON.stringify(match.initial_state, null, 2));
     return jsonResponse({ error: 'Match state is corrupted' }, { status: 500 });
   }
 
@@ -178,7 +181,9 @@ serve(async (req) => {
     }
   }
 
+  console.log('Move index validation - payload:', payload.moveIndex, 'expected:', expectedMoveIndex);
   if (typeof payload.moveIndex === 'number' && payload.moveIndex !== expectedMoveIndex) {
+    console.error('Move index mismatch - payload:', payload.moveIndex, 'expected:', expectedMoveIndex);
     return jsonResponse({ error: 'Move index out of sequence' }, { status: 409 });
   }
 
@@ -194,9 +199,14 @@ serve(async (req) => {
 
   let applyResult;
   try {
+    console.log('Applying move:', payload.action.move, 'for player:', actingPlayerIndex);
+    console.log('Engine state before move - player:', engine.player, 'validMoves count:', engine.validMoves.filter(v => v).length);
     applyResult = engine.applyMove(payload.action.move);
+    console.log('Move applied successfully, winner:', applyResult.winner);
   } catch (error) {
     console.error('Rejected illegal move', error);
+    console.error('Move was:', payload.action.move, 'Player:', actingPlayerIndex);
+    console.error('Engine player:', engine.player);
     return jsonResponse({ error: 'Illegal move' }, { status: 422 });
   }
 
