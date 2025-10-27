@@ -168,27 +168,82 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     }
 
     const latestMove = moves.length > 0 ? moves[moves.length - 1] : null;
-    const snapshot: SantoriniStateSnapshot | null =
-      latestMove?.state_snapshot ?? match.initial_state ?? null;
-    if (!snapshot) {
-      return;
-    }
-
     const latestIndex = latestMove ? latestMove.move_index : -1;
     const lastSynced = lastSyncedRef.current;
     if (lastSynced.matchId === match.id && lastSynced.moveIndex === latestIndex) {
       return;
     }
 
-    (async () => {
+    const snapshot: SantoriniStateSnapshot | null =
+      latestMove?.state_snapshot ?? match.initial_state ?? null;
+
+    let cancelled = false;
+
+    const synchronizeFromSnapshot = async () => {
+      if (!snapshot) {
+        return false;
+      }
       try {
         await base.importState(snapshot);
+        if (cancelled) {
+          return true;
+        }
         lastSyncedRef.current = { matchId: match.id, moveIndex: latestIndex };
+        return true;
       } catch (error) {
         console.error('Failed to synchronize board with server snapshot', error);
+        return false;
+      }
+    };
+
+    const replayLegacyMoves = async () => {
+      try {
+        if (typeof base.controls.reset === 'function') {
+          await base.controls.reset();
+          if (cancelled) {
+            return false;
+          }
+        }
+
+        let appliedAllMoves = true;
+        for (const moveRecord of moves) {
+          const action = moveRecord.action;
+          if (!action || action.kind !== 'santorini.move') {
+            continue;
+          }
+          try {
+            await base.applyMove(action.move, { triggerAi: false });
+          } catch (error) {
+            console.error('Failed to apply legacy move from server', error);
+            appliedAllMoves = false;
+            break;
+          }
+          if (cancelled) {
+            return false;
+          }
+        }
+
+        if (!cancelled && appliedAllMoves) {
+          lastSyncedRef.current = { matchId: match.id, moveIndex: latestIndex };
+          return true;
+        }
+      } catch (error) {
+        console.error('Failed to reconstruct board from legacy moves', error);
+      }
+      return false;
+    };
+
+    (async () => {
+      const synced = await synchronizeFromSnapshot();
+      if (!cancelled && !synced) {
+        await replayLegacyMoves();
       }
     })();
-  }, [base.importState, base.loading, match, moves]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [base.applyMove, base.controls, base.importState, base.loading, match, moves]);
 
   useEffect(() => {
     if (timerRef.current) {
