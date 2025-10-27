@@ -9,6 +9,7 @@ import {
   Tabs,
   Tooltip,
   useDisclosure,
+  useColorModeValue,
 } from '@chakra-ui/react';
 import { useEffect, useMemo, useState } from 'react';
 import { SearchIcon } from '@chakra-ui/icons';
@@ -104,6 +105,9 @@ function App() {
     setActiveTab(nextTab);
   };
 
+  const appBg = useColorModeValue('linear(to-br, gray.50, gray.100)', 'linear(to-br, gray.900, gray.800)');
+  const appColor = useColorModeValue('gray.900', 'whiteAlpha.900');
+
   return (
     <Tabs
       index={activeIndex}
@@ -115,7 +119,7 @@ function App() {
       flexDirection="column"
       minH="100vh"
     >
-      <Flex direction="column" flex="1" minH="100vh" bgGradient="linear(to-br, gray.900, gray.800)" color="whiteAlpha.900">
+      <Flex direction="column" flex="1" minH="100vh" bgGradient={appBg} color={appColor}>
         <HeaderBar activeTab={activeTab} actions={tabActions} auth={auth} />
         <Flex flex="1" py={{ base: 6, md: 8 }}>
           <Container maxW="7xl" flex="1" px={{ base: 3, md: 6 }}>

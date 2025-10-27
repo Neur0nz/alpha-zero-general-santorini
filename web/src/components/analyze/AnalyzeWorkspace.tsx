@@ -15,6 +15,7 @@ import {
   Spinner,
   Stack,
   Text,
+  useColorModeValue,
   useToast,
 } from '@chakra-ui/react';
 import GameBoard from '@components/GameBoard';
@@ -132,15 +133,21 @@ function AnalyzeWorkspace() {
 
   const canStepBack = currentIndex > -1;
   const canStepForward = loaded ? currentIndex < loaded.moves.length - 1 : false;
+  const cardBg = useColorModeValue('white', 'whiteAlpha.100');
+  const cardBorder = useColorModeValue('gray.200', 'whiteAlpha.200');
+  const mutedText = useColorModeValue('gray.600', 'whiteAlpha.700');
+  const helperText = useColorModeValue('gray.500', 'whiteAlpha.600');
+  const highlightBorder = useColorModeValue('teal.500', 'teal.300');
+  const badgeBorder = useColorModeValue('gray.200', 'whiteAlpha.200');
 
   return (
     <Stack spacing={6} py={{ base: 6, md: 10 }}>
-      <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200">
+      <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
         <CardHeader>
           <Heading size="md">Load a completed match</Heading>
         </CardHeader>
         <CardBody as={Stack} spacing={4}>
-          <Text color="whiteAlpha.800">
+          <Text color={mutedText}>
             Paste a match ID from the Play tab or use the most recent game sent from "Analyze game".
           </Text>
           <HStack spacing={3} align="center">
@@ -157,7 +164,7 @@ function AnalyzeWorkspace() {
             <HStack spacing={3}>
               <Badge colorScheme={summary.rated ? 'purple' : 'gray'}>{summary.rated ? 'Rated' : 'Casual'}</Badge>
               <Badge colorScheme="blue">{summary.visibility === 'public' ? 'Public' : 'Private'}</Badge>
-              <Badge>{summary.clock}</Badge>
+              <Badge borderWidth="1px" borderColor={badgeBorder}>{summary.clock}</Badge>
             </HStack>
           )}
         </CardBody>
@@ -165,11 +172,11 @@ function AnalyzeWorkspace() {
 
       {!loaded ? (
         <Center py={12}>
-          {loading ? <Spinner size="lg" /> : <Text color="whiteAlpha.700">Load a match to begin analysis.</Text>}
+          {loading ? <Spinner size="lg" /> : <Text color={mutedText}>Load a match to begin analysis.</Text>}
         </Center>
       ) : (
         <Stack spacing={6}>
-          <Card bg="whiteAlpha.100" borderWidth="1px" borderColor="whiteAlpha.200">
+          <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
             <CardBody>
               <Flex direction={{ base: 'column', xl: 'row' }} gap={6} align="stretch">
                 <Box flex="1" display="flex" justifyContent="center">
@@ -194,14 +201,17 @@ function AnalyzeWorkspace() {
                         <Button onClick={() => goToMove(Math.max(-1, currentIndex - 1))} isDisabled={!loaded || !canStepBack}>
                           Previous
                         </Button>
-                        <Button onClick={() => goToMove(Math.min(loaded.moves.length - 1, currentIndex + 1))} isDisabled={!canStepForward}>
+                        <Button
+                          onClick={() => goToMove(Math.min(loaded.moves.length - 1, currentIndex + 1))}
+                          isDisabled={!canStepForward}
+                        >
                           Next
                         </Button>
                         <Button onClick={() => goToMove(loaded.moves.length - 1)} isDisabled={!loaded}>
                           Latest
                         </Button>
                       </ButtonGroup>
-                      <Text fontSize="sm" color="whiteAlpha.700" mt={3}>
+                      <Text fontSize="sm" color={mutedText} mt={3}>
                         Viewing move {currentIndex >= 0 ? currentIndex + 1 : 0} of {loaded.moves.length}
                       </Text>
                     </Box>
@@ -214,7 +224,7 @@ function AnalyzeWorkspace() {
                           <Box
                             key={move.id}
                             borderWidth="1px"
-                            borderColor={currentIndex === index ? 'teal.300' : 'whiteAlpha.200'}
+                          borderColor={currentIndex === index ? highlightBorder : cardBorder}
                             borderRadius="md"
                             px={3}
                             py={2}
@@ -225,7 +235,7 @@ function AnalyzeWorkspace() {
                               <Text fontWeight="semibold" fontSize="sm">
                                 {index + 1}. {move.action?.kind === 'santorini.move' ? `Action ${move.action.move}` : 'Move'}
                               </Text>
-                              <Text fontSize="xs" color="whiteAlpha.600">
+                              <Text fontSize="xs" color={helperText}>
                                 {new Date(move.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </Text>
                             </HStack>

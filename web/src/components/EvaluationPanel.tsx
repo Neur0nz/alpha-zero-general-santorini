@@ -10,6 +10,7 @@ import {
   Stack,
   Text,
   useDisclosure,
+  useColorModeValue,
 } from '@chakra-ui/react';
 import { ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons';
 import type { EvaluationState, TopMove } from '@hooks/useSantorini';
@@ -36,6 +37,8 @@ function EvaluationBar({ value }: { value: number }) {
   const safeValue = Number.isFinite(value) ? Math.max(-1, Math.min(1, value)) : 0;
   const positiveWidth = safeValue > 0 ? safeValue * 50 : 0;
   const negativeWidth = safeValue < 0 ? Math.abs(safeValue) * 50 : 0;
+  const trackBg = useColorModeValue('gray.200', 'whiteAlpha.300');
+  const centerLineColor = useColorModeValue('gray.400', 'whiteAlpha.600');
 
   return (
     <Box
@@ -43,7 +46,7 @@ function EvaluationBar({ value }: { value: number }) {
       height="12px"
       borderRadius="full"
       overflow="hidden"
-      bg="whiteAlpha.300"
+      bg={trackBg}
     >
       <Box
         position="absolute"
@@ -51,7 +54,7 @@ function EvaluationBar({ value }: { value: number }) {
         bottom={0}
         left="50%"
         width="1px"
-        bg="whiteAlpha.600"
+        bg={centerLineColor}
         opacity={0.6}
       />
       {negativeWidth > 0 && (
@@ -95,13 +98,19 @@ function EvaluationPanel({
 }: EvaluationPanelProps) {
   const disclosure = useDisclosure({ defaultIsOpen: true });
   const movesDisclosure = useDisclosure({ defaultIsOpen: true });
+  const panelGradient = useColorModeValue('linear(to-br, gray.50, white)', 'linear(to-br, blackAlpha.500, blackAlpha.400)');
+  const panelBorder = useColorModeValue('gray.200', 'whiteAlpha.200');
+  const mutedText = useColorModeValue('gray.600', 'whiteAlpha.700');
+  const subtleText = useColorModeValue('gray.500', 'whiteAlpha.600');
+  const strongText = useColorModeValue('gray.800', 'whiteAlpha.800');
+  const moveBg = useColorModeValue('gray.50', 'whiteAlpha.100');
 
   return (
     <Box
       borderRadius="lg"
       borderWidth="1px"
-      borderColor="whiteAlpha.200"
-      bgGradient="linear(to-br, blackAlpha.500, blackAlpha.400)"
+      borderColor={panelBorder}
+      bgGradient={panelGradient}
       p={disclosure.isOpen ? { base: 5, md: 6 } : 3}
       minH={disclosure.isOpen ? (movesDisclosure.isOpen ? "360px" : "200px") : "auto"}
       boxShadow="dark-lg"
@@ -121,9 +130,9 @@ function EvaluationPanel({
             </HStack>
           </Flex>
           <Collapse in={disclosure.isOpen} animateOpacity>
-        <Stack spacing={5}>
+            <Stack spacing={5}>
           <Box>
-            <Text fontSize="sm" color="whiteAlpha.700" mb={2}>
+            <Text fontSize="sm" color={mutedText} mb={2}>
               Advantage: {evaluation.advantage}
             </Text>
             <EvaluationBar value={evaluation.value} />
@@ -171,7 +180,7 @@ function EvaluationPanel({
             <Collapse in={movesDisclosure.isOpen} animateOpacity>
               <Stack spacing={3} mt={2}>
                 {topMoves.length === 0 && (
-                  <Text fontSize="sm" color="whiteAlpha.600">
+                  <Text fontSize="sm" color={subtleText}>
                     Run a calculation to see detailed options.
                   </Text>
                 )}
@@ -190,9 +199,9 @@ function EvaluationPanel({
                       key={move.action}
                       borderWidth="1px"
                       borderRadius="md"
-                      borderColor="whiteAlpha.200"
+                      borderColor={panelBorder}
                       p={3}
-                      bg="whiteAlpha.100"
+                      bg={moveBg}
                     >
                       <Text fontWeight="medium">{move.text}</Text>
                       <Flex align="center" justify="space-between" mt={2} gap={3}>
@@ -203,12 +212,12 @@ function EvaluationPanel({
                           flex="1"
                           height="6px"
                         />
-                        <Text fontSize="sm" color="whiteAlpha.800" minW="48px" textAlign="right">
+                        <Text fontSize="sm" color={strongText} minW="48px" textAlign="right">
                           {percentLabel}
                         </Text>
                       </Flex>
                       {typeof move.eval === 'number' && (
-                        <Text fontSize="sm" color="whiteAlpha.700" mt={2}>
+                        <Text fontSize="sm" color={mutedText} mt={2}>
                           Eval: {move.eval >= 0 ? `+${move.eval.toFixed(2)}` : move.eval.toFixed(2)}
                           {typeof move.delta === 'number' && Math.abs(move.delta) >= 0.005
                             ? ` (Δ ${move.delta >= 0 ? '+' : ''}${move.delta.toFixed(2)})`
@@ -221,12 +230,12 @@ function EvaluationPanel({
               </Stack>
             </Collapse>
           </Box>
-        </Stack>
+            </Stack>
           </Collapse>
         </>
       ) : (
         <Flex justify="space-between" align="center">
-          <Heading size="sm" color="whiteAlpha.800">
+          <Heading size="sm" color={strongText}>
             AI Evaluation
           </Heading>
           <Button size="sm" colorScheme="teal" onClick={disclosure.onToggle}>

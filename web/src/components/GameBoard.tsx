@@ -39,6 +39,13 @@ function GameBoard({
   const cellBg = useColorModeValue('gray.50', 'gray.700');
   const selectableBg = useColorModeValue('teal.100', 'teal.700');
   const setupSelectableBg = useColorModeValue('blue.100', 'blue.700');
+  const labelColor = useColorModeValue('gray.600', 'whiteAlpha.700');
+  const subtleLabelColor = useColorModeValue('gray.500', 'whiteAlpha.600');
+  const boardFrameBg = useColorModeValue('gray.100', 'blackAlpha.500');
+  const defaultBorderColor = useColorModeValue('gray.300', 'whiteAlpha.300');
+  const highlightBorderColor = useColorModeValue('yellow.400', 'yellow.300');
+  const actionBorderColor = useColorModeValue('gray.200', 'whiteAlpha.200');
+  const panelTextColor = useColorModeValue('gray.800', 'whiteAlpha.800');
   const [boardPixels, setBoardPixels] = useState<number>(() => {
     if (typeof window === 'undefined') {
       return 600;
@@ -73,7 +80,7 @@ function GameBoard({
     >
       <Flex direction="column" gap={3} w="100%">
         <Flex align="center" gap={3} w="100%" px={{ base: 0, sm: 1 }}>
-          <Text fontSize="sm" color="whiteAlpha.700" whiteSpace="nowrap">
+          <Text fontSize="sm" color={labelColor} whiteSpace="nowrap">
             Board size
           </Text>
           <Slider
@@ -86,12 +93,12 @@ function GameBoard({
             colorScheme="teal"
             flex={1}
           >
-            <SliderTrack bg="whiteAlpha.200">
+            <SliderTrack bg={defaultBorderColor}>
               <SliderFilledTrack />
             </SliderTrack>
             <SliderThumb boxSize={5} />
           </Slider>
-          <Text fontSize="sm" color="whiteAlpha.600" w="64px" textAlign="right">
+          <Text fontSize="sm" color={subtleLabelColor} w="64px" textAlign="right">
             {Math.round(boardPixels)}px
           </Text>
         </Flex>
@@ -100,7 +107,7 @@ function GameBoard({
             direction="column"
             w="100%"
             h="100%"
-            bg="blackAlpha.500"
+            bg={boardFrameBg}
             p={{ base: 2, sm: 4, md: 6 }}
             borderRadius="xl"
             boxShadow="2xl"
@@ -137,7 +144,7 @@ function GameBoard({
                           cursor={canClick ? 'pointer' : 'default'}
                           borderRadius="lg"
                           borderWidth={highlight ? '3px' : '1px'}
-                          borderColor={highlight ? 'yellow.300' : 'whiteAlpha.300'}
+                          borderColor={highlight ? highlightBorderColor : defaultBorderColor}
                           bg={
                             isSetupSelectable
                               ? setupSelectableBg
@@ -214,12 +221,12 @@ function GameBoard({
         px={4}
         py={3}
         borderRadius="md"
-        bg={buttons.setupMode ? 'blue.500' : 'blackAlpha.500'}
+        bg={buttons.setupMode ? 'blue.500' : boardFrameBg}
         borderWidth="1px"
-        borderColor={buttons.setupMode ? 'blue.300' : 'whiteAlpha.200'}
+        borderColor={buttons.setupMode ? 'blue.300' : actionBorderColor}
         textAlign={{ base: 'center', sm: 'left' }}
       >
-        <Text fontSize="sm" color="whiteAlpha.800">
+        <Text fontSize="sm" color={panelTextColor}>
           {buttons.status}
         </Text>
         {buttons.loading && (

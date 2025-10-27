@@ -61,12 +61,12 @@ function PracticeToolbar({ controls, onReset, onShowHistory, buttons }: Practice
 
   return (
     <Box
-      bg={useColorModeValue('whiteAlpha.200', 'blackAlpha.300')}
+      bg={useColorModeValue('white', 'blackAlpha.300')}
       borderRadius="xl"
       px={{ base: 3, md: 5 }}
       py={{ base: 3, md: 4 }}
       borderWidth="1px"
-      borderColor={useColorModeValue('whiteAlpha.300', 'whiteAlpha.200')}
+      borderColor={useColorModeValue('gray.200', 'whiteAlpha.200')}
     >
       <Flex direction={{ base: 'column', lg: 'row' }} gap={{ base: 3, lg: 6 }} align={{ base: 'stretch', lg: 'center' }}>
         <Wrap spacing={{ base: 2, md: 3 }} align="center">

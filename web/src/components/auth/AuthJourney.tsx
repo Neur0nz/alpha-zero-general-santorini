@@ -13,6 +13,7 @@ import {
   Tooltip,
   useBoolean,
   useToast,
+  useColorModeValue,
 } from '@chakra-ui/react';
 import { ChevronDownIcon } from '@chakra-ui/icons';
 import GoogleIcon from '@components/auth/GoogleIcon';
@@ -27,6 +28,11 @@ function AuthJourney({ auth }: AuthJourneyProps) {
   const toast = useToast();
   const [signingOut, setSigningOut] = useBoolean(false);
   const [retrying, setRetrying] = useBoolean(false);
+  const signInHoverBg = useColorModeValue('gray.100', 'whiteAlpha.200');
+  const signInActiveBg = useColorModeValue('gray.200', 'whiteAlpha.300');
+  const menuBg = useColorModeValue('white', 'gray.900');
+  const menuBorder = useColorModeValue('gray.200', 'whiteAlpha.200');
+  const menuMuted = useColorModeValue('gray.600', 'whiteAlpha.700');
 
   const handleGoogleSignIn = async () => {
     try {
@@ -98,8 +104,8 @@ function AuthJourney({ auth }: AuthJourneyProps) {
         color="gray.800"
         leftIcon={<GoogleIcon boxSize={4} />}
         onClick={handleGoogleSignIn}
-        _hover={{ bg: 'whiteAlpha.900', transform: 'translateY(-1px)', boxShadow: 'lg' }}
-        _active={{ bg: 'whiteAlpha.800' }}
+        _hover={{ bg: signInHoverBg, transform: 'translateY(-1px)', boxShadow: 'lg' }}
+        _active={{ bg: signInActiveBg }}
       >
         Sign in with Google
       </Button>
@@ -125,8 +131,8 @@ function AuthJourney({ auth }: AuthJourneyProps) {
         variant="outline"
         px={3}
         py={2}
-        _hover={{ bg: 'whiteAlpha.200', transform: 'translateY(-1px)' }}
-        _active={{ bg: 'whiteAlpha.300' }}
+        _hover={{ bg: signInHoverBg, transform: 'translateY(-1px)' }}
+        _active={{ bg: signInActiveBg }}
       >
         <HStack spacing={2} align="center">
           <Avatar size="xs" name={profile.display_name} src={avatarUrl} />
@@ -136,28 +142,28 @@ function AuthJourney({ auth }: AuthJourneyProps) {
           <ChevronDownIcon />
         </HStack>
       </MenuButton>
-      <MenuList bg="gray.900" borderColor="whiteAlpha.200" minW="56">
+      <MenuList bg={menuBg} borderColor={menuBorder} minW="56">
         <Box px={3} py={2} display="flex" flexDir="column" gap={1}>
-          <Text fontSize="xs" textTransform="uppercase" color="whiteAlpha.600" letterSpacing="wide">
+          <Text fontSize="xs" textTransform="uppercase" color={menuMuted} letterSpacing="wide">
             Signed in
           </Text>
           <Text fontWeight="semibold">{profile.display_name}</Text>
           {email && (
-            <Text fontSize="sm" color="whiteAlpha.700">
+            <Text fontSize="sm" color={menuMuted}>
               {email}
             </Text>
           )}
         </Box>
-        <MenuDivider borderColor="whiteAlpha.200" />
+        <MenuDivider borderColor={menuBorder} />
         {error && (
-          <MenuItem onClick={handleRetry} isDisabled={retrying} _hover={{ bg: 'whiteAlpha.200' }}>
+          <MenuItem onClick={handleRetry} isDisabled={retrying} _hover={{ bg: signInHoverBg }}>
             <HStack spacing={3} align="center">
               {retrying && <Spinner size="sm" />}
               <Text>{retrying ? 'Refreshing…' : 'Retry profile sync'}</Text>
             </HStack>
           </MenuItem>
         )}
-        <MenuItem onClick={handleSignOut} isDisabled={signingOut} _hover={{ bg: 'whiteAlpha.200' }}>
+        <MenuItem onClick={handleSignOut} isDisabled={signingOut} _hover={{ bg: signInHoverBg }}>
           <HStack spacing={3} align="center">
             {signingOut && <Spinner size="sm" />}
             <Text>{signingOut ? 'Signing out…' : 'Sign out'}</Text>
