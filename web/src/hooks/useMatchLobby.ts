@@ -869,12 +869,21 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           hasClock: payload.hasClock,
           clockInitialMinutes: payload.clockInitialMinutes,
           clockIncrementSeconds: payload.clockIncrementSeconds,
+          startingPlayer: payload.startingPlayer,
         },
       });
 
       if (error) {
         console.error('Failed to create match', error);
-        throw error;
+        // Check if it's an active game conflict
+        const errorData = (error as any).context?.body;
+        if (errorData?.code === 'ACTIVE_GAME_EXISTS') {
+          const err = new Error(errorData.error);
+          (err as any).code = 'ACTIVE_GAME_EXISTS';
+          (err as any).activeMatchId = errorData.activeMatchId;
+          throw err;
+        }
+        throw new Error(error.message || 'Failed to create match');
       }
 
       const record = (data as { match?: MatchRecord & Partial<LobbyMatch> } | null)?.match;
@@ -1462,6 +1471,12 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     return null;
   }, [profile, state.activeMatch, state.sessionMode]);
 
+  const hasActiveGame = useMemo(() => {
+    return state.myMatches.some(m => 
+      m.status === 'waiting_for_opponent' || m.status === 'in_progress'
+    );
+  }, [state.myMatches]);
+
   const myMatchesWithProfiles = useMemo(
     () =>
       state.myMatches.map((match) => {
@@ -1546,6 +1561,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     activeRole,
     sessionMode: state.sessionMode,
     onlineEnabled,
+    hasActiveGame,
     undoRequests: state.undoRequests,
     setActiveMatch,
     createMatch,

@@ -1,5 +1,9 @@
 import { useState } from 'react';
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
   Badge,
   Box,
   Button,
@@ -30,6 +34,7 @@ import {
   Stack,
   Switch,
   Text,
+  Tooltip,
   useColorModeValue,
   useDisclosure,
   useToast,
@@ -56,6 +61,50 @@ function useSurfaceTokens() {
   return { cardBg, cardBorder, mutedText, helperText, strongText, accentHeading, panelBg };
 }
 
+function ActiveGameNotice({ 
+  match, 
+  onNavigateToPlay 
+}: { 
+  match: LobbyMatch; 
+  onNavigateToPlay: () => void;
+}) {
+  const { cardBorder } = useSurfaceTokens();
+  
+  const isWaiting = match.status === 'waiting_for_opponent';
+  const opponentName = match.opponent?.display_name || 'an opponent';
+  
+  return (
+    <Alert 
+      status="info" 
+      variant="left-accent" 
+      borderRadius="md"
+      borderWidth="1px"
+      borderColor={cardBorder}
+    >
+      <AlertIcon />
+      <Stack spacing={1} flex="1">
+        <AlertTitle>
+          {isWaiting ? 'Waiting for opponent' : 'Game in progress'}
+        </AlertTitle>
+        <AlertDescription>
+          {isWaiting 
+            ? 'Your game is waiting for an opponent to join. You cannot create new games until this one starts or is cancelled.'
+            : `You're playing against ${opponentName}. Finish this game before starting a new one.`
+          }
+        </AlertDescription>
+      </Stack>
+      <Button 
+        colorScheme="teal" 
+        size="sm"
+        onClick={onNavigateToPlay}
+        rightIcon={<ArrowForwardIcon />}
+      >
+        {isWaiting ? 'View game' : 'Continue game'}
+      </Button>
+    </Alert>
+  );
+}
+
 function LobbyHero({
   onQuickMatch,
   quickMatchLoading,
@@ -64,6 +113,7 @@ function LobbyHero({
   onNavigateToPractice,
   onNavigateToAnalyze,
   onNavigateToLeaderboard,
+  hasActiveGame,
 }: {
   onQuickMatch: () => Promise<void>;
   quickMatchLoading: boolean;
@@ -72,6 +122,7 @@ function LobbyHero({
   onNavigateToPractice: () => void;
   onNavigateToAnalyze: () => void;
   onNavigateToLeaderboard: () => void;
+  hasActiveGame: boolean;
 }) {
   const gradientBg = useColorModeValue('linear(to-r, teal.100, teal.300)', 'linear(to-r, teal.700, teal.500)');
   const frameBorder = useColorModeValue('teal.200', 'teal.500');
@@ -98,33 +149,47 @@ function LobbyHero({
             align={{ base: 'stretch', sm: 'center' }}
             w={{ base: '100%', sm: 'auto' }}
           >
-            <Button
-              size="lg"
-              colorScheme="teal"
-              rightIcon={<ArrowForwardIcon />}
-              onClick={onQuickMatch}
-              isLoading={quickMatchLoading}
-              w={{ base: '100%', sm: 'auto' }}
-              whiteSpace="normal"
-              height="auto"
-              textAlign="center"
-              px={{ base: 4, sm: 6 }}
+            <Tooltip 
+              label={hasActiveGame ? "Finish your current game first" : ""} 
+              isDisabled={!hasActiveGame}
+              hasArrow
             >
-              Start quick match
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              leftIcon={<AddIcon />}
-              onClick={onOpenCreate}
-              w={{ base: '100%', sm: 'auto' }}
-              whiteSpace="normal"
-              height="auto"
-              textAlign="center"
-              px={{ base: 4, sm: 6 }}
+              <Button
+                size="lg"
+                colorScheme="teal"
+                rightIcon={<ArrowForwardIcon />}
+                onClick={onQuickMatch}
+                isLoading={quickMatchLoading}
+                isDisabled={hasActiveGame || quickMatchLoading}
+                w={{ base: '100%', sm: 'auto' }}
+                whiteSpace="normal"
+                height="auto"
+                textAlign="center"
+                px={{ base: 4, sm: 6 }}
+              >
+                Start quick match
+              </Button>
+            </Tooltip>
+            <Tooltip 
+              label={hasActiveGame ? "Finish your current game first" : ""} 
+              isDisabled={!hasActiveGame}
+              hasArrow
             >
-              Custom match
-            </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                leftIcon={<AddIcon />}
+                onClick={onOpenCreate}
+                isDisabled={hasActiveGame}
+                w={{ base: '100%', sm: 'auto' }}
+                whiteSpace="normal"
+                height="auto"
+                textAlign="center"
+                px={{ base: 4, sm: 6 }}
+              >
+                Custom match
+              </Button>
+            </Tooltip>
             <Button
               size="lg"
               variant="ghost"
@@ -639,9 +704,28 @@ function LobbyWorkspace({
   const [creatingQuickMatch, setCreatingQuickMatch] = useBoolean(false);
 
   const handleCreate = async (payload: CreateMatchPayload) => {
-    await lobby.createMatch(payload);
-    // Navigate to Play tab after creating match
-    onNavigateToPlay();
+    try {
+      await lobby.createMatch(payload);
+      // Navigate to Play tab after creating match
+      onNavigateToPlay();
+    } catch (error: any) {
+      // Re-throw to be caught by the modal's error handling
+      if (error.code === 'ACTIVE_GAME_EXISTS') {
+        toast({
+          title: 'Active game exists',
+          description: error.message,
+          status: 'warning',
+          duration: 5000,
+        });
+        onCreateClose();
+        // Navigate to the active game
+        if (error.activeMatchId) {
+          lobby.setActiveMatch(error.activeMatchId);
+          onNavigateToPlay();
+        }
+      }
+      throw error;
+    }
   };
 
   const handleJoinByCode = async () => {
@@ -702,8 +786,21 @@ function LobbyWorkspace({
     );
   }
 
+  // Find the active game (if any)
+  const activeGame = lobby.myMatches.find(m => 
+    m.status === 'waiting_for_opponent' || m.status === 'in_progress'
+  );
+
   return (
     <Stack spacing={{ base: 6, md: 8 }} py={{ base: 6, md: 10 }}>
+      {/* Show active game notice if user has an active game */}
+      {activeGame && (
+        <ActiveGameNotice 
+          match={activeGame} 
+          onNavigateToPlay={onNavigateToPlay}
+        />
+      )}
+      
       <LobbyHero
         onQuickMatch={handleQuickMatch}
         quickMatchLoading={creatingQuickMatch}
@@ -712,6 +809,7 @@ function LobbyWorkspace({
         onNavigateToPractice={onNavigateToPractice}
         onNavigateToAnalyze={onNavigateToAnalyze}
         onNavigateToLeaderboard={onNavigateToLeaderboard}
+        hasActiveGame={lobby.hasActiveGame}
       />
       <FeatureHighlights
         onNavigateToPractice={onNavigateToPractice}

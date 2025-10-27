@@ -140,6 +140,27 @@ serve(async (req) => {
     return jsonResponse({ error: 'Player profile not found' }, { status: 403 });
   }
 
+  // Check for existing active games
+  const { data: existingMatches, error: checkError } = await supabase
+    .from('matches')
+    .select('id, status, creator_id, opponent_id')
+    .or(`creator_id.eq.${profile.id},opponent_id.eq.${profile.id}`)
+    .in('status', ['waiting_for_opponent', 'in_progress'])
+    .limit(1);
+
+  if (checkError) {
+    console.error('Failed to check for existing matches', checkError);
+    return jsonResponse({ error: 'Failed to check for existing matches' }, { status: 500 });
+  }
+
+  if (existingMatches && existingMatches.length > 0) {
+    return jsonResponse({ 
+      error: 'You already have an active game. Please finish or cancel your current game before creating a new one.',
+      code: 'ACTIVE_GAME_EXISTS',
+      activeMatchId: existingMatches[0].id
+    }, { status: 409 });
+  }
+
   const joinCode = visibility === 'private' ? generateJoinCode() : null;
 
   const { snapshot } = SantoriniEngine.createInitial(startingPlayerIndex);

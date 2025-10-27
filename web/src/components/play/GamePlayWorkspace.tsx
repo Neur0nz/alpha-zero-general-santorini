@@ -608,6 +608,88 @@ function NoActiveGamePrompt() {
   );
 }
 
+function WaitingForOpponentState({ 
+  match, 
+  joinCode 
+}: { 
+  match: LobbyMatch; 
+  joinCode: string | null;
+}) {
+  const { cardBg, cardBorder, mutedText, accentHeading } = useSurfaceTokens();
+  const gradientBg = useColorModeValue('linear(to-r, teal.50, blue.50)', 'linear(to-r, teal.900, blue.900)');
+  
+  return (
+    <Stack spacing={6}>
+      <Card bg={cardBg} borderWidth="2px" borderColor="teal.400" boxShadow="lg">
+        <CardBody py={8}>
+          <Center>
+            <Stack spacing={6} align="center" textAlign="center" maxW="lg">
+              <Spinner 
+                size="xl" 
+                color="teal.500" 
+                thickness="4px"
+                speed="0.8s"
+              />
+              <Stack spacing={2}>
+                <Heading size="lg" color={accentHeading}>
+                  Waiting for opponent...
+                </Heading>
+                <Text fontSize="lg" color={mutedText}>
+                  Your game is ready. We're waiting for an opponent to join.
+                </Text>
+              </Stack>
+              
+              {joinCode && (
+                <Card bgGradient={gradientBg} borderWidth="1px" borderColor={cardBorder} w="100%" maxW="md">
+                  <CardBody>
+                    <Stack spacing={3} align="center">
+                      <Badge colorScheme="orange" fontSize="md" px={4} py={2} borderRadius="full">
+                        Private Game
+                      </Badge>
+                      <Text fontSize="sm" color={mutedText}>
+                        Share this code with your friend:
+                      </Text>
+                      <Heading 
+                        size="2xl" 
+                        fontFamily="mono" 
+                        letterSpacing="wider"
+                        color={accentHeading}
+                      >
+                        {joinCode}
+                      </Heading>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          navigator.clipboard.writeText(joinCode);
+                        }}
+                      >
+                        Copy code
+                      </Button>
+                    </Stack>
+                  </CardBody>
+                </Card>
+              )}
+              
+              <HStack spacing={4} flexWrap="wrap" justify="center" color={mutedText} fontSize="sm">
+                <Text>✓ Game settings configured</Text>
+                <Text>✓ Board initialized</Text>
+                <Text>✓ Ready to start</Text>
+              </HStack>
+              
+              <Text fontSize="xs" color={mutedText} fontStyle="italic">
+                {match.visibility === 'public' 
+                  ? 'This game is visible in the public lobby' 
+                  : 'Only players with the code can join'}
+              </Text>
+            </Stack>
+          </Center>
+        </CardBody>
+      </Card>
+    </Stack>
+  );
+}
+
 function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   const lobby = useMatchLobbyContext();
   const sessionMode = lobby.sessionMode ?? 'online';
@@ -632,10 +714,11 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
     }
   }, [sessionMode, lobby.activeMatch, lobby.myMatches, lobby.setActiveMatch]);
 
-  // Check if we have an active online game
-  const hasActiveOnlineGame = sessionMode === 'online' && lobby.activeMatch && lobby.activeMatch.status === 'in_progress';
+  // Check if we have an active online game or waiting
+  const hasActiveMatch = sessionMode === 'online' && lobby.activeMatch;
+  const isWaitingForOpponent = hasActiveMatch && lobby.activeMatch?.status === 'waiting_for_opponent';
+  const isInProgress = hasActiveMatch && lobby.activeMatch?.status === 'in_progress';
   const hasActiveLocalGame = sessionMode === 'local';
-  const hasActiveGame = hasActiveLocalGame || hasActiveOnlineGame;
 
   return (
     <Stack spacing={6} py={{ base: 6, md: 10 }}>
@@ -685,10 +768,19 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
         />
       )}
 
-      {/* Game Board */}
+      {/* Game Board - Local */}
       {sessionMode === 'local' && <LocalMatchPanel onExit={lobby.stopLocalMatch} />}
 
-      {sessionMode === 'online' && hasActiveGame && (
+      {/* Waiting for Opponent State */}
+      {sessionMode === 'online' && isWaitingForOpponent && lobby.activeMatch && (
+        <WaitingForOpponentState 
+          match={lobby.activeMatch}
+          joinCode={lobby.joinCode}
+        />
+      )}
+
+      {/* Active Game In Progress */}
+      {sessionMode === 'online' && isInProgress && (
         <SantoriniProvider evaluationEnabled={false}>
           <ActiveMatchContent
             match={lobby.activeMatch}
@@ -707,7 +799,8 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
         </SantoriniProvider>
       )}
 
-      {sessionMode === 'online' && !hasActiveGame && <NoActiveGamePrompt />}
+      {/* No Active Game */}
+      {sessionMode === 'online' && !hasActiveMatch && <NoActiveGamePrompt />}
     </Stack>
   );
 }
