@@ -300,6 +300,10 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         toast({ title: 'Waiting for opponent', status: 'info' });
         return;
       }
+      if (pendingLocalMoveRef.current) {
+        toast({ title: 'Syncing previous move', status: 'info' });
+        return;
+      }
       if (currentTurn !== role) {
         toast({ title: "It's not your turn", status: 'warning' });
         return;
