@@ -23,6 +23,8 @@ const MODEL_FILENAME = `${import.meta.env.BASE_URL || '/'}santorini/model_no_god
 const SIZE_CB = [1, 25, 3];
 const ONNX_OUTPUT_SIZE = 162;
 
+let onnxSessionPromise: Promise<any> | null = null;
+
 export type BoardCell = CellState & {
   svg: string;
   highlight: boolean;
@@ -150,65 +152,74 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     if (!window.ort) {
       throw new Error('ONNX runtime not available');
     }
-    try {
-      // Load the model file as a binary blob to avoid content-type issues
-      console.log('Loading ONNX model from:', MODEL_FILENAME);
-      const response = await fetch(MODEL_FILENAME);
-      if (!response.ok) {
-        throw new Error(`Failed to load model: ${response.status} ${response.statusText}`);
-      }
-      console.log('Model response headers:', Object.fromEntries(response.headers.entries()));
-      const modelBuffer = await response.arrayBuffer();
-      console.log('Model buffer size:', modelBuffer.byteLength);
-      
-      // Try creating session with buffer
-      let session;
-      try {
-        // Configure ONNX runtime for single-threaded mode to avoid SharedArrayBuffer issues
-        const sessionOptions = {
-          executionProviders: ['wasm'],
-          graphOptimizationLevel: 'all',
-          enableCpuMemArena: false,
-          enableMemPattern: false,
-          enableProfiling: false,
-          logLevel: 'warning'
-        };
-        
-        session = await window.ort.InferenceSession.create(modelBuffer, sessionOptions);
-        console.log('ONNX session created successfully with buffer');
-      } catch (bufferError) {
-        console.warn('Failed to create session with buffer, trying URL approach:', bufferError);
-        // Fallback: try loading directly from URL with same options
-        const sessionOptions = {
-          executionProviders: ['wasm'],
-          graphOptimizationLevel: 'all',
-          enableCpuMemArena: false,
-          enableMemPattern: false,
-          enableProfiling: false,
-          logLevel: 'warning'
-        };
-        session = await window.ort.InferenceSession.create(MODEL_FILENAME, sessionOptions);
-        console.log('ONNX session created successfully with URL');
-      }
-      (window as any).onnxSession = session;
-      (window as any).predict = async (canonicalBoard: any, valids: any) => {
-        const boardArray = Array.from(canonicalBoard) as number[];
-        const validsArray = Array.from(valids) as number[];
-        const tensorBoard = new window.ort.Tensor('float32', Float32Array.from(boardArray), SIZE_CB);
-        const tensorValid = new window.ort.Tensor('bool', new Uint8Array(validsArray), [1, ONNX_OUTPUT_SIZE]);
-        const results = await session.run({
-          board: tensorBoard,
-          valid_actions: tensorValid,
-        });
-        return {
-          pi: Array.from(results.pi.data),
-          v: Array.from(results.v.data),
-        };
-      };
-    } catch (error) {
-      console.error('Failed to initialize ONNX session:', error);
-      throw error;
+
+    if (!onnxSessionPromise) {
+      onnxSessionPromise = (async () => {
+        try {
+          // Load the model file as a binary blob to avoid content-type issues
+          console.log('Loading ONNX model from:', MODEL_FILENAME);
+          const response = await fetch(MODEL_FILENAME);
+          if (!response.ok) {
+            throw new Error(`Failed to load model: ${response.status} ${response.statusText}`);
+          }
+          console.log('Model response headers:', Object.fromEntries(response.headers.entries()));
+          const modelBuffer = await response.arrayBuffer();
+          console.log('Model buffer size:', modelBuffer.byteLength);
+
+          // Try creating session with buffer
+          let session;
+          try {
+            // Configure ONNX runtime for single-threaded mode to avoid SharedArrayBuffer issues
+            const sessionOptions = {
+              executionProviders: ['wasm'],
+              graphOptimizationLevel: 'all',
+              enableCpuMemArena: false,
+              enableMemPattern: false,
+              enableProfiling: false,
+              logLevel: 'warning'
+            };
+
+            session = await window.ort.InferenceSession.create(modelBuffer, sessionOptions);
+            console.log('ONNX session created successfully with buffer');
+          } catch (bufferError) {
+            console.warn('Failed to create session with buffer, trying URL approach:', bufferError);
+            // Fallback: try loading directly from URL with same options
+            const sessionOptions = {
+              executionProviders: ['wasm'],
+              graphOptimizationLevel: 'all',
+              enableCpuMemArena: false,
+              enableMemPattern: false,
+              enableProfiling: false,
+              logLevel: 'warning'
+            };
+            session = await window.ort.InferenceSession.create(MODEL_FILENAME, sessionOptions);
+            console.log('ONNX session created successfully with URL');
+          }
+          (window as any).onnxSession = session;
+          (window as any).predict = async (canonicalBoard: any, valids: any) => {
+            const boardArray = Array.from(canonicalBoard) as number[];
+            const validsArray = Array.from(valids) as number[];
+            const tensorBoard = new window.ort.Tensor('float32', Float32Array.from(boardArray), SIZE_CB);
+            const tensorValid = new window.ort.Tensor('bool', new Uint8Array(validsArray), [1, ONNX_OUTPUT_SIZE]);
+            const results = await session.run({
+              board: tensorBoard,
+              valid_actions: tensorValid,
+            });
+            return {
+              pi: Array.from(results.pi.data),
+              v: Array.from(results.v.data),
+            };
+          };
+          return session;
+        } catch (error) {
+          onnxSessionPromise = null;
+          console.error('Failed to initialize ONNX session:', error);
+          throw error;
+        }
+      })();
     }
+
+    await onnxSessionPromise;
   }, []);
 
   const loadPyodideRuntime = useCallback(async () => {
@@ -233,29 +244,41 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
       // Wait a bit for the script to initialize
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      if (!window.loadPyodide) {
+      const loadPyodideFn = window.loadPyodide;
+      if (!loadPyodideFn) {
         throw new Error('Pyodide runtime missing - failed to load Pyodide script');
       }
-      
-      const pyodide = await window.loadPyodide({ fullStdLib: false });
-      await pyodide.loadPackage('numpy');
-      
-      for (const [input, output] of PY_FILES) {
-        const response = await fetch(input);
-        if (!response.ok) {
-          throw new Error(`Failed to load Python file: ${input}`);
-        }
-        const data = await response.arrayBuffer();
-        pyodide.FS.writeFile(output, new Uint8Array(data));
-      }
-      
+
+      const onnxSessionInitPromise = evaluationEnabled ? initOnnxSession() : Promise.resolve();
+
+      const fileFetchPromise = Promise.all(
+        PY_FILES.map(async ([input, output]) => {
+          const response = await fetch(input);
+          if (!response.ok) {
+            throw new Error(`Failed to load Python file: ${input}`);
+          }
+          const data = await response.arrayBuffer();
+          return { output, data: new Uint8Array(data) };
+        })
+      );
+
+      const pyodidePromise = (async () => {
+        const instance = await loadPyodideFn({ fullStdLib: false });
+        await instance.loadPackage('numpy');
+        return instance;
+      })();
+
+      const [pyodide, fetchedFiles] = await Promise.all([pyodidePromise, fileFetchPromise]);
+
+      fetchedFiles.forEach(({ output, data }) => {
+        pyodide.FS.writeFile(output, data);
+      });
+
       const game = new Santorini();
       game.setBackend(pyodide);
       gameRef.current = game;
       selectorRef.current = new MoveSelector(game);
-      if (evaluationEnabled) {
-        await initOnnxSession();
-      }
+      await onnxSessionInitPromise;
     } catch (error) {
       console.error('Failed to load Pyodide runtime:', error);
       throw error;
