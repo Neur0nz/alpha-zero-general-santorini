@@ -92,6 +92,8 @@ const normalizeTopMoves = (rawMoves: unknown): TopMove[] => {
     return [];
   }
 
+  const stripAnsi = (value: string) => value.replace(/\u001b\[[0-9;]*m/g, '').trim();
+
   return rawMoves.map((entry) => {
     const move = entry as Record<string, unknown>;
 
@@ -102,7 +104,12 @@ const normalizeTopMoves = (rawMoves: unknown): TopMove[] => {
     const normalized: TopMove = {
       action: Number.isFinite(actionValue) ? actionValue : -1,
       prob: Number.isFinite(probValue) ? Math.min(Math.max(probValue, 0), 1) : 0,
-      text: typeof textValue === 'string' ? textValue : textValue != null ? String(textValue) : '',
+      text:
+        typeof textValue === 'string'
+          ? stripAnsi(textValue)
+          : textValue != null
+          ? stripAnsi(String(textValue))
+          : '',
     };
 
     if (move.eval !== undefined) {
