@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
       }
     },
     server: {
-      port: Number(env.VITE_DEV_PORT ?? 5173),
+      port: Number(env.VITE_DEV_PORT ?? 5174),
       host: true
     },
     preview: {

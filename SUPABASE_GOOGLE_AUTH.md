@@ -8,7 +8,7 @@ configuration and restart the dev server with your existing environment variable
 >
 > - Supabase project set up by following `SUPABASE_SETUP.md`
 > - `players` table and policies applied (see the setup guide)
-> - Local environment running on `http://localhost:5173` (default Vite dev URL)
+> - Local environment running on `http://localhost:5174` (default Vite dev URL)
 
 ## 1. Create a Google Cloud project
 
@@ -25,7 +25,7 @@ configuration and restart the dev server with your existing environment variable
 2. Choose **Web application**.
 3. Set an identifiable name such as `Santorini Supabase Web`.
 4. Under **Authorized JavaScript origins** add your local and production origins, for example:
-   - `http://localhost:5173`
+   - `http://localhost:5174`
    - `https://your-production-domain`
 5. Under **Authorized redirect URIs** add the Supabase callback URL:
    - `https://<your-project-ref>.supabase.co/auth/v1/callback`
@@ -38,14 +38,14 @@ configuration and restart the dev server with your existing environment variable
 2. Enable **Google** and paste the Client ID and Client secret from the previous step.
 3. Click **Save**. Supabase instantly makes the provider available to the frontend.
 4. Confirm the **Site URL** under **Authentication → URL Configuration** matches your local dev URL (e.g.
-   `http://localhost:5173`). This must align with the origins you added in Google Cloud so Supabase can redirect users back to
+   `http://localhost:5174`). This must align with the origins you added in Google Cloud so Supabase can redirect users back to
    the app after sign-in.
 
 ## 4. Test locally
 
 1. Restart the Vite dev server if it is running: `cd web && npm run dev`.
 2. Open the Play tab and click **Continue with Google**. Supabase should redirect you to Google for consent, then back to
-   `http://localhost:5173`.
+   `http://localhost:5174`.
 3. After the redirect finishes, the app automatically creates or updates your `players` profile and lets you pick a display
    name from the new profile card.
 

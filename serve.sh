@@ -1,7 +1,7 @@
 #!/bin/bash
 # Simple script to serve the Santorini web UI locally
 
-PORT=${1:-5173}
+PORT=${1:-5174}
 
 echo "╔════════════════════════════════════════════════════════════════════════════╗"
 echo "║                 Ascent Demo - Vite Dev Server                 ║"

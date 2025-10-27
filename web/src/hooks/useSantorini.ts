@@ -818,5 +818,6 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     redo,
     calcOptionsBusy,
     nextPlayer,
+    gameEnded: gameRef.current?.gameEnded ?? [0, 0],
   };
 }

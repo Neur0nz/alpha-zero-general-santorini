@@ -12,7 +12,7 @@ so once the assets are cached you can continue playing offline.
 # Install dependencies and launch the dev server
 ./serve.sh
 
-# The app will be available on http://localhost:5173
+# The app will be available on http://localhost:5174
 ```
 
 > ℹ️ The first run downloads Pyodide, ONNX Runtime Web and the Santorini model,

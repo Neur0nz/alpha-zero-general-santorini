@@ -42,7 +42,7 @@ import { useMatchLobby, type CreateMatchPayload, type LobbyMatch } from '@hooks/
 import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
 import GameBoard from '@components/GameBoard';
 import GoogleIcon from '@components/auth/GoogleIcon';
-import type { SantoriniMoveAction } from '@/types/match';
+import type { SantoriniMoveAction, MatchStatus } from '@/types/match';
 import { generateDisplayName, validateDisplayName } from '@/utils/generateDisplayName';
 
 function formatDate(value: string) {
@@ -246,7 +246,7 @@ function ActiveMatchPanel({
   onSubmitMove: ReturnType<typeof useMatchLobby>['submitMove'];
   onLeave: () => Promise<void>;
   onOfferRematch: ReturnType<typeof useMatchLobby>['offerRematch'];
-  onGameComplete: (winnerId: string | null) => void;
+  onGameComplete: (status: MatchStatus, payload?: { winner_id?: string | null }) => Promise<void>;
 }) {
   const toast = useToast();
   const [offerBusy, setOfferBusy] = useBoolean();

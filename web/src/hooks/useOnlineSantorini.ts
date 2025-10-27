@@ -178,7 +178,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     if (base.loading || !match || !role || !onGameComplete) return;
     
     // Check if the game has ended
-    if (base.gameEnded && base.gameEnded.some((ended) => ended)) {
+    if (base.gameEnded && base.gameEnded.some((ended: number) => ended)) {
       // Determine the winner based on gameEnded array
       // gameEnded[0] = 1 means player 0 (creator) won
       // gameEnded[1] = 1 means player 1 (opponent) won
