@@ -474,6 +474,15 @@ function ActiveMatchPanel({
     }
   }, [lobbyMatch, onGameComplete, toast]);
 
+  // Always call the hook, but only use it when sessionMode is 'online'
+  const santorini = useOnlineSantorini({
+    match: sessionMode === 'online' ? lobbyMatch : null,
+    role: sessionMode === 'online' ? role : null,
+    moves: sessionMode === 'online' ? moves : [],
+    onSubmitMove: sessionMode === 'online' ? onSubmitMove : async () => {},
+    onGameComplete: sessionMode === 'online' ? handleGameComplete : undefined,
+  });
+
   if (sessionMode === 'local') {
     return <LocalMatchPanel onExit={onStopLocal} />;
   }
@@ -492,14 +501,6 @@ function ActiveMatchPanel({
       </Card>
     );
   }
-
-  const santorini = useOnlineSantorini({
-    match: lobbyMatch,
-    role,
-    moves,
-    onSubmitMove,
-    onGameComplete: handleGameComplete,
-  });
   const creatorName = lobbyMatch?.creator?.display_name ?? 'Player 1 (Blue)';
   const opponentName = lobbyMatch?.opponent?.display_name ?? 'Player 2 (Red)';
   const creatorClock = santorini.formatClock(santorini.creatorClockMs);
