@@ -25,9 +25,9 @@ export interface LobbyMatch extends MatchRecord {
 }
 
 export interface UseMatchLobbyState {
-  matches: MatchRecord[];
+  matches: LobbyMatch[];
   loading: boolean;
-  activeMatch: MatchRecord | null;
+  activeMatch: LobbyMatch | null;
   moves: MatchMoveRecord<MatchAction>[];
   joinCode: string | null;
 }
@@ -39,6 +39,10 @@ const INITIAL_STATE: UseMatchLobbyState = {
   moves: [],
   joinCode: null,
 };
+
+const MATCH_WITH_PROFILES =
+  '*, creator:creator_id (id, auth_user_id, display_name, rating, games_played, created_at, updated_at), '
+  + 'opponent:opponent_id (id, auth_user_id, display_name, rating, games_played, created_at, updated_at)';
 
 function normalizeAction(action: unknown): MatchAction {
   if (typeof action === 'object' && action !== null) {
@@ -105,12 +109,16 @@ export function useMatchLobby(profile: PlayerProfile | null) {
   );
 
   const attachProfiles = useCallback(
-    (match: MatchRecord | null): LobbyMatch | null => {
+    (match: (MatchRecord & Partial<LobbyMatch>) | null): LobbyMatch | null => {
       if (!match) return null;
+      const creatorProfile = (match as LobbyMatch).creator ?? null;
+      const opponentProfile = (match as LobbyMatch).opponent ?? null;
       return {
         ...match,
-        creator: match.creator_id ? playersRef.current[match.creator_id] ?? null : null,
-        opponent: match.opponent_id ? playersRef.current[match.opponent_id] ?? null : null,
+        creator:
+          creatorProfile ?? (match.creator_id ? playersRef.current[match.creator_id] ?? null : null),
+        opponent:
+          opponentProfile ?? (match.opponent_id ? playersRef.current[match.opponent_id] ?? null : null),
       };
     },
     [playersVersion],
@@ -179,7 +187,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       setState((prev) => ({ ...prev, loading: true }));
       const { data, error } = await client
         .from('matches')
-        .select('*')
+        .select(MATCH_WITH_PROFILES)
         .eq('status', 'waiting_for_opponent')
         .order('created_at', { ascending: true });
 
@@ -189,8 +197,16 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         return;
       }
 
-      const records = (data ?? []) as MatchRecord[];
-      setState((prev) => ({ ...prev, loading: false, matches: records }));
+      const rawRecords = Array.isArray(data) ? data : [];
+      const records = rawRecords as unknown as Array<MatchRecord & Partial<LobbyMatch>>;
+      const profilesToCache: PlayerProfile[] = [];
+      records.forEach((record) => {
+        if (record.creator) profilesToCache.push(record.creator);
+        if (record.opponent) profilesToCache.push(record.opponent);
+      });
+      mergePlayers(profilesToCache);
+      const hydrated = records.map((record) => attachProfiles(record) ?? { ...record, creator: null, opponent: null });
+      setState((prev) => ({ ...prev, loading: false, matches: hydrated }));
       void ensurePlayersLoaded(
         records.flatMap((match) => [match.creator_id, match.opponent_id ?? undefined]),
       );
@@ -209,16 +225,19 @@ export function useMatchLobby(profile: PlayerProfile | null) {
             if (payload.eventType === 'INSERT') {
               const record = payload.new as MatchRecord;
               if (record.status === 'waiting_for_opponent') {
-                matches.unshift(record);
+                matches.unshift(attachProfiles(record) ?? { ...record, creator: null, opponent: null });
               }
               void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
             } else if (payload.eventType === 'UPDATE') {
               const updated = payload.new as MatchRecord;
               const index = matches.findIndex((m) => m.id === updated.id);
               if (index >= 0) {
-                matches[index] = updated;
+                matches[index] = attachProfiles({ ...matches[index], ...updated }) ?? {
+                  ...matches[index],
+                  ...updated,
+                };
               } else if (updated.status === 'waiting_for_opponent') {
-                matches.unshift(updated);
+                matches.unshift(attachProfiles(updated) ?? { ...updated, creator: null, opponent: null });
               }
               if (updated.status !== 'waiting_for_opponent') {
                 return { ...prev, matches: matches.filter((m) => m.id !== updated.id) };
@@ -252,7 +271,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
     const fetchMatch = async () => {
       const { data, error } = await client
         .from('matches')
-        .select('*')
+        .select(MATCH_WITH_PROFILES)
         .eq('id', matchId)
         .maybeSingle();
 
@@ -261,8 +280,11 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         return;
       }
 
-      const record = (data ?? null) as MatchRecord | null;
-      setState((prev) => ({ ...prev, activeMatch: record }));
+      const record = (data ?? null) as unknown as (MatchRecord & Partial<LobbyMatch>) | null;
+      if (record?.creator) mergePlayers([record.creator]);
+      if (record?.opponent) mergePlayers([record.opponent]);
+      const hydrated = attachProfiles(record);
+      setState((prev) => ({ ...prev, activeMatch: hydrated }));
       if (record) {
         void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
       }
@@ -299,7 +321,14 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` },
         (payload: RealtimePostgresChangesPayload<MatchRecord>) => {
           const updated = payload.new as MatchRecord;
-          setState((prev) => ({ ...prev, activeMatch: updated }));
+          setState((prev) => ({
+            ...prev,
+            activeMatch:
+              attachProfiles({ ...prev.activeMatch, ...updated }) ??
+              (prev.activeMatch
+                ? { ...prev.activeMatch, ...updated }
+                : { ...updated, creator: null, opponent: null }),
+          }));
           void ensurePlayersLoaded([updated.creator_id, updated.opponent_id ?? undefined]);
         },
       )
@@ -332,7 +361,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       client.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [ensurePlayersLoaded, matchId]);
+  }, [attachProfiles, ensurePlayersLoaded, matchId, mergePlayers]);
 
   const createMatch = useCallback(
     async (payload: CreateMatchPayload) => {
@@ -351,20 +380,25 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         clock_increment_seconds: payload.hasClock ? Math.max(0, Math.round(payload.clockIncrementSeconds)) : 0,
       };
 
-      const { data, error } = await client.from('matches').insert(baseRecord).select('*').single();
+      const { data, error } = await client
+        .from('matches')
+        .insert(baseRecord)
+        .select(MATCH_WITH_PROFILES)
+        .single();
 
       if (error) {
         console.error('Failed to create match', error);
         throw error;
       }
 
-      const record = data as MatchRecord;
-      setState((prev) => ({ ...prev, activeMatch: record, joinCode, moves: [] }));
+      const record = data as unknown as MatchRecord & Partial<LobbyMatch>;
+      if (record.creator) mergePlayers([record.creator]);
+      const enriched = attachProfiles(record) ?? { ...record, creator: profile, opponent: null };
+      setState((prev) => ({ ...prev, activeMatch: enriched, joinCode, moves: [] }));
       void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
-      const enriched = attachProfiles(record);
-      return enriched ?? { ...record, creator: null, opponent: null };
+      return enriched;
     },
-    [attachProfiles, ensurePlayersLoaded, profile],
+    [attachProfiles, ensurePlayersLoaded, mergePlayers, profile],
   );
 
   const joinMatch = useCallback(
@@ -375,30 +409,30 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       }
 
       const isCode = idOrCode.length <= 8;
-      let targetMatch: MatchRecord | null = null;
+      let targetMatch: (MatchRecord & Partial<LobbyMatch>) | null = null;
 
       if (isCode) {
         const { data, error } = await client
           .from('matches')
-          .select('*')
+          .select(MATCH_WITH_PROFILES)
           .eq('private_join_code', idOrCode)
           .maybeSingle();
         if (error) {
           console.error('Failed to find match by code', error);
           throw error;
         }
-        targetMatch = (data ?? null) as MatchRecord | null;
+        targetMatch = (data ?? null) as (MatchRecord & Partial<LobbyMatch>) | null;
       } else {
         const { data, error } = await client
           .from('matches')
-          .select('*')
+          .select(MATCH_WITH_PROFILES)
           .eq('id', idOrCode)
           .maybeSingle();
         if (error) {
           console.error('Failed to find match by id', error);
           throw error;
         }
-        targetMatch = (data ?? null) as MatchRecord | null;
+        targetMatch = (data ?? null) as (MatchRecord & Partial<LobbyMatch>) | null;
       }
 
       if (!targetMatch) {
@@ -413,11 +447,11 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         throw new Error('Match is no longer available or has already been joined by another player.');
       }
 
+      const selfMatch = attachProfiles(targetMatch) ?? { ...targetMatch, creator: null, opponent: null };
       if (targetMatch.creator_id === profile.id) {
-        setState((prev) => ({ ...prev, activeMatch: targetMatch, joinCode: targetMatch.private_join_code, moves: [] }));
+        setState((prev) => ({ ...prev, activeMatch: selfMatch, joinCode: targetMatch.private_join_code, moves: [] }));
         void ensurePlayersLoaded([targetMatch.creator_id, targetMatch.opponent_id ?? undefined]);
-        const enriched = attachProfiles(targetMatch);
-        return enriched ?? { ...targetMatch, creator: null, opponent: null };
+        return selfMatch;
       }
 
       const { data, error } = await client
@@ -425,7 +459,7 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         .update({ opponent_id: profile.id, status: 'in_progress' })
         .eq('id', targetMatch.id)
         .is('opponent_id', null)
-        .select('*')
+        .select(MATCH_WITH_PROFILES)
         .maybeSingle();
 
       if (error) {
@@ -437,13 +471,21 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         throw new Error('Match is no longer available or has already been joined by another player.');
       }
 
-      const joined = data as MatchRecord;
-      setState((prev) => ({ ...prev, activeMatch: joined, joinCode: targetMatch.private_join_code, moves: [] }));
+      const joined = data as unknown as MatchRecord & Partial<LobbyMatch>;
+      const mergedProfiles: PlayerProfile[] = [];
+      if (joined.creator) mergedProfiles.push(joined.creator);
+      if (joined.opponent) mergedProfiles.push(joined.opponent);
+      mergePlayers(mergedProfiles);
+      const enriched = attachProfiles(joined) ?? {
+        ...joined,
+        creator: selfMatch.creator,
+        opponent: profile,
+      };
+      setState((prev) => ({ ...prev, activeMatch: enriched, joinCode: targetMatch.private_join_code, moves: [] }));
       void ensurePlayersLoaded([joined.creator_id, joined.opponent_id ?? undefined]);
-      const enriched = attachProfiles(joined);
-      return enriched ?? { ...joined, creator: null, opponent: null };
+      return enriched;
     },
-    [attachProfiles, ensurePlayersLoaded, profile],
+    [attachProfiles, ensurePlayersLoaded, mergePlayers, profile],
   );
 
   const leaveMatch = useCallback(async () => {
@@ -511,19 +553,23 @@ export function useMatchLobby(profile: PlayerProfile | null) {
           clock_increment_seconds: state.activeMatch.clock_increment_seconds,
           rematch_parent_id: state.activeMatch.id,
         })
-        .select('*')
+        .select(MATCH_WITH_PROFILES)
         .single();
       if (error) {
         console.error('Failed to create rematch', error);
         throw error;
       }
-      const record = data as MatchRecord;
-      setState((prev) => ({ ...prev, activeMatch: record, moves: [], joinCode: record.private_join_code }));
+      const record = data as unknown as MatchRecord & Partial<LobbyMatch>;
+      const cachedProfiles: PlayerProfile[] = [];
+      if (record.creator) cachedProfiles.push(record.creator);
+      if (record.opponent) cachedProfiles.push(record.opponent);
+      mergePlayers(cachedProfiles);
+      const enriched = attachProfiles(record) ?? { ...record, creator: profile, opponent: null };
+      setState((prev) => ({ ...prev, activeMatch: enriched, moves: [], joinCode: record.private_join_code }));
       void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
-      const enriched = attachProfiles(record);
-      return enriched ?? { ...record, creator: null, opponent: null };
+      return enriched;
     },
-    [attachProfiles, ensurePlayersLoaded, profile, state.activeMatch],
+    [attachProfiles, ensurePlayersLoaded, mergePlayers, profile, state.activeMatch],
   );
 
   const activeRole = useMemo<'creator' | 'opponent' | null>(() => {

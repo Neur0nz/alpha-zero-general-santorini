@@ -106,13 +106,17 @@ async function ensureProfile(client: SupabaseClient, user: User): Promise<Player
 const CACHE_KEY = 'santorini-auth-cache';
 
 const cacheAuthState = (session: Session | null, profile: PlayerProfile | null) => {
-  if (typeof window !== 'undefined' && session) {
+  if (typeof window !== 'undefined') {
     try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({
-        session,
-        profile,
-        timestamp: Date.now()
-      }));
+      if (session && profile) {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({
+          session,
+          profile,
+          timestamp: Date.now()
+        }));
+      } else {
+        localStorage.removeItem(CACHE_KEY);
+      }
     } catch (error) {
       console.warn('Failed to cache auth state:', error);
     }
@@ -140,11 +144,12 @@ const getCachedAuthState = (): { session: Session; profile: PlayerProfile } | nu
 };
 
 export function useSupabaseAuth() {
+  const cachedInitialState = getCachedAuthState();
+  const cachedStateRef = useRef(cachedInitialState);
   const [state, setState] = useState<AuthState>(() => {
-    const cached = getCachedAuthState();
-    if (cached) {
+    if (cachedInitialState) {
       console.log('Restoring auth state from cache');
-      return { session: cached.session, profile: cached.profile, loading: false, error: null };
+      return { session: cachedInitialState.session, profile: cachedInitialState.profile, loading: false, error: null };
     }
     return DEFAULT_STATE;
   });
@@ -202,9 +207,10 @@ export function useSupabaseAuth() {
         const newState = { session, profile, loading: false, error: null };
         setState(newState);
         cacheAuthState(session, profile);
+        cachedStateRef.current = { session, profile };
       } catch (profileError) {
         console.error('Failed to load player profile', profileError);
-        
+
         // Check if it's a network error or timeout
         const isNetworkError = profileError instanceof Error && 
           (profileError.message.includes('fetch') || 
@@ -216,7 +222,12 @@ export function useSupabaseAuth() {
           ? 'Network connection issue. Please check your internet connection and try again.'
           : 'Failed to load player profile. Please try again.';
           
-        setState({ session, profile: null, loading: false, error: errorMessage });
+        setState((prev) => ({
+          session,
+          profile: prev.profile,
+          loading: false,
+          error: errorMessage,
+        }));
       } finally {
         loadingProfileRef.current = null;
       }
@@ -225,6 +236,32 @@ export function useSupabaseAuth() {
     loadingProfileRef.current = loadPromise;
     await loadPromise;
   }, [state.profile]);
+
+  const restoreSessionFromCache = useCallback(async (): Promise<Session | null> => {
+    const client = supabase;
+    if (!client) {
+      return null;
+    }
+    const cached = cachedStateRef.current;
+    if (!cached?.session) {
+      return null;
+    }
+    try {
+      const { access_token: accessToken, refresh_token: refreshToken } = cached.session;
+      if (!accessToken || !refreshToken) {
+        return null;
+      }
+      const { data, error } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+      if (error) {
+        console.warn('Failed to restore Supabase session from cache', error);
+        return cached.session;
+      }
+      return data.session ?? cached.session;
+    } catch (error) {
+      console.warn('Unexpected error while restoring Supabase session from cache', error);
+      return cached.session;
+    }
+  }, []);
 
   useEffect(() => {
     const client = supabase;
@@ -242,36 +279,56 @@ export function useSupabaseAuth() {
 
         if (error) {
           console.error('Failed to load Supabase session', error);
-          
+
           // Check if it's a network error
-          const isNetworkError = error.message && 
-            (error.message.includes('fetch') || 
+          const isNetworkError = error.message &&
+            (error.message.includes('fetch') ||
              error.message.includes('network') ||
              error.message.includes('timeout'));
-          
-          const errorMessage = isNetworkError 
+
+          const errorMessage = isNetworkError
             ? 'Network connection issue. Please check your internet connection and refresh the page.'
             : 'Unable to load authentication session. Please refresh and try again.';
-            
-          setState({ session: null, profile: null, loading: false, error: errorMessage });
+
+          const cached = cachedStateRef.current;
+          if (cached) {
+            setState({ session: cached.session, profile: cached.profile, loading: false, error: errorMessage });
+          } else {
+            setState({ session: null, profile: null, loading: false, error: errorMessage });
+          }
           return;
         }
 
-        await loadSessionProfile(session);
+        if (session) {
+          await loadSessionProfile(session);
+          return;
+        }
+
+        const restored = await restoreSessionFromCache();
+        if (restored) {
+          await loadSessionProfile(restored);
+        } else {
+          setState({ session: null, profile: null, loading: false, error: null });
+        }
       } catch (err) {
         console.error('Failed to initialize authentication', err);
-        
+
         // Check if it's a network error
-        const isNetworkError = err instanceof Error && 
-          (err.message.includes('fetch') || 
+        const isNetworkError = err instanceof Error &&
+          (err.message.includes('fetch') ||
            err.message.includes('network') ||
            err.message.includes('timeout'));
-        
-        const errorMessage = isNetworkError 
+
+        const errorMessage = isNetworkError
           ? 'Network connection issue. Please check your internet connection and refresh the page.'
           : 'Failed to initialize authentication. Please refresh the page and try again.';
-          
-        setState({ session: null, profile: null, loading: false, error: errorMessage });
+
+        const cached = cachedStateRef.current;
+        if (cached) {
+          setState({ session: cached.session, profile: cached.profile, loading: false, error: errorMessage });
+        } else {
+          setState({ session: null, profile: null, loading: false, error: errorMessage });
+        }
       }
     };
 
@@ -279,6 +336,18 @@ export function useSupabaseAuth() {
 
     const { data: listener } = client.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
       console.log('Auth state change:', event, session?.user?.id);
+      if (event === 'INITIAL_SESSION') {
+        if (session) {
+          await loadSessionProfile(session);
+        }
+        return;
+      }
+
+      if (!session && cachedStateRef.current?.session && (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN')) {
+        await loadSessionProfile(cachedStateRef.current.session);
+        return;
+      }
+
       await loadSessionProfile(session);
     });
 
@@ -347,6 +416,7 @@ export function useSupabaseAuth() {
     if (typeof window !== 'undefined') {
       localStorage.removeItem(CACHE_KEY);
     }
+    cachedStateRef.current = null;
   }, []);
 
   const userId = state.session?.user.id ?? null;

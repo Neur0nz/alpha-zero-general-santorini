@@ -550,7 +550,21 @@ export function useSantorini(options: UseSantoriniOptions = {}) {
     readBoard();
 
     if (newSetupTurn >= 4) {
-      await finalizeGuidedSetup();
+      setButtons((prev) => ({
+        ...prev,
+        setupMode: false,
+        status: 'Finalizing setup...'
+      }));
+      try {
+        await finalizeGuidedSetup();
+      } catch (error) {
+        console.error('Guided setup finalization failed:', error);
+        setButtons((prev) => ({
+          ...prev,
+          setupMode: true,
+          status: 'Setup incomplete. Please place the workers again.',
+        }));
+      }
     }
   }, [buttons.setupTurn, readBoard, finalizeGuidedSetup]);
 
