@@ -5,18 +5,18 @@ export type CellState = {
   worker: number;
 };
 
+const LEVEL_COLORS = ['#F4F7FF', '#CFDAFF', '#A8C2FF'];
+const LEVEL_STROKE = '#1E2A4A';
+const DOME_COLOR = '#F5E8B8';
+
 export function renderCellSvg({ levels, worker }: CellState): string {
   const width = 240;
   const height = 240;
   const levelHeight = 40;
   const levelShrinkX = 30;
 
-  let style = 'style=""';
-  if (worker > 0) {
-    style = `style=\"fill: ${GREEN};\"`;
-  } else if (worker < 0) {
-    style = `style=\"fill: ${RED};\"`;
-  }
+  const workerFill = worker > 0 ? GREEN : worker < 0 ? RED : undefined;
+  const workerStyle = workerFill ? `style=\"fill: ${workerFill};\"` : '';
 
   let svg = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xml:space="preserve">`;
 
@@ -25,13 +25,14 @@ export function renderCellSvg({ levels, worker }: CellState): string {
     const xEnd = width - levelShrinkX * l;
     const yBeg = height - levelHeight * l;
     const yEnd = height - levelHeight * (l + 1);
-    svg += `<polygon ${style} points="${xBeg},${yBeg} ${xBeg},${yEnd} ${xEnd},${yEnd} ${xEnd},${yBeg}"/>`;
+    const fillColor = LEVEL_COLORS[Math.min(l, LEVEL_COLORS.length - 1)];
+    svg += `<polygon fill="${fillColor}" stroke="${LEVEL_STROKE}" stroke-width="4" stroke-linejoin="round" points="${xBeg},${yBeg} ${xBeg},${yEnd} ${xEnd},${yEnd} ${xEnd},${yBeg}"/>`;
   }
 
   if (levels === 4) {
-    svg += `<path d="M 70 0 A 50 50, 0, 0 1, 170 0" style="fill: blue;" transform="translate(0 ${3 * levelHeight})"/>`;
+    svg += `<path d="M 70 0 A 50 50, 0, 0 1, 170 0" fill="${DOME_COLOR}" stroke="${LEVEL_STROKE}" stroke-width="4" transform="translate(0 ${3 * levelHeight})"/>`;
   } else if (worker !== 0) {
-    svg += `<g ${style} transform="translate(70 ${height - levels * levelHeight - 100})">`;
+    svg += `<g ${workerStyle} transform="translate(70 ${height - levels * levelHeight - 100})">`;
     if (Math.abs(worker) === 1) {
       svg +=
         '<path d="M66.403,29.362C68.181,18.711,60.798,10,50,10l0,0c-10.794,0-18.177,8.711-16.403,19.362l2.686,16.133 c1.068,6.393,7.24,11.621,13.718,11.621l0,0c6.481,0,12.649-5.229,13.714-11.621L66.403,29.362z"/>' +
