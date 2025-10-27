@@ -40,22 +40,22 @@ function GameBoard({
       direction="column"
       gap={{ base: 6, md: 7 }}
       w="100%"
-      maxW={{ base: '100%', sm: '560px', md: '700px', lg: '840px', xl: '920px' }}
+      maxW={{ base: '100%', sm: '600px', md: '740px', lg: '880px', xl: '960px' }}
       mx="auto"
     >
-      <AspectRatio ratio={1} w="100%" maxW="min(100%, 920px)">
+      <AspectRatio ratio={1} w="100%" maxW="min(100%, 960px)">
         <Flex
           direction="column"
           w="100%"
           h="100%"
           bg="blackAlpha.500"
-          p={{ base: 5, sm: 6, md: 7 }}
+          p={{ base: 4, sm: 5, md: 6 }}
           borderRadius="xl"
           boxShadow="2xl"
         >
           <Grid
             templateColumns="repeat(5, 1fr)"
-            gap={{ base: 2, sm: 3, md: 4 }}
+            gap={{ base: 1, sm: 2, md: 3 }}
             w="100%"
             h="100%"
             flex={1}
