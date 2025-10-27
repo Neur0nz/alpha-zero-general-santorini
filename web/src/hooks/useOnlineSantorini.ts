@@ -110,6 +110,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   
   // Game engine state - pure TypeScript!
   const [engine, setEngine] = useState<SantoriniEngine>(() => SantoriniEngine.createInitial().engine);
+  const engineRef = useRef<SantoriniEngine>(engine); // Track current engine for fast path
   const [board, setBoard] = useState<BoardCell[][]>(() => engineToBoard(engine.snapshot));
   const moveSelectorRef = useRef<TypeScriptMoveSelector>(new TypeScriptMoveSelector());
   const [selectable, setSelectable] = useState<boolean[][]>(() => computeSelectable(engine.getValidMoves(), engine.snapshot, moveSelectorRef.current, false));
@@ -133,11 +134,17 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const gameCompletedRef = useRef<string | null>(null);
   const submissionLockRef = useRef<boolean>(false);
   
+  // Update engineRef whenever engine state changes
+  useEffect(() => {
+    engineRef.current = engine;
+  }, [engine]);
+  
   const resetMatch = useCallback(() => {
     if (!match) return;
     
     try {
       const newEngine = SantoriniEngine.fromSnapshot(match.initial_state);
+      engineRef.current = newEngine; // Update ref immediately
       setEngine(newEngine);
       setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
@@ -220,7 +227,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       lastSynced 
     });
 
-    // OPTIMIZATION: If we only have 1 new optimistic move and no snapshot, skip full sync
+    // OPTIMIZATION: If we only have 1 new optimistic move, use fast path
     const isOptimisticOnly = moves.length === lastSynced.appliedMoveCount + 1 && 
                               moves[moves.length - 1]?.id.startsWith('optimistic-');
     
@@ -231,8 +238,14 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       if (isSantoriniMoveAction(action) && typeof action.move === 'number') {
         try {
           console.log('⚡ FAST PATH: Applying single optimistic move', action.move);
-          const result = engine.applyMove(action.move);
+          
+          // Use engineRef for current state (not stale useState value)
+          const currentEngine = engineRef.current;
+          const result = currentEngine.applyMove(action.move);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
+          
+          // Update ref immediately to prevent race conditions
+          engineRef.current = newEngine;
           
           // Batch state updates
           setEngine(newEngine);
@@ -306,6 +319,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       }
       
       // Update engine and board state
+      engineRef.current = newEngine; // Update ref immediately
       setEngine(newEngine);
       setBoard(engineToBoard(newEngine.snapshot));
       moveSelectorRef.current.reset();
