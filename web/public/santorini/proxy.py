@@ -9,6 +9,45 @@ future_history = [] # States that were undone (oldest first) for redo support
 current_eval = [0.0, 0.0] # Current evaluation values for [player0, player1]
 last_probs = None # Last computed policy vector for current position
 
+
+def _reset_state_for_setup(reset_board: bool = False):
+    """Reset bookkeeping so a manual setup becomes the new baseline."""
+    global history, future_history, player, current_eval, last_probs, board
+
+    history = []
+    future_history = []
+    player = 0
+    current_eval = [0.0, 0.0]
+    last_probs = None
+
+    if mcts is not None:
+        mcts.nodes_data.clear()
+        mcts.step = 0
+        mcts.last_cleaning = 0
+
+    if g is None:
+        return
+
+    if reset_board:
+        g.board.workers.fill(0)
+        g.board.levels.fill(0)
+        g.board.meta.fill(0)
+
+    board = np.copy(g.board.get_state())
+
+
+def _normalize_coordinates(coord):
+    try:
+        y = int(coord[0])
+        x = int(coord[1])
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        raise ValueError("Invalid coordinate received for setup") from exc
+
+    if not (0 <= y < 5 and 0 <= x < 5):
+        raise ValueError(f"Setup coordinate out of range: {(y, x)}")
+
+    return y, x
+
 class dotdict(dict):
     def __getattr__(self, name):
         return self[name]
@@ -54,14 +93,42 @@ def changeDifficulty(numMCTSSims):
 
 
 def begin_setup():
-	"""Clear move history so edits become the new start state."""
-	global history, future_history
-	history = []
-	future_history = []
+        """Clear move history so edits become the new start state."""
+        _reset_state_for_setup(reset_board=True)
+
+def force_guided_setup(green1, green2, red1, red2):
+        """Hard reset the game state and place workers at the provided coordinates."""
+        if g is None:
+                raise RuntimeError("Game has not been initialised")
+
+        placements = [green1, green2, red1, red2]
+        worker_ids = [1, 2, -1, -2]
+
+        parsed_positions = []
+        seen = set()
+        for coords, worker_id in zip(placements, worker_ids):
+                y, x = _normalize_coordinates(coords)
+                if (y, x) in seen:
+                        raise ValueError("All workers must occupy unique tiles during setup")
+                seen.add((y, x))
+                parsed_positions.append((y, x, worker_id))
+
+        _reset_state_for_setup(reset_board=True)
+
+        for y, x, worker_id in parsed_positions:
+                g.board.workers[y, x] = worker_id
+
+        global board
+        board = np.copy(g.board.get_state())
+
+        return update_after_edit()
 
 def end_setup():
-	"""Finalize setup after edits and return new state."""
-	return update_after_edit()
+        """Finalize setup after edits and return new state."""
+        positions = [_findWorker(worker_id) for worker_id in (1, 2, -1, -2)]
+        if any(pos[0] < 0 or pos[1] < 0 for pos in positions):
+                raise ValueError("All four workers must be placed before finalizing setup")
+        return force_guided_setup(*positions)
 
 
 async def guessBestAction():
