@@ -41,6 +41,7 @@ import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
 import GameBoard from '@components/GameBoard';
 import GoogleIcon from '@components/auth/GoogleIcon';
 import type { SantoriniMoveAction, MatchStatus } from '@/types/match';
+import MyMatchesPanel from './MyMatchesPanel';
 
 function formatDate(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -254,7 +255,7 @@ function ActiveMatchPanel({
   moves: ReturnType<typeof useMatchLobby>['moves'];
   joinCode: string | null;
   onSubmitMove: ReturnType<typeof useMatchLobby>['submitMove'];
-  onLeave: () => Promise<void>;
+  onLeave: (matchId?: string | null) => Promise<void>;
   onOfferRematch: ReturnType<typeof useMatchLobby>['offerRematch'];
   onGameComplete: (status: MatchStatus, payload?: { winner_id?: string | null }) => Promise<void>;
 }) {
@@ -328,7 +329,7 @@ function ActiveMatchPanel({
   const handleLeave = async () => {
     setLeaveBusy.on();
     try {
-      await onLeave();
+      await onLeave(match?.id);
       await santorini.resetMatch();
     } finally {
       setLeaveBusy.off();
@@ -748,7 +749,16 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
             </Stack>
           </GridItem>
           <GridItem>
-            <PublicLobbies matches={lobby.matches} loading={lobby.loading} onJoin={lobby.joinMatch} />
+            <Stack spacing={6}>
+              <PublicLobbies matches={lobby.matches} loading={lobby.loading} onJoin={lobby.joinMatch} />
+              <MyMatchesPanel
+                matches={lobby.myMatches}
+                activeMatchId={lobby.activeMatchId}
+                profile={auth.profile}
+                onSelect={lobby.setActiveMatch}
+                onLeave={lobby.leaveMatch}
+              />
+            </Stack>
           </GridItem>
         </Grid>
       )}
