@@ -272,163 +272,161 @@ function ActiveMatchContent({
   const showJoinCode = lobbyMatch?.visibility === 'private' && joinCode;
 
   return (
-    <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} w="100%">
-      <CardHeader>
-        <Flex justify="space-between" align="center">
-          <Stack spacing={1}>
-            <Heading size="md">Active match</Heading>
-            {lobbyMatch && (
-              <Text fontSize="sm" color={mutedText}>
-                {creatorName} vs {lobbyMatch.opponent ? opponentName : 'Waiting for opponent'}
+    <Stack spacing={6}>
+      {/* Game Identity Bar - CLEAR indication of which game */}
+      <Card bg={cardBg} borderWidth="2px" borderColor="teal.400">
+        <CardBody py={3}>
+          <Flex
+            direction={{ base: 'column', sm: 'row' }}
+            justify="space-between"
+            align={{ base: 'flex-start', sm: 'center' }}
+            gap={3}
+          >
+            <Stack spacing={1}>
+              <Heading size="md" color={accentHeading}>
+                {creatorName} vs {opponentName}
+              </Heading>
+              <HStack spacing={3} flexWrap="wrap">
+                {showJoinCode && (
+                  <Badge colorScheme="orange" fontSize="0.8rem">
+                    Code: {joinCode}
+                  </Badge>
+                )}
+                <Badge colorScheme={lobbyMatch?.rated ? 'purple' : 'gray'}>
+                  {lobbyMatch?.rated ? 'Rated' : 'Casual'}
+                </Badge>
+                {lobbyMatch && lobbyMatch.clock_initial_seconds > 0 && (
+                  <Badge colorScheme="blue">
+                    {Math.round(lobbyMatch.clock_initial_seconds / 60)}+{lobbyMatch.clock_increment_seconds}
+                  </Badge>
+                )}
+                <Text fontSize="sm" color={mutedText}>
+                  {typedMoves.length} moves
+                </Text>
+              </HStack>
+            </Stack>
+            <ButtonGroup size="sm" variant="outline" spacing={2} flexWrap="wrap">
+              <Button colorScheme="red" onClick={handleLeave} isLoading={leaveBusy}>
+                Leave
+              </Button>
+              <Tooltip label="Offer a new game with the same settings" hasArrow>
+                <Button colorScheme="teal" onClick={handleOfferRematch} isLoading={offerBusy} isDisabled={!role || offerBusy}>
+                  Rematch
+                </Button>
+              </Tooltip>
+              <Tooltip label="Review this game from the Analyze tab" hasArrow>
+                <Button
+                  onClick={() => {
+                    if (!lobbyMatch) return;
+                    localStorage.setItem('santorini:lastAnalyzedMatch', lobbyMatch.id);
+                    toast({
+                      title: 'Ready for analysis',
+                      description: 'Open the Analyze tab to review this game.',
+                      status: 'success',
+                    });
+                  }}
+                >
+                  Analyze
+                </Button>
+              </Tooltip>
+            </ButtonGroup>
+          </Flex>
+        </CardBody>
+      </Card>
+
+      {/* Game Board - Centered and LARGE */}
+      <Flex direction="column" align="center" w="100%">
+        <Box
+          bg={panelBg}
+          borderRadius="xl"
+          borderWidth="1px"
+          borderColor={cardBorder}
+          p={{ base: 2, md: 3 }}
+          display="flex"
+          justifyContent="center"
+          w="100%"
+          maxW="960px"
+        >
+          <GameBoard
+            board={santorini.board}
+            selectable={santorini.selectable}
+            onCellClick={santorini.onCellClick}
+            onCellHover={santorini.onCellHover}
+            onCellLeave={santorini.onCellLeave}
+            buttons={santorini.buttons}
+            undo={santorini.undo}
+            redo={santorini.redo}
+            undoLabel="Request undo"
+            hideRedoButton
+            undoDisabledOverride
+          />
+        </Box>
+
+        {/* Player Clocks - Below board - PROMINENT */}
+        <Stack
+          direction={{ base: 'column', sm: 'row' }}
+          spacing={{ base: 4, sm: 8, md: 16 }}
+          mt={8}
+          w="100%"
+          maxW="960px"
+          justify="center"
+          align={{ base: 'stretch', sm: 'center' }}
+        >
+          <Box
+            flex="1"
+            p={4}
+            borderRadius="lg"
+            borderWidth="2px"
+            borderColor={creatorTurnActive ? accentHeading : cardBorder}
+            bg={creatorTurnActive ? useColorModeValue('teal.50', 'teal.900') : 'transparent'}
+            transition="all 0.3s"
+          >
+            <VStack spacing={2} align="center">
+              <Text fontSize="sm" fontWeight="semibold" color={mutedText}>
+                {role === 'creator' ? '🟢 YOUR CLOCK' : 'Player 1 (Blue)'}
               </Text>
-            )}
-          </Stack>
-          <HStack spacing={3}>
-            {showJoinCode && (
-              <Badge colorScheme="orange" fontSize="0.8rem">
-                Code: {joinCode}
-              </Badge>
-            )}
-            <Badge colorScheme={lobbyMatch?.rated ? 'purple' : 'gray'}>{lobbyMatch?.rated ? 'Rated' : 'Casual'}</Badge>
-            {lobbyMatch && lobbyMatch.clock_initial_seconds > 0 && (
-              <Badge colorScheme="blue">
-                {Math.round(lobbyMatch.clock_initial_seconds / 60)}+{lobbyMatch.clock_increment_seconds}
-              </Badge>
-            )}
-          </HStack>
-        </Flex>
-      </CardHeader>
-      <CardBody>
-        {!lobbyMatch ? (
-          <Center py={10}>
-            <Text color={mutedText}>Select or create a match to begin.</Text>
-          </Center>
-        ) : (
-          <Grid templateColumns={{ base: '1fr', xl: '1.2fr 0.8fr' }} gap={8} alignItems="flex-start">
-            <GridItem>
-              <VStack spacing={4} align="stretch">
-                <Box bg={panelBg} borderRadius="xl" borderWidth="1px" borderColor={cardBorder} p={{ base: 2, md: 3 }} display="flex" justifyContent="center">
-                  {/* TODO: Implement online undo request flow */}
-                  <GameBoard
-                    board={santorini.board}
-                    selectable={santorini.selectable}
-                    onCellClick={santorini.onCellClick}
-                    onCellHover={santorini.onCellHover}
-                    onCellLeave={santorini.onCellLeave}
-                    buttons={santorini.buttons}
-                    undo={santorini.undo}
-                    redo={santorini.redo}
-                    undoLabel="Request undo"
-                    hideRedoButton
-                    undoDisabledOverride
-                  />
-                </Box>
-                <Stack direction={{ base: 'column', sm: 'row' }} spacing={{ base: 3, sm: 4 }} justify="space-between" w="100%" align={{ base: 'stretch', sm: 'center' }}>
-                  <VStack spacing={1} align={{ base: 'center', sm: 'flex-start' }} w="100%">
-                    <Text fontSize="sm" color={mutedText}>
-                      {role === 'creator' ? 'Your clock' : 'Player 1 (Blue)'}
-                    </Text>
-                    <Heading size="lg" color={creatorTurnActive ? accentHeading : strongText}>
-                      {creatorClock}
-                    </Heading>
-                    <Text fontSize="xs" color={helperText} textAlign={{ base: 'center', sm: 'left' }}>
-                      {creatorName}
-                    </Text>
-                  </VStack>
-                  <VStack spacing={1} align={{ base: 'center', sm: 'flex-end' }} w="100%">
-                    <Text fontSize="sm" color={mutedText} textAlign={{ base: 'center', sm: 'right' }}>
-                      {role === 'opponent' ? 'Your clock' : 'Player 2 (Red)'}
-                    </Text>
-                    <Heading size="lg" color={opponentTurnActive ? accentHeading : strongText}>
-                      {opponentClock}
-                    </Heading>
-                    <Text fontSize="xs" color={helperText} textAlign={{ base: 'center', sm: 'right' }}>
-                      {opponentName}
-                    </Text>
-                  </VStack>
-                </Stack>
-              </VStack>
-            </GridItem>
-            <GridItem>
-              <Stack spacing={6}>
-                <Box>
-                  <Heading size="sm" mb={3}>
-                    Match status
-                  </Heading>
-                  <Text fontSize="sm" color={strongText}>
-                    {role === 'creator'
-                      ? 'You are playing as Player 1 (Blue)'
-                      : role === 'opponent'
-                      ? 'You are playing as Player 2 (Red)'
-                      : 'Spectating this match'}
-                  </Text>
-                  <Text fontSize="sm" color={helperText}>
-                    {typedMoves.length} moves played · Turn:{' '}
-                    {santorini.currentTurn === 'creator' ? `Player 1 (Blue) – ${creatorName}` : `Player 2 (Red) – ${opponentName}`}
-                  </Text>
-                </Box>
-                <Box>
-                  <Heading size="sm" mb={3}>
-                    Recent moves
-                  </Heading>
-                  {santorini.history.length === 0 ? (
-                    <Text color={mutedText} fontSize="sm">
-                      No moves yet. Use the board to make the first move.
-                    </Text>
-                  ) : (
-                    <Stack spacing={2} maxH="220px" overflowY="auto">
-                      {[...santorini.history]
-                        .slice()
-                        .reverse()
-                        .map((entry, index) => (
-                          <Box key={`${entry.action}-${index}`} borderBottomWidth="1px" borderColor={cardBorder} pb={2}>
-                            <Text fontWeight="semibold" fontSize="sm">
-                              Move {santorini.history.length - index}
-                            </Text>
-                            <Text fontSize="sm" color={mutedText}>
-                              {entry.description || `Action ${entry.action}`}
-                            </Text>
-                          </Box>
-                        ))}
-                    </Stack>
-                  )}
-                </Box>
-                <Box>
-                  <Heading size="sm" mb={3}>
-                    Actions
-                  </Heading>
-                  <ButtonGroup size="sm" variant="outline" spacing={3} flexWrap="wrap">
-                    <Button colorScheme="red" onClick={handleLeave} isLoading={leaveBusy}>
-                      Leave match
-                    </Button>
-                    <Tooltip label="Offer a new game with the same settings" hasArrow>
-                      <Button colorScheme="teal" onClick={handleOfferRematch} isLoading={offerBusy} isDisabled={!role || offerBusy}>
-                        Offer rematch
-                      </Button>
-                    </Tooltip>
-                    <Tooltip label="Review this game from the Analyze tab" hasArrow>
-                      <Button
-                        onClick={() => {
-                          if (!lobbyMatch) return;
-                          localStorage.setItem('santorini:lastAnalyzedMatch', lobbyMatch.id);
-                          toast({
-                            title: 'Ready for analysis',
-                            description: 'Open the Analyze tab to review this game.',
-                            status: 'success',
-                          });
-                        }}
-                      >
-                        Analyze game
-                      </Button>
-                    </Tooltip>
-                  </ButtonGroup>
-                </Box>
-              </Stack>
-            </GridItem>
-          </Grid>
-        )}
-      </CardBody>
-    </Card>
+              <Heading 
+                size="3xl" 
+                color={creatorTurnActive ? accentHeading : strongText}
+                fontFamily="mono"
+                letterSpacing="tight"
+              >
+                {creatorClock}
+              </Heading>
+              <Text fontSize="md" fontWeight="medium" color={helperText}>
+                {creatorName}
+              </Text>
+            </VStack>
+          </Box>
+          <Box
+            flex="1"
+            p={4}
+            borderRadius="lg"
+            borderWidth="2px"
+            borderColor={opponentTurnActive ? accentHeading : cardBorder}
+            bg={opponentTurnActive ? useColorModeValue('teal.50', 'teal.900') : 'transparent'}
+            transition="all 0.3s"
+          >
+            <VStack spacing={2} align="center">
+              <Text fontSize="sm" fontWeight="semibold" color={mutedText}>
+                {role === 'opponent' ? '🟢 YOUR CLOCK' : 'Player 2 (Red)'}
+              </Text>
+              <Heading 
+                size="3xl" 
+                color={opponentTurnActive ? accentHeading : strongText}
+                fontFamily="mono"
+                letterSpacing="tight"
+              >
+                {opponentClock}
+              </Heading>
+              <Text fontSize="md" fontWeight="medium" color={helperText}>
+                {opponentName}
+              </Text>
+            </VStack>
+          </Box>
+        </Stack>
+      </Flex>
+    </Stack>
   );
 }
 
@@ -449,15 +447,20 @@ function NoActiveGamePrompt() {
 }
 
 function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
-  const lobby = useMatchLobby(auth.profile);
+  const lobby = useMatchLobby(auth.profile, { autoConnectOnline: true });
   const sessionMode = lobby.sessionMode ?? 'online';
+  const { cardBg, cardBorder } = useSurfaceTokens();
 
-  // Auto-enable online mode
+  // Auto-select first in-progress game if none is selected
   useEffect(() => {
-    if (!lobby.sessionMode && auth.profile) {
-      lobby.enableOnline();
+    if (sessionMode === 'online' && !lobby.activeMatch && lobby.myMatches.length > 0) {
+      const inProgressGames = lobby.myMatches.filter(m => m.status === 'in_progress');
+      if (inProgressGames.length > 0) {
+        console.log('Auto-selecting first in-progress game:', inProgressGames[0].id);
+        lobby.setActiveMatch(inProgressGames[0].id);
+      }
     }
-  }, [lobby.sessionMode, lobby.enableOnline, auth.profile]);
+  }, [sessionMode, lobby.activeMatch, lobby.myMatches, lobby.setActiveMatch]);
 
   // Check if we have an active online game
   const hasActiveOnlineGame = sessionMode === 'online' && lobby.activeMatch && lobby.activeMatch.status === 'in_progress';
@@ -466,56 +469,50 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
 
   return (
     <Stack spacing={6} py={{ base: 6, md: 10 }}>
+      {/* Persistent Mode Switcher - Always visible */}
+      <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
+        <CardBody py={3}>
+          <Flex justify="space-between" align="center" gap={4} flexWrap="wrap">
+            <ButtonGroup size="sm" isAttached variant="outline">
+              <Button
+                colorScheme={sessionMode === 'online' ? 'teal' : undefined}
+                variant={sessionMode === 'online' ? 'solid' : 'outline'}
+                onClick={() => lobby.enableOnline()}
+                isDisabled={!auth.profile}
+              >
+                Online
+              </Button>
+              <Button
+                colorScheme={sessionMode === 'local' ? 'teal' : undefined}
+                variant={sessionMode === 'local' ? 'solid' : 'outline'}
+                onClick={() => {
+                  if (hasActiveLocalGame) {
+                    // Already in local mode with active game
+                    return;
+                  }
+                  lobby.startLocalMatch();
+                }}
+              >
+                Local
+              </Button>
+            </ButtonGroup>
+            {!auth.profile && (
+              <Text fontSize="xs" color="orange.500">
+                Sign in to play online
+              </Text>
+            )}
+          </Flex>
+        </CardBody>
+      </Card>
+
       {/* Active Game Switcher - only show if user has multiple active games */}
-      {auth.profile && sessionMode === 'online' && (
+      {auth.profile && sessionMode === 'online' && lobby.myMatches.filter(m => m.status === 'in_progress').length > 0 && (
         <ActiveGameSwitcher
           matches={lobby.myMatches}
           activeMatchId={lobby.activeMatchId}
           profile={auth.profile}
           onSelectMatch={lobby.setActiveMatch}
         />
-      )}
-
-      {/* Mode Selector for Local vs Online */}
-      {!hasActiveGame && (
-        <Card
-          bg={useColorModeValue('white', 'whiteAlpha.100')}
-          borderWidth="1px"
-          borderColor={useColorModeValue('gray.200', 'whiteAlpha.200')}
-        >
-          <CardBody>
-            <Stack spacing={4}>
-              <Stack spacing={1}>
-                <Heading size="sm">Choose game mode</Heading>
-                <Text fontSize="sm" color="gray.500">
-                  Start a local match on this device or find opponents online
-                </Text>
-              </Stack>
-              <ButtonGroup isAttached variant="outline">
-                <Button
-                  colorScheme="teal"
-                  variant="outline"
-                  onClick={() => lobby.enableOnline()}
-                  isDisabled={!auth.profile}
-                >
-                  Online Game
-                </Button>
-                <Button
-                  colorScheme="teal"
-                  variant="outline"
-                  onClick={() => lobby.startLocalMatch()}
-                >
-                  Local Match
-                </Button>
-              </ButtonGroup>
-              {!auth.profile && (
-                <Text fontSize="sm" color="orange.500">
-                  Sign in required for online games
-                </Text>
-              )}
-            </Stack>
-          </CardBody>
-        </Card>
       )}
 
       {/* Game Board */}
