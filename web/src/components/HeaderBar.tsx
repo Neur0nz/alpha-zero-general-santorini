@@ -56,12 +56,14 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
             </Tooltip>
           </HStack>
         </Flex>
-        <Flex direction={{ base: 'column', md: 'row' }} align={{ base: 'flex-start', md: 'center' }} gap={{ base: 2, md: 4 }}>
+        <Flex direction={{ base: 'column', md: 'row' }} align={{ base: 'stretch', md: 'center' }} gap={{ base: 2, md: 4 }}>
           <TabList
             display="flex"
             flexWrap="wrap"
             gap={{ base: 1, md: 2 }}
             borderBottom="none"
+            justifyContent={{ base: 'center', md: 'flex-start' }}
+            w="100%"
             sx={{ button: { fontWeight: 'semibold' } }}
           >
             <Tab

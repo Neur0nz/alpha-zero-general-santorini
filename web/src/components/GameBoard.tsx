@@ -36,18 +36,24 @@ function GameBoard({
   const setupSelectableBg = useColorModeValue('blue.100', 'blue.700');
 
   return (
-    <Flex direction="column" gap={5} w={{ base: "100%", sm: "400px", md: "500px", lg: "550px" }} maxW={{ base: "100%", sm: "400px", md: "500px", lg: "550px" }} minW={{ base: "300px", sm: "400px", md: "500px", lg: "550px" }}>
+    <Flex
+      direction="column"
+      gap={{ base: 4, md: 5 }}
+      w="100%"
+      maxW={{ base: '100%', sm: '380px', md: '480px', lg: '540px' }}
+      mx="auto"
+    >
       <Box>
         <Grid
           templateColumns="repeat(5, 1fr)"
-          gap={{ base: 2, sm: 3, md: 3 }}
+          gap={{ base: 1.5, sm: 3, md: 3 }}
           bg="blackAlpha.500"
           p={{ base: 3, sm: 4, md: 4 }}
           borderRadius="lg"
           boxShadow="xl"
           w="100%"
-          h={{ base: "300px", sm: "400px", md: "500px", lg: "550px" }}
-          minH={{ base: "300px", sm: "400px", md: "500px", lg: "550px" }}
+          h={{ base: '260px', sm: '360px', md: '460px', lg: '520px' }}
+          minH={{ base: '260px', sm: '360px', md: '460px', lg: '520px' }}
         >
           {board.map((row, y) =>
             row.map((cell, x) => {
@@ -114,11 +120,23 @@ function GameBoard({
           )}
         </Grid>
       </Box>
-      <Flex gap={3}>
-        <Button flex="1" onClick={undo} isDisabled={!buttons.canUndo} colorScheme="blue">
+      <Flex gap={3} direction={{ base: 'column', sm: 'row' }} w="100%">
+        <Button
+          flex="1"
+          w={{ base: '100%', sm: 'auto' }}
+          onClick={undo}
+          isDisabled={!buttons.canUndo}
+          colorScheme="blue"
+        >
           Undo
         </Button>
-        <Button flex="1" onClick={redo} isDisabled={!buttons.canRedo} colorScheme="purple">
+        <Button
+          flex="1"
+          w={{ base: '100%', sm: 'auto' }}
+          onClick={redo}
+          isDisabled={!buttons.canRedo}
+          colorScheme="purple"
+        >
           Redo
         </Button>
       </Flex>
@@ -126,9 +144,10 @@ function GameBoard({
         px={4}
         py={3}
         borderRadius="md"
-        bg={buttons.setupMode ? "blue.500" : "blackAlpha.500"}
+        bg={buttons.setupMode ? 'blue.500' : 'blackAlpha.500'}
         borderWidth="1px"
-        borderColor={buttons.setupMode ? "blue.300" : "whiteAlpha.200"}
+        borderColor={buttons.setupMode ? 'blue.300' : 'whiteAlpha.200'}
+        textAlign={{ base: 'center', sm: 'left' }}
       >
         <Text fontSize="sm" color="whiteAlpha.800">
           {buttons.status}
