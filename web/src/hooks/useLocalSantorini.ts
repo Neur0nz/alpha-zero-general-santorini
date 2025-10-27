@@ -112,9 +112,12 @@ export function useLocalSantorini() {
 
       const validMoves = engine.getValidMoves();
       
-      // During placement phase
+      // Check if we're in placement phase (first 25 valid moves are placements)
+      const hasPlacementMoves = validMoves.slice(0, 25).some(v => v);
+      
+      // During placement phase ONLY
       const placementAction = y * 5 + x;
-      if (placementAction < 25 && validMoves[placementAction]) {
+      if (hasPlacementMoves && placementAction < 25 && validMoves[placementAction]) {
         try {
           const result = engine.applyMove(placementAction);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);

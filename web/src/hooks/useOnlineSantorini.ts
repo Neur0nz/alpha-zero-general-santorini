@@ -461,11 +461,15 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       // Find valid move for this cell click
       const validMoves = engine.getValidMoves();
       
+      // Check if we're in placement phase (first 25 valid moves are placements)
+      const hasPlacementMoves = validMoves.slice(0, 25).some(v => v);
+      
       console.log('🎯 onCellClick Debug:', {
         y, x,
         role,
         enginePlayer: engine.player,
         currentTurn,
+        hasPlacementMoves,
         moveSelector: {
           stage: moveSelectorRef.current.stage,
           workerIndex: moveSelectorRef.current.workerIndex,
@@ -478,9 +482,9 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         firstFewValidMoves: validMoves.slice(0, 30).map((v, i) => v ? i : null).filter(Boolean),
       });
       
-      // During placement, the action is simply y * 5 + x
+      // During placement phase ONLY - apply placement moves
       const placementAction = y * 5 + x;
-      if (placementAction < 25 && validMoves[placementAction]) {
+      if (hasPlacementMoves && placementAction < 25 && validMoves[placementAction]) {
         try {
           const result = engine.applyMove(placementAction);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
@@ -581,9 +585,12 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
 
     const winnerId = p0Score === 1 ? match.creator_id : p1Score === 1 ? match.opponent_id : null;
     
-    console.log('useOnlineSantorini: Game completed detected, winner:', winnerId);
-    onGameComplete(winnerId);
-  }, [engine, match, onGameComplete]);
+    console.log('useOnlineSantorini: Game end detected locally, winner:', winnerId);
+    console.log('useOnlineSantorini: Server will handle match status update - NOT calling onGameComplete to avoid 409 conflict');
+    // DON'T call onGameComplete here! The server already updates match status
+    // when it processes the winning move in submit-move edge function.
+    // Calling it from client causes 409 Conflict race condition.
+  }, [engine, match]);
 
   // Clock timeout detection
   useEffect(() => {
