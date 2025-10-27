@@ -9,6 +9,7 @@ export interface UseOnlineSantoriniOptions {
   moves: MatchMoveRecord<SantoriniMoveAction>[];
   role: 'creator' | 'opponent' | null;
   onSubmitMove: (match: LobbyMatch, index: number, action: SantoriniMoveAction) => Promise<void>;
+  onGameComplete?: (winnerId: string | null) => void;
 }
 
 interface ClockState {
@@ -27,7 +28,7 @@ function deriveInitialClocks(match: LobbyMatch | null): ClockState {
 }
 
 export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
-  const { match, moves, role, onSubmitMove } = options;
+  const { match, moves, role, onSubmitMove, onGameComplete } = options;
   const base = useSantorini({ evaluationEnabled: false });
   const lockedControls = useMemo(
     () => ({
@@ -171,6 +172,31 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         pendingLocalMoveRef.current = null;
       });
   }, [base.history, clock, clockEnabled, match, onSubmitMove, role, toast]);
+
+  // Check for game completion after moves are applied
+  useEffect(() => {
+    if (base.loading || !match || !role || !onGameComplete) return;
+    
+    // Check if the game has ended
+    if (base.gameEnded && base.gameEnded.some((ended) => ended)) {
+      // Determine the winner based on gameEnded array
+      // gameEnded[0] = 1 means player 0 (creator) won
+      // gameEnded[1] = 1 means player 1 (opponent) won
+      let winnerId: string | null = null;
+      
+      if (base.gameEnded[0] === 1) {
+        winnerId = match.creator_id;
+      } else if (base.gameEnded[1] === 1) {
+        winnerId = match.opponent_id;
+      }
+      
+      // Only update match status if it's not already completed
+      if (match.status !== 'completed') {
+        console.log('Game completed! Winner:', winnerId);
+        onGameComplete(winnerId);
+      }
+    }
+  }, [base.gameEnded, base.loading, match, role, onGameComplete]);
 
   const formatClock = useCallback((ms: number) => {
     if (!clockEnabled) return '--:--';

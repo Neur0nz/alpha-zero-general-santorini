@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   AlertDescription,
@@ -237,6 +237,7 @@ function ActiveMatchPanel({
   onSubmitMove,
   onLeave,
   onOfferRematch,
+  onGameComplete,
 }: {
   match: LobbyMatch | null;
   role: 'creator' | 'opponent' | null;
@@ -245,6 +246,7 @@ function ActiveMatchPanel({
   onSubmitMove: ReturnType<typeof useMatchLobby>['submitMove'];
   onLeave: () => Promise<void>;
   onOfferRematch: ReturnType<typeof useMatchLobby>['offerRematch'];
+  onGameComplete: (winnerId: string | null) => void;
 }) {
   const toast = useToast();
   const [offerBusy, setOfferBusy] = useBoolean();
@@ -260,11 +262,48 @@ function ActiveMatchPanel({
         })),
     [moves],
   );
+  const handleGameComplete = useCallback(async (winnerId: string | null) => {
+    if (!lobbyMatch) return;
+    
+    try {
+      // Update match status to completed with winner
+      await onGameComplete('completed', { winner_id: winnerId });
+      
+      // Show completion toast
+      if (winnerId) {
+        const winnerName = winnerId === lobbyMatch.creator_id 
+          ? lobbyMatch.creator?.display_name ?? 'Player 1'
+          : lobbyMatch.opponent?.display_name ?? 'Player 2';
+        toast({
+          title: 'Game completed!',
+          description: `${winnerName} wins!`,
+          status: 'success',
+          duration: 5000,
+        });
+      } else {
+        toast({
+          title: 'Game completed!',
+          description: 'The game ended in a draw.',
+          status: 'info',
+          duration: 5000,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to complete game:', error);
+      toast({
+        title: 'Error completing game',
+        status: 'error',
+        description: 'Failed to update match status.',
+      });
+    }
+  }, [lobbyMatch, onGameComplete, toast]);
+
   const santorini = useOnlineSantorini({
     match: lobbyMatch,
     role,
     moves: typedMoves,
     onSubmitMove,
+    onGameComplete: handleGameComplete,
   });
   const creatorName = lobbyMatch?.creator?.display_name ?? 'Player 1 (Blue)';
   const opponentName = lobbyMatch?.opponent?.display_name ?? 'Player 2 (Red)';
@@ -820,6 +859,7 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
           onSubmitMove={lobby.submitMove}
           onLeave={lobby.leaveMatch}
           onOfferRematch={lobby.offerRematch}
+          onGameComplete={lobby.updateMatchStatus}
         />
       )}
     </Stack>
