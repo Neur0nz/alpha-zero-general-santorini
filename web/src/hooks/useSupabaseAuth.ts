@@ -223,6 +223,41 @@ export function useSupabaseAuth() {
     [userId]
   );
 
+  useEffect(() => {
+    if (!state.loading) {
+      return undefined;
+    }
+
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setState((prev) => {
+        if (!prev.loading) {
+          return prev;
+        }
+
+        console.warn('Authentication request timed out. Resetting state to allow retry.');
+
+        const fallbackError = prev.session && !prev.profile
+          ? 'We were unable to finish loading your profile. Please sign in again.'
+          : 'Unable to reach Supabase to verify your session. Please try signing in again.';
+
+        return {
+          session: null,
+          profile: null,
+          loading: false,
+          error: prev.error ?? fallbackError,
+        };
+      });
+    }, 8000);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [state.loading, state.session, state.profile]);
+
   return {
     session: state.session,
     profile: state.profile,

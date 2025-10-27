@@ -82,7 +82,7 @@ function AuthJourney({ auth }: AuthJourneyProps) {
     );
   }
 
-  if (loading) {
+  if (loading && session) {
     return (
       <Button size="sm" variant="outline" isLoading loadingText="Loading">
         Loading
