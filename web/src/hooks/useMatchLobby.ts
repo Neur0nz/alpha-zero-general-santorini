@@ -539,8 +539,8 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           console.log('useMatchLobby: Real-time move received', { 
             eventType: payload.eventType, 
             matchId, 
-            moveId: payload.new?.id,
-            moveIndex: payload.new?.move_index 
+            moveId: (payload.new as MatchMoveRecord)?.id,
+            moveIndex: (payload.new as MatchMoveRecord)?.move_index 
           });
           setState((prev) => {
             if (prev.activeMatchId !== matchId) {
@@ -562,7 +562,11 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
                 moveIndex: moveRecord.move_index,
                 totalMoves: prev.moves.length + 1 
               });
-              return { ...prev, moves: [...prev.moves, moveRecord] };
+              
+              // Add move and ensure proper ordering by move_index
+              // This handles cases where moves arrive out of order due to network delays
+              const updatedMoves = [...prev.moves, moveRecord].sort((a, b) => a.move_index - b.move_index);
+              return { ...prev, moves: updatedMoves };
             }
             return prev;
           });
@@ -574,6 +578,18 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           status,
           channel: channel.topic 
         });
+        
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('useMatchLobby: Real-time connection lost for match, will auto-reconnect', { matchId, status });
+          // Supabase will automatically attempt to reconnect
+        }
+        
+        if (status === 'SUBSCRIBED') {
+          console.log('useMatchLobby: Real-time subscription active, refreshing match state', { matchId });
+          // On (re)connection, refresh both match and moves to catch any missed updates
+          fetchMatch();
+          fetchMoves();
+        }
       });
 
     channelRef.current = channel;

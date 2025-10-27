@@ -431,6 +431,48 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     [base, currentTurn, match, moves.length, role, toast],
   );
 
+  // Game completion detection effect
+  useEffect(() => {
+    if (!match || !onGameComplete || match.status !== 'in_progress') {
+      return;
+    }
+    
+    // Check if game has ended based on game engine state
+    const [p0Score, p1Score] = base.gameEnded;
+    if (p0Score !== 0 || p1Score !== 0) {
+      // Game ended - determine winner
+      let winnerId: string | null = null;
+      if (p0Score > 0) {
+        winnerId = match.creator_id; // Player 0 (creator) won
+      } else if (p1Score > 0) {
+        winnerId = match.opponent_id; // Player 1 (opponent) won
+      }
+      
+      console.log('useOnlineSantorini: Game completed detected, winner:', winnerId);
+      onGameComplete(winnerId);
+    }
+  }, [base.gameEnded, match, onGameComplete]);
+
+  // Clock timeout detection effect
+  useEffect(() => {
+    if (!clockEnabled || !match || match.status !== 'in_progress' || !role || !onGameComplete) {
+      return;
+    }
+    
+    // Check if either clock has run out (with small buffer to avoid floating point issues)
+    if (clock.creatorMs <= 100 && currentTurn === 'creator') {
+      // Creator ran out of time, opponent wins
+      console.log('useOnlineSantorini: Creator ran out of time, opponent wins');
+      if (match.opponent_id) {
+        onGameComplete(match.opponent_id);
+      }
+    } else if (clock.opponentMs <= 100 && currentTurn === 'opponent') {
+      // Opponent ran out of time, creator wins
+      console.log('useOnlineSantorini: Opponent ran out of time, creator wins');
+      onGameComplete(match.creator_id);
+    }
+  }, [clock, clockEnabled, currentTurn, match, onGameComplete, role]);
+
   const localPlayerClock = role === 'opponent' ? clock.opponentMs : clock.creatorMs;
   const remotePlayerClock = role === 'opponent' ? clock.creatorMs : clock.opponentMs;
 
