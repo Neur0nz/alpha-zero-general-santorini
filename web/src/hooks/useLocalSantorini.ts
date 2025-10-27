@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { SantoriniEngine, type SantoriniSnapshot } from '@/lib/santoriniEngine';
+import { TypeScriptMoveSelector } from '@/lib/moveSelectorTS';
 import { renderCellSvg } from '@game/svg';
 import { useToast } from '@chakra-ui/react';
 
@@ -39,7 +40,11 @@ function engineToBoard(snapshot: SantoriniSnapshot): BoardCell[][] {
   return board;
 }
 
-function computeSelectable(validMoves: boolean[], snapshot: SantoriniSnapshot): boolean[][] {
+function computeSelectable(
+  validMoves: boolean[], 
+  snapshot: SantoriniSnapshot,
+  moveSelector: TypeScriptMoveSelector | null
+): boolean[][] {
   const selectable: boolean[][] = Array.from({ length: 5 }, () => Array(5).fill(false));
   
   // During placement phase (first 25 actions are placements)
@@ -55,10 +60,10 @@ function computeSelectable(validMoves: boolean[], snapshot: SantoriniSnapshot): 
     return selectable;
   }
   
-  // During game phase: Don't auto-highlight cells
-  // The move selection requires clicking a worker first, then showing valid moves/builds
-  // This would require move selector state which we'll skip for now
-  // Just return empty selectable - user can still click cells and the engine will validate
+  // During game phase: Use move selector to highlight relevant cells
+  if (moveSelector) {
+    return moveSelector.computeSelectable(snapshot.board, validMoves, snapshot.player);
+  }
   
   return selectable;
 }
@@ -69,7 +74,8 @@ export function useLocalSantorini() {
   // Game state
   const [engine, setEngine] = useState<SantoriniEngine>(() => SantoriniEngine.createInitial().engine);
   const [board, setBoard] = useState<BoardCell[][]>(() => engineToBoard(engine.snapshot));
-  const [selectable, setSelectable] = useState<boolean[][]>(() => computeSelectable(engine.getValidMoves(), engine.snapshot));
+  const moveSelectorRef = useRef<TypeScriptMoveSelector>(new TypeScriptMoveSelector());
+  const [selectable, setSelectable] = useState<boolean[][]>(() => computeSelectable(engine.getValidMoves(), engine.snapshot, moveSelectorRef.current));
   const [history, setHistory] = useState<Array<{ action: number; description: string }>>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   
@@ -87,7 +93,8 @@ export function useLocalSantorini() {
     const { engine: newEngine } = SantoriniEngine.createInitial();
     setEngine(newEngine);
     setBoard(engineToBoard(newEngine.snapshot));
-    setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot));
+    moveSelectorRef.current.reset();
+    setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current));
     setHistory([]);
     setHistoryIndex(-1);
   }, []);
@@ -114,7 +121,8 @@ export function useLocalSantorini() {
           
           setEngine(newEngine);
           setBoard(engineToBoard(newEngine.snapshot));
-          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot));
+          moveSelectorRef.current.reset();
+          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current));
           
           // Update history
           const newHistory = history.slice(0, historyIndex + 1);
@@ -131,8 +139,46 @@ export function useLocalSantorini() {
         return;
       }
 
-      // For game phase moves, simplified implementation
-      toast({ title: 'Move selection not yet fully implemented for game phase', status: 'warning' });
+      // During game phase: Use move selector
+      const moveSelector = moveSelectorRef.current;
+      const clicked = moveSelector.click(y, x, engine.snapshot.board, validMoves, engine.player);
+      
+      if (!clicked) {
+        toast({ title: 'Invalid selection', status: 'warning' });
+        return;
+      }
+      
+      // Update highlighting for next stage
+      setSelectable(computeSelectable(validMoves, engine.snapshot, moveSelector));
+      
+      // Check if move is complete
+      const action = moveSelector.getAction();
+      if (action >= 0) {
+        // Move is complete - apply it
+        try {
+          const result = engine.applyMove(action);
+          const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
+          
+          setEngine(newEngine);
+          setBoard(engineToBoard(newEngine.snapshot));
+          moveSelector.reset();
+          setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelector));
+          
+          // Update history
+          const newHistory = history.slice(0, historyIndex + 1);
+          newHistory.push({
+            action,
+            description: `Move action ${action}`,
+          });
+          setHistory(newHistory);
+          setHistoryIndex(newHistory.length - 1);
+        } catch (error) {
+          console.error('Move failed:', error);
+          toast({ title: 'Invalid move', status: 'error' });
+          moveSelector.reset();
+          setSelectable(computeSelectable(validMoves, engine.snapshot, moveSelector));
+        }
+      }
     },
     [engine, gameEnded, history, historyIndex, toast],
   );
@@ -153,7 +199,8 @@ export function useLocalSantorini() {
       
       setEngine(currentEngine);
       setBoard(engineToBoard(currentEngine.snapshot));
-      setSelectable(computeSelectable(currentEngine.getValidMoves(), currentEngine.snapshot));
+      moveSelectorRef.current.reset();
+      setSelectable(computeSelectable(currentEngine.getValidMoves(), currentEngine.snapshot, moveSelectorRef.current));
       setHistoryIndex(newIndex);
     } catch (error) {
       console.error('Undo failed:', error);
@@ -173,7 +220,8 @@ export function useLocalSantorini() {
       
       setEngine(newEngine);
       setBoard(engineToBoard(newEngine.snapshot));
-      setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot));
+      moveSelectorRef.current.reset();
+      setSelectable(computeSelectable(newEngine.getValidMoves(), newEngine.snapshot, moveSelectorRef.current));
       setHistoryIndex(newIndex);
     } catch (error) {
       console.error('Redo failed:', error);

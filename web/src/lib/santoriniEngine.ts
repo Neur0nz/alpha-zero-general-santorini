@@ -458,5 +458,7 @@ export const SANTORINI_CONSTANTS = {
   DIRECTIONS,
   encodeAction,
   decodeAction,
+  NO_MOVE,
+  NO_BUILD,
 } as const;
 
