@@ -223,7 +223,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     const syncStart = performance.now();
     console.log('useOnlineSantorini: Syncing state', { 
       matchId: match.id, 
-      movesCount: moves.length,
+      movesCount: moves.length, 
       lastSynced 
     });
 
@@ -349,7 +349,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     } catch (error) {
       console.error('useOnlineSantorini: Failed to synchronize board with server', error);
     }
-  }, [clockEnabled, match, moves, engine, role]);
+  }, [clockEnabled, match, moves, role]); // Removed 'engine' - using engineRef instead
 
   // Clock tick effect
   const currentTurn = useMemo(() => {
@@ -428,7 +428,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     // Get the move from pending ref
     const moveAction = pending.moveAction;
     if (!moveAction) {
-      pendingLocalMoveRef.current = null;
+    pendingLocalMoveRef.current = null;
       return;
     }
 
@@ -499,7 +499,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         toast({ title: "It's not your turn", status: 'warning' });
         return;
       }
-      
+
       // Don't allow moves while state is still syncing
       const lastSynced = lastSyncedStateRef.current;
       if (lastSynced.matchId !== match.id || lastSynced.appliedMoveCount !== moves.length) {
