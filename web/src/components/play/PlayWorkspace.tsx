@@ -405,26 +405,36 @@ function ActiveMatchPanel({
                     redo={santorini.redo}
                   />
                 </Box>
-                <HStack spacing={4} justify="space-between" w="100%">
-                  <VStack spacing={1} align="flex-start">
+                <Stack
+                  direction={{ base: 'column', sm: 'row' }}
+                  spacing={{ base: 3, sm: 4 }}
+                  justify="space-between"
+                  w="100%"
+                  align={{ base: 'stretch', sm: 'center' }}
+                >
+                  <VStack spacing={1} align={{ base: 'center', sm: 'flex-start' }} w="100%">
                     <Text fontSize="sm" color="whiteAlpha.700">
                       {role === 'creator' ? 'Your clock' : 'Player 1 (Blue)'}
                     </Text>
                     <Heading size="lg" color={creatorTurnActive ? 'teal.200' : 'whiteAlpha.900'}>
                       {creatorClock}
                     </Heading>
-                    <Text fontSize="xs" color="whiteAlpha.600">{creatorName}</Text>
+                    <Text fontSize="xs" color="whiteAlpha.600" textAlign={{ base: 'center', sm: 'left' }}>
+                      {creatorName}
+                    </Text>
                   </VStack>
-                  <VStack spacing={1} align="flex-end">
-                    <Text fontSize="sm" color="whiteAlpha.700" textAlign="right">
+                  <VStack spacing={1} align={{ base: 'center', sm: 'flex-end' }} w="100%">
+                    <Text fontSize="sm" color="whiteAlpha.700" textAlign={{ base: 'center', sm: 'right' }}>
                       {role === 'opponent' ? 'Your clock' : 'Player 2 (Red)'}
                     </Text>
                     <Heading size="lg" color={opponentTurnActive ? 'teal.200' : 'whiteAlpha.900'}>
                       {opponentClock}
                     </Heading>
-                    <Text fontSize="xs" color="whiteAlpha.600">{opponentName}</Text>
+                    <Text fontSize="xs" color="whiteAlpha.600" textAlign={{ base: 'center', sm: 'right' }}>
+                      {opponentName}
+                    </Text>
                   </VStack>
-                </HStack>
+                </Stack>
               </VStack>
             </GridItem>
             <GridItem>
