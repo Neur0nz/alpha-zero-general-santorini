@@ -55,7 +55,12 @@ function GameBoard({
     if (Number.isFinite(parsed) && parsed >= 320 && parsed <= 960) {
       return parsed;
     }
-    return 600;
+    const viewportWidth = window.innerWidth || 0;
+    if (viewportWidth <= 0) {
+      return 720;
+    }
+    const preferred = Math.round(viewportWidth - 96);
+    return Math.min(960, Math.max(360, preferred));
   });
 
   useEffect(() => {

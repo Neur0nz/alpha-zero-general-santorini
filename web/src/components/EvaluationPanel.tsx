@@ -184,7 +184,7 @@ function EvaluationPanel({
                     Run a calculation to see detailed options.
                   </Text>
                 )}
-                {topMoves.map((move) => {
+                {topMoves.map((move, index) => {
                   const clampedProb = Math.max(0, Math.min(move.prob, 1));
                   const percentValue = clampedProb * 100;
                   const percentLabel =
@@ -196,7 +196,7 @@ function EvaluationPanel({
 
                   return (
                     <Box
-                      key={move.action}
+                      key={`${move.action}-${index}`}
                       borderWidth="1px"
                       borderRadius="md"
                       borderColor={panelBorder}
