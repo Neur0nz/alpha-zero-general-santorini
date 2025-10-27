@@ -47,6 +47,11 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appliedMovesRef = useRef(0);
   const pendingLocalMoveRef = useRef<{ expectedHistoryLength: number } | null>(null);
+  const previousMatchRef = useRef<{ id: string | null; status: LobbyMatch['status'] | null; clockSeconds: number | null }>({
+    id: match?.id ?? null,
+    status: match?.status ?? null,
+    clockSeconds: match?.clock_initial_seconds ?? null,
+  });
 
   const currentTurn = useMemo<'creator' | 'opponent'>(() => {
     if (!match) return 'creator';
@@ -54,11 +59,37 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   }, [base.nextPlayer, match?.id]);
 
   useEffect(() => {
-    setClock(deriveInitialClocks(match));
-    setClockEnabled(match?.clock_initial_seconds ? match.clock_initial_seconds > 0 : false);
-    appliedMovesRef.current = 0;
-    pendingLocalMoveRef.current = null;
-  }, [match?.id, match?.clock_initial_seconds]);
+    const previous = previousMatchRef.current;
+
+    if (!match) {
+      setClock(deriveInitialClocks(null));
+      setClockEnabled(false);
+      appliedMovesRef.current = 0;
+      pendingLocalMoveRef.current = null;
+      previousMatchRef.current = { id: null, status: null, clockSeconds: null };
+      return;
+    }
+
+    const next: typeof previous = {
+      id: match.id,
+      status: match.status,
+      clockSeconds: match.clock_initial_seconds ?? null,
+    };
+
+    const shouldResetClock =
+      previous.id !== next.id ||
+      previous.clockSeconds !== next.clockSeconds ||
+      (previous.status === 'waiting_for_opponent' && next.status === 'in_progress');
+
+    if (shouldResetClock) {
+      setClock(deriveInitialClocks(match));
+      appliedMovesRef.current = 0;
+      pendingLocalMoveRef.current = null;
+    }
+
+    setClockEnabled(match.clock_initial_seconds ? match.clock_initial_seconds > 0 : false);
+    previousMatchRef.current = next;
+  }, [match?.id, match?.clock_initial_seconds, match?.status, match]);
 
   useEffect(() => {
     if (base.loading) return;
@@ -96,10 +127,13 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   }, [match, moves, base.loading, base.applyMove, clockEnabled, match?.clock_increment_seconds]);
 
   useEffect(() => {
-    if (!clockEnabled || !match) return;
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
+    }
+
+    if (!clockEnabled || !match || match.status !== 'in_progress') {
+      return;
     }
 
     const side = currentTurn;
@@ -121,7 +155,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         timerRef.current = null;
       }
     };
-  }, [clockEnabled, currentTurn, match]);
+  }, [clockEnabled, currentTurn, match?.status, match]);
 
   useEffect(() => {
     return () => {
