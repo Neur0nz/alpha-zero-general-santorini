@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSantorini } from './useSantorini';
 import type { LobbyMatch } from './useMatchLobby';
-import type { MatchMoveRecord, SantoriniMoveAction } from '@/types/match';
+import type { MatchMoveRecord, SantoriniMoveAction, SantoriniStateSnapshot } from '@/types/match';
 import { useToast } from '@chakra-ui/react';
 
 export interface UseOnlineSantoriniOptions {
@@ -31,23 +31,40 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const { match, moves, role, onSubmitMove, onGameComplete } = options;
   const base = useSantorini({ evaluationEnabled: false });
   const matchId = match?.id ?? null;
-  const lockedControls = useMemo(
-    () => ({
-      ...base.controls,
-      refreshEvaluation: async () => {},
-      calculateOptions: async () => {},
-      updateCalcDepth: (_depth: number | null) => {},
-      setGameMode: async (_mode: 'P0' | 'P1' | 'Human' | 'AI') => {},
-      changeDifficulty: (_sims: number) => {},
-    }),
-    [base.controls],
-  );
   const toast = useToast();
   const [clock, setClock] = useState<ClockState>(() => deriveInitialClocks(match));
   const [clockEnabled, setClockEnabled] = useState(match?.clock_initial_seconds ? match.clock_initial_seconds > 0 : false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const appliedMovesRef = useRef(0);
   const pendingLocalMoveRef = useRef<{ expectedHistoryLength: number } | null>(null);
+  const lastSyncedRef = useRef<{ matchId: string | null; moveIndex: number }>({ matchId: null, moveIndex: -1 });
+  const resetMatch = useCallback(async () => {
+    if (!match) {
+      return;
+    }
+    try {
+      await base.importState(match.initial_state);
+      const latestMove = moves.length > 0 ? moves[moves.length - 1] : null;
+      appliedMovesRef.current = moves.length;
+      pendingLocalMoveRef.current = null;
+      lastSyncedRef.current = { matchId: match.id, moveIndex: latestMove ? latestMove.move_index : -1 };
+      setClock(deriveInitialClocks(match));
+    } catch (error) {
+      console.error('Failed to reset match to server snapshot', error);
+    }
+  }, [base.importState, match, moves]);
+  const lockedControls = useMemo(
+    () => ({
+      ...base.controls,
+      reset: resetMatch,
+      refreshEvaluation: async () => {},
+      calculateOptions: async () => {},
+      updateCalcDepth: (_depth: number | null) => {},
+      setGameMode: async (_mode: 'P0' | 'P1' | 'Human' | 'AI') => {},
+      changeDifficulty: (_sims: number) => {},
+    }),
+    [base.controls, resetMatch],
+  );
   const previousMatchRef = useRef<{ id: string | null; status: LobbyMatch['status'] | null; clockSeconds: number | null }>({
     id: match?.id ?? null,
     status: match?.status ?? null,
@@ -121,39 +138,57 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   }, [match?.id, match?.clock_initial_seconds, match?.status, match]);
 
   useEffect(() => {
-    if (base.loading) return;
     if (!match) return;
-
-    const applyNewMoves = async () => {
-      if (!moves.length) return;
-      while (appliedMovesRef.current < moves.length) {
-        const moveRecord = moves[appliedMovesRef.current];
-        const action = moveRecord.action;
-        if (!action || action.kind !== 'santorini.move') {
-          appliedMovesRef.current += 1;
-          continue;
-        }
-        try {
-          await base.applyMove(action.move, { triggerAi: false });
-          if (action.clocks) {
-            setClock({ creatorMs: action.clocks.creatorMs, opponentMs: action.clocks.opponentMs });
-          } else if (clockEnabled && match.clock_increment_seconds > 0) {
-            const increment = match.clock_increment_seconds * 1000;
-            if (action.by === 'creator') {
-              setClock((prev) => ({ ...prev, creatorMs: prev.creatorMs + increment }));
-            } else {
-              setClock((prev) => ({ ...prev, opponentMs: prev.opponentMs + increment }));
-            }
+    while (appliedMovesRef.current < moves.length) {
+      const moveRecord = moves[appliedMovesRef.current];
+      const action = moveRecord.action;
+      if (action && action.kind === 'santorini.move') {
+        if (action.clocks) {
+          setClock({ creatorMs: action.clocks.creatorMs, opponentMs: action.clocks.opponentMs });
+        } else if (clockEnabled && match.clock_increment_seconds > 0) {
+          const increment = match.clock_increment_seconds * 1000;
+          if (action.by === 'creator') {
+            setClock((prev) => ({ ...prev, creatorMs: prev.creatorMs + increment }));
+          } else {
+            setClock((prev) => ({ ...prev, opponentMs: prev.opponentMs + increment }));
           }
-        } catch (error) {
-          console.error('Failed to apply move from server', error);
         }
-        appliedMovesRef.current += 1;
       }
-    };
+      appliedMovesRef.current += 1;
+    }
+  }, [clockEnabled, match, match?.clock_increment_seconds, moves]);
 
-    applyNewMoves();
-  }, [match, moves, base.loading, base.applyMove, clockEnabled, match?.clock_increment_seconds]);
+  useEffect(() => {
+    if (!match) {
+      lastSyncedRef.current = { matchId: null, moveIndex: -1 };
+      return;
+    }
+    if (base.loading) {
+      return;
+    }
+
+    const latestMove = moves.length > 0 ? moves[moves.length - 1] : null;
+    const snapshot: SantoriniStateSnapshot | null =
+      latestMove?.state_snapshot ?? match.initial_state ?? null;
+    if (!snapshot) {
+      return;
+    }
+
+    const latestIndex = latestMove ? latestMove.move_index : -1;
+    const lastSynced = lastSyncedRef.current;
+    if (lastSynced.matchId === match.id && lastSynced.moveIndex === latestIndex) {
+      return;
+    }
+
+    (async () => {
+      try {
+        await base.importState(snapshot);
+        lastSyncedRef.current = { matchId: match.id, moveIndex: latestIndex };
+      } catch (error) {
+        console.error('Failed to synchronize board with server snapshot', error);
+      }
+    })();
+  }, [base.importState, base.loading, match, moves]);
 
   useEffect(() => {
     if (timerRef.current) {
@@ -236,31 +271,6 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       });
   }, [base.history, clock, clockEnabled, match, onSubmitMove, role, toast]);
 
-  // Check for game completion after moves are applied
-  useEffect(() => {
-    if (base.loading || !match || !role || !onGameComplete) return;
-    
-    // Check if the game has ended
-    if (base.gameEnded && base.gameEnded.some((ended: number) => ended)) {
-      // Determine the winner based on gameEnded array
-      // gameEnded[0] = 1 means player 0 (creator) won
-      // gameEnded[1] = 1 means player 1 (opponent) won
-      let winnerId: string | null = null;
-      
-      if (base.gameEnded[0] === 1) {
-        winnerId = match.creator_id;
-      } else if (base.gameEnded[1] === 1) {
-        winnerId = match.opponent_id;
-      }
-      
-      // Only update match status if it's not already completed
-      if (match.status !== 'completed') {
-        console.log('Game completed! Winner:', winnerId);
-        onGameComplete(winnerId);
-      }
-    }
-  }, [base.gameEnded, base.loading, match, role, onGameComplete]);
-
   const formatClock = useCallback((ms: number) => {
     if (!clockEnabled) return '--:--';
     const totalSeconds = Math.floor(ms / 1000);
@@ -285,13 +295,6 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     },
     [base, currentTurn, match, role, toast],
   );
-
-  const resetMatch = useCallback(async () => {
-    await base.controls.reset();
-    appliedMovesRef.current = 0;
-    pendingLocalMoveRef.current = null;
-    setClock(deriveInitialClocks(match));
-  }, [base.controls, match]);
 
   const localPlayerClock = role === 'opponent' ? clock.opponentMs : clock.creatorMs;
   const remotePlayerClock = role === 'opponent' ? clock.creatorMs : clock.opponentMs;

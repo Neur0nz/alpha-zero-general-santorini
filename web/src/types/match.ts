@@ -1,6 +1,16 @@
 export type MatchVisibility = 'public' | 'private';
 export type MatchStatus = 'waiting_for_opponent' | 'in_progress' | 'completed' | 'abandoned';
 
+export interface SantoriniStateSnapshot {
+  version: number;
+  player: number;
+  board: number[][][];
+  history: unknown[];
+  future: unknown[];
+  gameEnded: [number, number];
+  validMoves: boolean[];
+}
+
 export interface PlayerProfile {
   id: string;
   auth_user_id: string | null;
@@ -24,6 +34,7 @@ export interface MatchRecord {
   winner_id: string | null;
   rematch_parent_id: string | null;
   created_at: string;
+  initial_state: SantoriniStateSnapshot;
 }
 
 export interface MatchMoveRecord<TAction = unknown> {
@@ -32,7 +43,7 @@ export interface MatchMoveRecord<TAction = unknown> {
   move_index: number;
   player_id: string;
   action: TAction;
-  state_snapshot: unknown;
+  state_snapshot: SantoriniStateSnapshot | null;
   eval_snapshot: unknown;
   created_at: string;
 }

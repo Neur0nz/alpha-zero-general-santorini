@@ -51,15 +51,6 @@ function normalizeAction(action: unknown): MatchAction {
   return { kind: 'unknown' } as MatchAction;
 }
 
-function generateJoinCode() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 6; i += 1) {
-    code += alphabet[Math.floor(Math.random() * alphabet.length)];
-  }
-  return code;
-}
-
 export function useMatchLobby(profile: PlayerProfile | null) {
   const [state, setState] = useState<UseMatchLobbyState>(INITIAL_STATE);
   const channelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
@@ -370,30 +361,28 @@ export function useMatchLobby(profile: PlayerProfile | null) {
         throw new Error('Authentication required.');
       }
 
-      const joinCode = payload.visibility === 'private' ? generateJoinCode() : null;
-      const baseRecord = {
-        creator_id: profile.id,
-        visibility: payload.visibility,
-        rated: payload.rated,
-        private_join_code: joinCode,
-        clock_initial_seconds: payload.hasClock ? Math.max(0, Math.round(payload.clockInitialMinutes * 60)) : 0,
-        clock_increment_seconds: payload.hasClock ? Math.max(0, Math.round(payload.clockIncrementSeconds)) : 0,
-      };
-
-      const { data, error } = await client
-        .from('matches')
-        .insert(baseRecord)
-        .select(MATCH_WITH_PROFILES)
-        .single();
+      const { data, error } = await client.functions.invoke('create-match', {
+        body: {
+          visibility: payload.visibility,
+          rated: payload.rated,
+          hasClock: payload.hasClock,
+          clockInitialMinutes: payload.clockInitialMinutes,
+          clockIncrementSeconds: payload.clockIncrementSeconds,
+        },
+      });
 
       if (error) {
         console.error('Failed to create match', error);
         throw error;
       }
 
-      const record = data as unknown as MatchRecord & Partial<LobbyMatch>;
+      const record = (data as { match?: MatchRecord & Partial<LobbyMatch> } | null)?.match;
+      if (!record) {
+        throw new Error('Match creation response was malformed.');
+      }
       if (record.creator) mergePlayers([record.creator]);
       const enriched = attachProfiles(record) ?? { ...record, creator: profile, opponent: null };
+      const joinCode = record.private_join_code ?? null;
       setState((prev) => ({ ...prev, activeMatch: enriched, joinCode, moves: [] }));
       void ensurePlayersLoaded([record.creator_id, record.opponent_id ?? undefined]);
       return enriched;
@@ -513,11 +502,12 @@ export function useMatchLobby(profile: PlayerProfile | null) {
       if (!client || !profile) {
         throw new Error('Authentication required.');
       }
-      const { error } = await client.from('match_moves').insert({
-        match_id: match.id,
-        move_index: moveIndex,
-        player_id: profile.id,
-        action: movePayload,
+      const { error } = await client.functions.invoke('submit-move', {
+        body: {
+          matchId: match.id,
+          moveIndex,
+          action: movePayload,
+        },
       });
       if (error) {
         console.error('Failed to submit move', error);

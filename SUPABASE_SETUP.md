@@ -48,7 +48,8 @@ create table public.matches (
   status match_status not null default 'waiting_for_opponent',
   winner_id uuid references public.players (id) on delete set null,
   rematch_parent_id uuid references public.matches (id) on delete set null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  initial_state jsonb not null
 );
 
 create table public.match_moves (
@@ -137,17 +138,8 @@ create policy "Participants can read moves"
     )
   );
 
-create policy "Participants can record moves"
-  on public.match_moves for insert
-  with check (
-    player_id in (select id from public.players where auth_user_id = auth.uid()) and
-    match_id in (
-      select id from public.matches
-      where
-        creator_id in (select id from public.players where auth_user_id = auth.uid()) or
-        opponent_id in (select id from public.players where auth_user_id = auth.uid())
-    )
-  );
+-- Moves must be inserted via the server-side validator. Do not add an
+-- insert policy so regular clients cannot bypass validation.
 ```
 
 > **Tip:** You can expose completed games for spectators by adjusting the `select` policies to allow everyone to read rows where `status = 'completed'`.
