@@ -535,8 +535,8 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       engineRef.current = SantoriniEngine.fromSnapshot(snapshot);
       moveSelectorRef.current.reset();
       
-      // Note: Python engine will be out of sync after restore from localStorage
-      // It will resync as moves are played
+      // Sync to Python engine for AI/evaluation
+      await syncPythonFromTypeScript();
       
       return true;
     } catch (error) {
@@ -546,20 +546,50 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     }
   }, []);
 
-  // Apply a move to Python engine (for keeping it in sync with TypeScript)
-  const applyMoveToPython = useCallback((action: number) => {
+  // Sync Python engine FROM TypeScript engine (for AI and evaluation)
+  const syncPythonFromTypeScript = useCallback(async () => {
     const game = gameRef.current;
     if (!game?.py) {
-      console.error('🔄 Cannot apply move to Python: missing game');
+      console.error('🔄 Cannot sync: missing game.py');
+      return;
+    }
+    
+    // Check if import_practice_state exists
+    if (typeof game.py.import_practice_state !== 'function') {
+      console.error('🔄 import_practice_state not available on game.py');
+      console.log('🔄 Available methods:', Object.getOwnPropertyNames(game.py).filter(k => !k.startsWith('_')));
       return;
     }
     
     try {
-      console.log('🔄 Applying move', action, 'to Python engine');
-      game.move(action, false);
-      console.log('🔄 Python move applied. Python player:', game.nextPlayer);
+      const snapshot = engineRef.current.snapshot;
+      console.log('🔄 Syncing TS → Python. Player:', snapshot.player);
+      const resultProxy = game.py.import_practice_state(snapshot);
+      if (!resultProxy) {
+        console.error('🔄 import_practice_state returned null!');
+        return;
+      }
+      const result =
+        typeof resultProxy.toJs === 'function'
+          ? resultProxy.toJs({ create_proxies: false })
+          : resultProxy;
+      resultProxy.destroy?.();
+      console.log('🔄 Sync complete. Python now at player:', result[0]);
+      if (Array.isArray(result) && result.length >= 3) {
+        const [nextPlayer, gameEndedRaw, validMovesRaw] = result as [
+          number,
+          ArrayLike<number> | number[],
+          ArrayLike<boolean> | boolean[],
+        ];
+        game.nextPlayer = typeof nextPlayer === 'number' ? nextPlayer : 0;
+        const endArray = Array.from(gameEndedRaw ?? [], (value) => Number(value));
+        game.gameEnded = (endArray.length === 2 ? endArray : [0, 0]) as [number, number];
+        const validArray = Array.from(validMovesRaw ?? [], (value) => Boolean(value));
+        game.validMoves =
+          validArray.length > 0 ? validArray : Array(GAME_CONSTANTS.TOTAL_MOVES).fill(false);
+      }
     } catch (error) {
-      console.error('Failed to apply move to Python:', error);
+      console.error('Failed to sync Python from TypeScript:', error);
     }
   }, []);
 
@@ -1067,8 +1097,8 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       moveSelectorRef.current.reset();
       console.log('🤖 AI move applied to TypeScript, new player:', engineRef.current.player);
       
-      // Python already applied this move (it came from guessBestAction which includes the move)
-      // So Python and TypeScript are now in sync
+      // Sync TypeScript → Python (AI made move in Python, but we re-apply from TS as source of truth)
+      await syncPythonFromTypeScript();
       
       await syncUi();
       await refreshEvaluation();
@@ -1077,13 +1107,14 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     }
     
     await updateButtons(false);
-  }, [evaluationEnabled, refreshEvaluation, syncUi, updateButtons]);
+  }, [evaluationEnabled, refreshEvaluation, syncPythonFromTypeScript, syncUi, updateButtons]);
 
   const ensureAiIdle = useCallback(() => aiPromiseRef.current, []);
 
   // No longer needed - placement is handled naturally by the engine
   const finalizeGuidedSetup = useCallback(async () => {
-    // After 4 workers are placed, refresh evaluation and trigger AI if needed
+    // After 4 workers are placed, sync to Python and trigger AI if needed
+    await syncPythonFromTypeScript();
     await refreshEvaluation();
     
     // Trigger AI if it should move first
@@ -1091,7 +1122,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     if (game && game.gameMode) {
       aiPromiseRef.current = aiPlayIfNeeded();
     }
-  }, [aiPlayIfNeeded, refreshEvaluation]);
+  }, [aiPlayIfNeeded, refreshEvaluation, syncPythonFromTypeScript]);
 
   const applyMove = useCallback(
     async (move: number, options: ApplyMoveOptions = {}) => {
@@ -1108,8 +1139,8 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
         
         console.log('👤 Move applied to TS. New player:', engineRef.current.player);
         
-        // Also apply to Python engine for AI/evaluation
-        applyMoveToPython(move);
+        // Sync to Python engine for AI/evaluation
+        await syncPythonFromTypeScript();
         
         await syncUi();
         await refreshEvaluation();
@@ -1124,7 +1155,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
         toast({ title: 'Invalid move', status: 'error' });
       }
     },
-    [aiPlayIfNeeded, applyMoveToPython, ensureAiIdle, refreshEvaluation, syncUi, toast],
+    [aiPlayIfNeeded, ensureAiIdle, refreshEvaluation, syncPythonFromTypeScript, syncUi, toast],
   );
 
   const onCellClick = useCallback(

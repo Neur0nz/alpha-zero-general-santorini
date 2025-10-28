@@ -3,6 +3,18 @@ from SantoriniGame import SantoriniGame as Game
 from SantoriniDisplay import move_to_str
 import numpy as np
 
+# Explicitly export functions for Pyodide
+__all__ = [
+    'init_game', 'getNextState', 'changeDifficulty', 'guessBestAction',
+    'begin_setup', 'force_guided_setup', 'end_setup', 
+    'get_current_eval', 'list_current_moves', 'list_current_moves_with_adv',
+    'revert_last_move', 'revert_to_previous_move', 'jump_to_move_index',
+    'redo_next_move', 'get_redo_actions', 'get_redo_count',
+    'get_last_action', 'get_history_length', 'get_history_snapshot',
+    'export_practice_state', 'import_practice_state',
+    'editCell', 'update_after_edit', 'calculate_eval_for_current_position'
+]
+
 g, board, mcts, player = None, None, None, 0
 history = [] # Previous states (new to old, not current). Each is an array with player and board and action
 future_history = [] # States that were undone (oldest first) for redo support
@@ -47,6 +59,63 @@ def _normalize_coordinates(coord):
         raise ValueError(f"Setup coordinate out of range: {(y, x)}")
 
     return y, x
+
+
+def _serialize_board_state(state):
+    """Convert a numpy board state into a JSON-serializable list."""
+    array = np.array(state, copy=True)
+    if array.shape != (5, 5, 3):
+        raise ValueError(f"Unexpected board shape while serializing: {array.shape}")
+    return array.astype(np.int8).tolist()
+
+
+def _deserialize_board_state(payload):
+    """Convert a JSON payload back into a board state array."""
+    array = np.array(payload, dtype=np.int8)
+    if array.shape != (5, 5, 3):
+        raise ValueError(f"Unexpected board shape while deserializing: {array.shape}")
+    return array
+
+
+def _serialize_history(entries):
+    """Serialize history or future history entries for persistence."""
+    serialized = []
+    for entry in entries:
+        player_value = int(entry[0])
+        board_state = _serialize_board_state(entry[1])
+        action = entry[2]
+        serialized.append(
+            {
+                "player": player_value,
+                "board": board_state,
+                "action": None if action is None else int(action),
+            }
+        )
+    return serialized
+
+
+def _deserialize_history(entries):
+    """Deserialize persisted history data back into runtime structures."""
+    if entries is None:
+        return []
+
+    restored = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if "board" not in entry:
+            continue
+        board_state = _deserialize_board_state(entry["board"])
+        player_value = int(entry.get("player", 0))
+        action_value = entry.get("action")
+        restored.append(
+            [
+                player_value,
+                board_state,
+                None if action_value is None else int(action_value),
+            ]
+        )
+    return restored
 
 class dotdict(dict):
     def __getattr__(self, name):
@@ -93,42 +162,47 @@ def changeDifficulty(numMCTSSims):
 
 
 def begin_setup():
-        """Clear move history so edits become the new start state."""
-        _reset_state_for_setup(reset_board=True)
+    """Clear move history so edits become the new start state."""
+    _reset_state_for_setup(reset_board=True)
+    # Guided setups always start with Player 0 to move
+    global player
+    player = 0
+
 
 def force_guided_setup(green1, green2, red1, red2):
-        """Hard reset the game state and place workers at the provided coordinates."""
-        if g is None:
-                raise RuntimeError("Game has not been initialised")
+    """Hard reset the game state and place workers at the provided coordinates."""
+    if g is None:
+        raise RuntimeError("Game has not been initialised")
 
-        placements = [green1, green2, red1, red2]
-        worker_ids = [1, 2, -1, -2]
+    placements = [green1, green2, red1, red2]
+    worker_ids = [1, 2, -1, -2]
 
-        parsed_positions = []
-        seen = set()
-        for coords, worker_id in zip(placements, worker_ids):
-                y, x = _normalize_coordinates(coords)
-                if (y, x) in seen:
-                        raise ValueError("All workers must occupy unique tiles during setup")
-                seen.add((y, x))
-                parsed_positions.append((y, x, worker_id))
+    parsed_positions = []
+    seen = set()
+    for coords, worker_id in zip(placements, worker_ids):
+        y, x = _normalize_coordinates(coords)
+        if (y, x) in seen:
+            raise ValueError("All workers must occupy unique tiles during setup")
+        seen.add((y, x))
+        parsed_positions.append((y, x, worker_id))
 
-        _reset_state_for_setup(reset_board=True)
+    _reset_state_for_setup(reset_board=True)
 
-        for y, x, worker_id in parsed_positions:
-                g.board.workers[y, x] = worker_id
+    for y, x, worker_id in parsed_positions:
+        g.board.workers[y, x] = worker_id
 
-        global board
-        board = np.copy(g.board.get_state())
+    global board
+    board = np.copy(g.board.get_state())
 
-        return update_after_edit()
+    return update_after_edit()
+
 
 def end_setup():
-        """Finalize setup after edits and return new state."""
-        positions = [_findWorker(worker_id) for worker_id in (1, 2, -1, -2)]
-        if any(pos[0] < 0 or pos[1] < 0 for pos in positions):
-                raise ValueError("All four workers must be placed before finalizing setup")
-        return force_guided_setup(*positions)
+    """Finalize setup after edits and return new state."""
+    positions = [_findWorker(worker_id) for worker_id in (1, 2, -1, -2)]
+    if any(pos[0] < 0 or pos[1] < 0 for pos in positions):
+        raise ValueError("All four workers must be placed before finalizing setup")
+    return force_guided_setup(*positions)
 
 
 async def guessBestAction():
@@ -439,6 +513,77 @@ def get_history_snapshot():
 # -----------------------------------------------------------------------------
 
 
+def export_practice_state():
+    """Serialize the current practice state for persistence in local storage."""
+    global g, board, player, history, future_history
+
+    if g is None:
+        return None
+
+    try:
+        current_board = _serialize_board_state(board)
+        history_payload = _serialize_history(history)
+        future_payload = _serialize_history(future_history)
+        end_state = g.getGameEnded(board, player)
+        valid_moves = g.getValidMoves(board, player)
+
+        return {
+            "version": 1,
+            "player": int(player),
+            "board": current_board,
+            "history": history_payload,
+            "future": future_payload,
+            "gameEnded": [int(end_state[0]), int(end_state[1])],
+            "validMoves": [bool(x) for x in valid_moves.tolist()],
+        }
+    except Exception as exc:  # pragma: no cover - defensive guard
+        print(f"Failed to export practice state: {exc}")
+        return None
+
+
+def import_practice_state(payload):
+    """Restore a previously persisted practice state."""
+    global g, board, player, history, future_history, current_eval, last_probs
+
+    if g is None:
+        raise RuntimeError("Game has not been initialised")
+
+    if payload is None:
+        raise ValueError("Empty practice state payload")
+
+    if hasattr(payload, "to_py"):  # pragma: no cover - pyodide proxy handling
+        payload = payload.to_py()
+
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid practice state payload")
+
+    board_data = payload.get("board")
+    player_value = int(payload.get("player", 0))
+
+    try:
+        restored_board = _deserialize_board_state(board_data)
+        history_entries = _deserialize_history(payload.get("history"))
+        future_entries = _deserialize_history(payload.get("future"))
+    except Exception as exc:
+        raise ValueError("Malformed practice state data") from exc
+
+    g.board.state[:, :, :] = restored_board
+    board = np.copy(g.board.get_state())
+    player = player_value
+    history = history_entries
+    future_history = future_entries
+    current_eval = [0.0, 0.0]
+    last_probs = None
+
+    end_state = g.getGameEnded(board, player)
+    valid_moves = g.getValidMoves(board, player)
+
+    return [int(player), end_state, valid_moves]
+
+
+# -----------------------------------------------------------------------------
+
+
 def _findWorker(worker):
     global g, board, mcts, player, history
 
@@ -457,6 +602,7 @@ def _read_level(y, x):
 
 
 def editCell(clicked_y, clicked_x, editMode):
+    global board
     if editMode == 1:
         g.board.levels[clicked_y, clicked_x] = (
             g.board.levels[clicked_y, clicked_x] + 1
@@ -478,10 +624,13 @@ def editCell(clicked_y, clicked_x, editMode):
             elif g.board.workers.flat[xy] < 0:
                 counts[1] += 1
                 g.board.workers.flat[xy] = -counts[1]
-        if counts[0] != 2 or counts[0] != 2:
+        if counts[0] != 2 or counts[1] != 2:
             print("Invalid board", counts)
     else:
         print("Dont know what to do in editMode", editMode)
+
+    # Keep the exported board state in sync with edits applied to g.board
+    board = np.copy(g.board.get_state())
 
 
 def update_after_edit():

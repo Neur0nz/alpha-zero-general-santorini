@@ -3,6 +3,18 @@ from SantoriniGame import SantoriniGame as Game
 from SantoriniDisplay import move_to_str
 import numpy as np
 
+# Explicitly export functions for Pyodide
+__all__ = [
+    'init_game', 'getNextState', 'changeDifficulty', 'guessBestAction',
+    'begin_setup', 'force_guided_setup', 'end_setup', 
+    'get_current_eval', 'list_current_moves', 'list_current_moves_with_adv',
+    'revert_last_move', 'revert_to_previous_move', 'jump_to_move_index',
+    'redo_next_move', 'get_redo_actions', 'get_redo_count',
+    'get_last_action', 'get_history_length', 'get_history_snapshot',
+    'export_practice_state', 'import_practice_state',
+    'editCell', 'update_after_edit', 'calculate_eval_for_current_position'
+]
+
 g, board, mcts, player = None, None, None, 0
 history = [] # Previous states (new to old, not current). Each is an array with player and board and action
 future_history = [] # States that were undone (oldest first) for redo support
