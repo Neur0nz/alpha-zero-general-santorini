@@ -244,7 +244,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           opponentProfile ?? (match.opponent_id ? playersRef.current[match.opponent_id] ?? null : null),
       };
     },
-    [playersVersion],
+    [], // Stable - reads from playersRef.current which is always up-to-date
   );
 
   useEffect(() => {
@@ -896,9 +896,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       client.removeChannel(channel);
       channelRef.current = null;
     };
-    // Note: attachProfiles and mergePlayers are intentionally omitted from dependencies
-    // to prevent subscription churn when player profiles update
-  }, [ensurePlayersLoaded, matchId, onlineEnabled]);
+  }, [attachProfiles, ensurePlayersLoaded, matchId, mergePlayers, onlineEnabled]);
 
   const createMatch = useCallback(
     async (payload: CreateMatchPayload) => {
