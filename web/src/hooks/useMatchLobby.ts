@@ -171,6 +171,8 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
   const playersRef = useRef<Record<string, PlayerProfile>>({});
   const [playersVersion, setPlayersVersion] = useState(0);
   const isStartingLocalMatchRef = useRef(false);
+  // Track moves being processed to prevent React setState race conditions
+  const processingMovesRef = useRef<Set<number>>(new Set());
 
   const matchId = state.activeMatchId;
   
@@ -619,8 +621,21 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
             return;
           }
           
+          // Check if we're already processing this move (prevents React setState race condition)
+          if (processingMovesRef.current.has(broadcastMove.move_index)) {
+            console.log('⚡ BROADCAST: Move already being processed, skipping duplicate', { 
+              moveIndex: broadcastMove.move_index 
+            });
+            return;
+          }
+          
+          // Mark as processing
+          processingMovesRef.current.add(broadcastMove.move_index);
+          
           setState((prev) => {
             if (prev.activeMatchId !== matchId) {
+              // Clean up if match changed
+              processingMovesRef.current.delete(broadcastMove.move_index);
               return prev;
             }
             
@@ -628,6 +643,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
             const exists = prev.moves.some((move) => move.move_index === broadcastMove.move_index);
             if (exists) {
               console.log('⚡ BROADCAST: Move already exists, skipping', { moveIndex: broadcastMove.move_index });
+              processingMovesRef.current.delete(broadcastMove.move_index);
               return prev;
             }
             
@@ -640,6 +656,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
                 action: 'Will wait for DB confirmation'
               });
               // Don't add it yet - wait for DB to sort it out
+              processingMovesRef.current.delete(broadcastMove.move_index);
               return prev;
             }
             
@@ -660,6 +677,9 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
               totalMoves: prev.moves.length + 1,
               isOptimistic: true
             });
+            
+            // Remove from processing set after adding
+            processingMovesRef.current.delete(broadcastMove.move_index);
             
             const updatedMoves = [...prev.moves, moveRecord];
             return { ...prev, moves: updatedMoves };
@@ -1159,7 +1179,8 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       
       // 1️⃣ BROADCAST FIRST - Instant feedback (50-100ms)!
       console.log('⚡ Broadcasting move to all players...');
-      const channel = client.channel(`match-${match.id}`);
+      // Reuse the existing subscribed channel instead of creating a new one
+      const channel = channelRef.current || client.channel(`match-${match.id}`);
       
       try {
         await channel.send({
@@ -1232,7 +1253,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       const totalElapsed = performance.now() - broadcastStart;
       console.log(`⚡ TOTAL time (user perception): ${totalElapsed.toFixed(0)}ms`);
     },
-    [onlineEnabled, profile],
+    [onlineEnabled, profile, channelRef],
   );
 
   const updateMatchStatus = useCallback(
