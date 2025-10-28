@@ -74,10 +74,13 @@ async function ensureProfile(client: SupabaseClient, user: User): Promise<Player
         error.message.includes('timeout'))
     ) {
       console.warn('Profile fetch failed, using temporary fallback profile. Will retry in background.', error.message);
+      // Use generateDisplayName to properly sanitize the seed (removes spaces, special chars)
+      const seed = getDisplayNameSeed(user);
+      const sanitizedName = seed ? generateDisplayName(seed) : `Player${user.id.slice(0, 8)}`;
       const fallbackProfile: PlayerProfile = {
         id: `temp_${user.id}`,
         auth_user_id: user.id,
-        display_name: getDisplayNameSeed(user) || `Player_${user.id.slice(0, 8)}`,
+        display_name: sanitizedName,
         rating: 1200,
         games_played: 0,
         created_at: new Date().toISOString(),
