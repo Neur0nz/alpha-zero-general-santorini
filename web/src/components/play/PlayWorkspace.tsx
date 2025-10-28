@@ -977,12 +977,23 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
       toast({ title: 'Match joined successfully!', status: 'success' });
       setJoiningCode('');
       onJoinClose();
-    } catch (error) {
-      toast({
-        title: 'Unable to join',
-        status: 'error',
-        description: error instanceof Error ? error.message : 'Invalid code or match unavailable.',
-      });
+    } catch (error: any) {
+      if (error.code === 'ACTIVE_GAME_EXISTS') {
+        toast({
+          title: 'Active game exists',
+          description: error.message,
+          status: 'warning',
+          duration: 5000,
+        });
+        onJoinClose();
+        // The user is already on the Play tab, so no navigation needed
+      } else {
+        toast({
+          title: 'Unable to join',
+          status: 'error',
+          description: error instanceof Error ? error.message : 'Invalid code or match unavailable.',
+        });
+      }
     }
   };
 

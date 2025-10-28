@@ -160,6 +160,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
   const channelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
   const playersRef = useRef<Record<string, PlayerProfile>>({});
   const [playersVersion, setPlayersVersion] = useState(0);
+  const isStartingLocalMatchRef = useRef(false);
 
   const matchId = state.activeMatchId;
   
@@ -376,14 +377,29 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
   useEffect(() => {
     const client = supabase;
     if (!client || !profile || !onlineEnabled) {
-      setState((prev) => ({ ...prev, myMatches: [], activeMatchId: null, activeMatch: null }));
+      // Don't clear state if we're starting a local match or already in local mode
+      if (isStartingLocalMatchRef.current) {
+        setState((prev) => ({ ...prev, myMatches: [] }));
+        return undefined;
+      }
+      setState((prev) => {
+        if (prev.sessionMode === 'local') {
+          return { ...prev, myMatches: [] };
+        }
+        return { ...prev, myMatches: [], activeMatchId: null, activeMatch: null };
+      });
       return undefined;
     }
     
     // Skip if we have a temporary profile (network error fallback)
     if (isTemporaryProfile(profile)) {
       console.log('Skipping match fetch with temporary profile ID - waiting for real profile');
-      setState((prev) => ({ ...prev, myMatches: [], activeMatchId: null, activeMatch: null }));
+      setState((prev) => {
+        if (prev.sessionMode === 'local') {
+          return { ...prev, myMatches: [] };
+        }
+        return { ...prev, myMatches: [], activeMatchId: null, activeMatch: null };
+      });
       return undefined;
     }
 
@@ -916,6 +932,17 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       const client = supabase;
       if (!client || !profile) {
         throw new Error('Authentication required.');
+      }
+
+      // Check if player already has an active game
+      if (state.activeMatchId && state.activeMatch) {
+        const activeStatus = state.activeMatch.status;
+        if (activeStatus === 'waiting_for_opponent' || activeStatus === 'in_progress') {
+          const error = new Error('You already have an active game. Please finish or cancel your current game before joining a new one.');
+          (error as any).code = 'ACTIVE_GAME_EXISTS';
+          (error as any).activeMatchId = state.activeMatchId;
+          throw error;
+        }
       }
 
       const isCode = idOrCode.length <= 8;
@@ -1499,6 +1526,8 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
 
   const startLocalMatch = useCallback(() => {
     const localMatch = createLocalMatch();
+    // Set flag to prevent useEffect from clearing the match when we disable online
+    isStartingLocalMatchRef.current = true;
     setOnlineEnabled(false);
     setState({
       ...INITIAL_STATE,
@@ -1506,6 +1535,10 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       activeMatchId: localMatch.id,
       activeMatch: localMatch,
     });
+    // Reset flag after state is set
+    setTimeout(() => {
+      isStartingLocalMatchRef.current = false;
+    }, 0);
   }, []);
 
   const stopLocalMatch = useCallback(() => {

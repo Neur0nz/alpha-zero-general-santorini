@@ -718,7 +718,6 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   const hasActiveMatch = sessionMode === 'online' && lobby.activeMatch;
   const isWaitingForOpponent = hasActiveMatch && lobby.activeMatch?.status === 'waiting_for_opponent';
   const isInProgress = hasActiveMatch && lobby.activeMatch?.status === 'in_progress';
-  const hasActiveLocalGame = sessionMode === 'local';
 
   return (
     <Stack spacing={6} py={{ base: 6, md: 10 }}>
@@ -738,13 +737,7 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
               <Button
                 colorScheme={sessionMode === 'local' ? 'teal' : undefined}
                 variant={sessionMode === 'local' ? 'solid' : 'outline'}
-                onClick={() => {
-                  if (hasActiveLocalGame) {
-                    // Already in local mode with active game
-                    return;
-                  }
-                  lobby.startLocalMatch();
-                }}
+                onClick={() => lobby.startLocalMatch()}
               >
                 Local
               </Button>

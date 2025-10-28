@@ -13,15 +13,20 @@ interface MatchLobbyProviderProps {
 
 export function MatchLobbyProvider({ profile, children }: MatchLobbyProviderProps) {
   const lobby = useMatchLobby(profile, { autoConnectOnline: true });
-  const { onlineEnabled, disableOnline, enableOnline } = lobby;
+  const { onlineEnabled, disableOnline, enableOnline, sessionMode } = lobby;
 
   useEffect(() => {
+    // Don't interfere with local mode
+    if (sessionMode === 'local') {
+      return;
+    }
+    
     if (!profile && onlineEnabled) {
       disableOnline();
     } else if (profile && !onlineEnabled) {
       enableOnline();
     }
-  }, [profile, onlineEnabled, disableOnline, enableOnline]);
+  }, [profile, onlineEnabled, disableOnline, enableOnline, sessionMode]);
 
   return <MatchLobbyContext.Provider value={lobby}>{children}</MatchLobbyContext.Provider>;
 }

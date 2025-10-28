@@ -737,12 +737,27 @@ function LobbyWorkspace({
       onJoinClose();
       // Navigate to Play tab after joining match
       onNavigateToPlay();
-    } catch (error) {
-      toast({
-        title: 'Unable to join',
-        status: 'error',
-        description: error instanceof Error ? error.message : 'Invalid code or match unavailable.',
-      });
+    } catch (error: any) {
+      if (error.code === 'ACTIVE_GAME_EXISTS') {
+        toast({
+          title: 'Active game exists',
+          description: error.message,
+          status: 'warning',
+          duration: 5000,
+        });
+        onJoinClose();
+        // Navigate to the active game
+        if (error.activeMatchId) {
+          lobby.setActiveMatch(error.activeMatchId);
+          onNavigateToPlay();
+        }
+      } else {
+        toast({
+          title: 'Unable to join',
+          status: 'error',
+          description: error instanceof Error ? error.message : 'Invalid code or match unavailable.',
+        });
+      }
     }
   };
 

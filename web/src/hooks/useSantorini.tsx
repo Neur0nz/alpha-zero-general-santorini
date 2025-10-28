@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { loadScript } from '@/utils/scriptLoader';
 import { Santorini } from '@game/santorini';
@@ -6,7 +6,12 @@ import { MoveSelector } from '@game/moveSelector';
 import { renderCellSvg, type CellState } from '@game/svg';
 import { GAME_CONSTANTS } from '@game/constants';
 import type { SantoriniStateSnapshot } from '@/types/match';
-import { SantoriniEngine, SANTORINI_CONSTANTS, type SantoriniSnapshot } from '@/lib/santoriniEngine';
+import {
+  SantoriniEngine,
+  SANTORINI_CONSTANTS,
+  type SantoriniSnapshot,
+  type PlacementContext as EnginePlacementContext,
+} from '@/lib/santoriniEngine';
 import { TypeScriptMoveSelector } from '@/lib/moveSelectorTS';
 import { useToast } from '@chakra-ui/react';
 
@@ -140,7 +145,7 @@ export type ButtonsState = {
   setupTurn: number;
 };
 
-type PlacementContext =
+type UiPlacementContext =
   | { phase: 'placement'; player: 0 | 1; workerId: 1 | 2 | -1 | -2 }
   | { phase: 'play' };
 
@@ -359,6 +364,24 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     setupMode: false,
     setupTurn: 0
   });
+  const buttonsRef = useRef(buttons);
+  useEffect(() => {
+    buttonsRef.current = buttons;
+  }, [buttons]);
+
+  const updateButtonsState = useCallback(
+    (updater: ButtonsState | ((prev: ButtonsState) => ButtonsState)) => {
+      setButtons((prev) => {
+        const next =
+          typeof updater === 'function'
+            ? (updater as (prevState: ButtonsState) => ButtonsState)(prev)
+            : (updater as ButtonsState);
+        buttonsRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
   const [evaluation, setEvaluation] = useState<EvaluationState>({ value: 0, advantage: 'Balanced', label: '0.00' });
   const [topMoves, setTopMoves] = useState<TopMove[]>([]);
   const [history, setHistory] = useState<MoveSummary[]>([]);
@@ -380,6 +403,38 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   const guidedSetupPlacementsRef = useRef<Array<[number, number]>>([]);
   const processingMoveRef = useRef<boolean>(false); // Prevent rapid clicks
 
+  const getPlacementContext = useCallback((): UiPlacementContext => {
+    const enginePlacement: EnginePlacementContext | null = engineRef.current?.getPlacementContext() ?? null;
+    if (!enginePlacement) {
+      return { phase: 'play' };
+    }
+    return {
+      phase: 'placement',
+      player: enginePlacement.player,
+      workerId: enginePlacement.workerId,
+    };
+  }, []);
+
+  const updateSelectable = useCallback(() => {
+    const selector = selectorRef.current;
+    const game = gameRef.current;
+    if (!selector || !game || !game.py) {
+      return;
+    }
+
+    selector.selectRelevantCells();
+    const placement = getPlacementContext();
+    if (buttonsRef.current.setupMode || placement.phase === 'placement') {
+      const cells = Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, (_, y) =>
+        Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, (_, x) => game.py._read_worker(y, x) === 0),
+      );
+      setSelectable(cells);
+      return;
+    }
+
+    setSelectable(selector.cells.map((row) => row.slice()));
+  }, []);
+
   // Helper to sync TypeScript engine state to UI and Python engine
   const syncEngineToUi = useCallback(() => {
     const snapshot = engineRef.current.snapshot;
@@ -399,8 +454,9 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     );
     setBoard(newBoard);
     setNextPlayer(snapshot.player);
+    updateSelectable();
     setEngineVersion(v => v + 1);
-  }, []);
+  }, [updateSelectable]);
 
   const persistPracticeState = useCallback(async () => {
     if (typeof window === 'undefined') {
@@ -428,6 +484,35 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       console.error('Failed to persist practice state:', error);
     }
   }, []);
+
+  const syncEngineFromPracticeState = useCallback(async () => {
+    const game = gameRef.current;
+    if (!game || !game.py || !game.py.export_practice_state) {
+      return;
+    }
+    try {
+      const snapshotProxy = game.py.export_practice_state();
+      if (!snapshotProxy) {
+        return;
+      }
+      const rawSnapshot =
+        typeof snapshotProxy.toJs === 'function'
+          ? (snapshotProxy.toJs({ create_proxies: false }) as unknown)
+          : snapshotProxy;
+      snapshotProxy.destroy?.();
+      if (!rawSnapshot || typeof rawSnapshot !== 'object') {
+        return;
+      }
+      const snapshot = rawSnapshot as SantoriniSnapshot;
+      engineRef.current = SantoriniEngine.fromSnapshot(snapshot);
+      moveSelectorRef.current.reset();
+      selectorRef.current?.resetAndStart();
+      updateSelectable();
+      setNextPlayer(engineRef.current.player);
+    } catch (error) {
+      console.error('Failed to sync practice engine state:', error);
+    }
+  }, [updateSelectable]);
 
   const restorePracticeState = useCallback(async () => {
     if (typeof window === 'undefined') {
@@ -636,75 +721,11 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     setBoard(nextBoard);
   }, []);
 
-  const getPlacementContext = useCallback((): PlacementContext => {
-    const game = gameRef.current;
-    if (!game || !game.py || typeof game.py._findWorker !== 'function') {
-      return { phase: 'play' };
-    }
-
-    const readWorkerPosition = (workerId: number): [number, number] | null => {
-      try {
-        const result = game.py._findWorker(workerId);
-        if (!result) {
-          return null;
-        }
-        const coords =
-          typeof result.toJs === 'function'
-            ? (result.toJs({ create_proxies: false }) as unknown)
-            : result;
-        if (typeof result.destroy === 'function') {
-          result.destroy();
-        }
-        if (Array.isArray(coords) && coords.length >= 2) {
-          const y = Number(coords[0]);
-          const x = Number(coords[1]);
-          if (Number.isInteger(y) && Number.isInteger(x) && y >= 0 && x >= 0) {
-            return [y, x];
-          }
-        }
-      } catch (_error) {
-        // Ignore lookup errors; treat as missing worker.
-      }
-      return null;
-    };
-
-    if (!readWorkerPosition(1)) {
-      return { phase: 'placement', player: 0, workerId: 1 };
-    }
-    if (!readWorkerPosition(2)) {
-      return { phase: 'placement', player: 0, workerId: 2 };
-    }
-    if (!readWorkerPosition(-1)) {
-      return { phase: 'placement', player: 1, workerId: -1 };
-    }
-    if (!readWorkerPosition(-2)) {
-      return { phase: 'placement', player: 1, workerId: -2 };
-    }
-    return { phase: 'play' };
-  }, []);
-
-  const updateSelectable = useCallback(() => {
-    const selector = selectorRef.current;
-    const game = gameRef.current;
-    if (!selector || !game || !game.py) return;
-    selector.selectRelevantCells();
-    const placement = getPlacementContext();
-    if (placement.phase === 'placement') {
-      const cells = Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, (_, y) =>
-        Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, (_, x) =>
-          game.py._read_worker(y, x) === 0,
-        ),
-      );
-      setSelectable(cells);
-      return;
-    }
-    setSelectable(selector.cells.map((row) => row.slice()));
-  }, [getPlacementContext]);
-
   const updateButtons = useCallback(async (loadingState = false) => {
     const game = gameRef.current;
     const selector = selectorRef.current;
-    if (!game || !selector) return;
+    const engine = engineRef.current;
+    if (!game || !selector || !engine) return;
     const py = game.py;
     let canUndo = false;
     let canRedo = false;
@@ -717,7 +738,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     const stage = selector.stage;
     const placement = getPlacementContext();
 
-    setButtons((prev) => {
+    updateButtonsState((prev) => {
       let status = prev.status;
       if (!prev.setupMode && placement.phase === 'placement') {
         const pieceNumber = placement.workerId === 1 || placement.workerId === -1 ? 1 : 2;
@@ -744,7 +765,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       };
     });
     setNextPlayer(typeof game.nextPlayer === 'number' ? game.nextPlayer : 0);
-  }, [getPlacementContext]);
+  }, [updateButtonsState]);
 
   const refreshHistory = useCallback(() => {
     const game = gameRef.current;
@@ -905,12 +926,70 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   }, [calcDepthOverride, evaluationEnabled]);
 
   const syncUi = useCallback(async (loadingState = false) => {
+    await syncEngineFromPracticeState();
     readBoard();
-    updateSelectable();
     await updateButtons(loadingState);
     refreshHistory();
     await persistPracticeState();
-  }, [persistPracticeState, readBoard, updateSelectable, updateButtons, refreshHistory]);
+  }, [persistPracticeState, readBoard, refreshHistory, syncEngineFromPracticeState, updateButtons]);
+
+  const startGuidedSetup = useCallback(async () => {
+    const game = gameRef.current;
+    const selector = selectorRef.current;
+    if (!game || !selector) return;
+
+    guidedSetupPlacementsRef.current = [];
+
+    updateButtonsState((prev) => ({
+      ...prev,
+      setupMode: true,
+      setupTurn: 0,
+      editMode: 2,
+      canUndo: false,
+      canRedo: false,
+      status: 'Place Green piece 1',
+    }));
+
+    selector.setEditMode(2);
+    selector.selectNone();
+    setSelectable(
+      Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () =>
+        Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () => false),
+      ),
+    );
+    setHistory([]);
+
+    if (game.py) {
+      try {
+        if (game.py.begin_setup) {
+          game.py.begin_setup();
+        }
+        for (let y = 0; y < GAME_CONSTANTS.BOARD_SIZE; y++) {
+          for (let x = 0; x < GAME_CONSTANTS.BOARD_SIZE; x++) {
+            let level = game.py._read_level(y, x);
+            let guard = 0;
+            while (level !== 0 && guard < 6) {
+              game.editCell(y, x, 1);
+              level = game.py._read_level(y, x);
+              guard += 1;
+            }
+            const worker = game.py._read_worker(y, x);
+            if (worker !== 0) {
+              game.editCell(y, x, 2);
+              if (game.py._read_worker(y, x) !== 0) {
+                game.editCell(y, x, 2);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to clear board for setup:', error);
+      }
+    }
+
+    moveSelectorRef.current.reset();
+    await syncUi();
+  }, [syncUi, updateButtonsState]);
 
   const initializeStartedRef = useRef(false);
   const initializePromiseRef = useRef<Promise<void> | null>(null);
@@ -929,7 +1008,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     const initPromise = (async () => {
       try {
         // Don't block UI - just update status
-        setButtons((prev) => ({ ...prev, status: 'Loading game engine...' }));
+        updateButtonsState((prev) => ({ ...prev, status: 'Loading game engine...' }));
         await yieldToMainThread();
         await loadPyodideRuntime();
         const game = gameRef.current;
@@ -938,14 +1017,23 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
           return;
         }
         game.init_game();
-        await restorePracticeState();
+        const restored = await restorePracticeState();
         selector.resetAndStart();
         await syncUi(true);
         await refreshEvaluation();
-        setButtons((prev) => ({ ...prev, loading: false, status: 'Ready to play!' }));
+        let statusOverride: string | null = 'Ready to play!';
+        if (!restored) {
+          await startGuidedSetup();
+          statusOverride = null;
+        }
+        updateButtonsState((prev) => ({
+          ...prev,
+          loading: false,
+          status: statusOverride ?? prev.status,
+        }));
       } catch (error) {
         initializeStartedRef.current = false;
-        setButtons((prev) => ({ ...prev, status: 'Failed to load game engine' }));
+        updateButtonsState((prev) => ({ ...prev, status: 'Failed to load game engine' }));
         throw error;
       } finally {
         initializePromiseRef.current = null;
@@ -955,7 +1043,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
 
     initializePromiseRef.current = initPromise;
     await initPromise;
-  }, [loadPyodideRuntime, refreshEvaluation, restorePracticeState, syncUi]);
+  }, [loadPyodideRuntime, refreshEvaluation, restorePracticeState, startGuidedSetup, syncUi, updateButtonsState]);
 
   const aiPlayIfNeeded = useCallback(async () => {
     if (!evaluationEnabled) {
@@ -967,15 +1055,12 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     await updateButtons(true);
     while (game.gameEnded.every((x: number) => !x) && !game.is_human_player('next')) {
       selector.selectNone();
-      readBoard();
       await game.ai_guess_and_move();
-      readBoard();
-      updateSelectable();
+      await syncUi();
       await refreshEvaluation();
-      refreshHistory();
     }
     await updateButtons(false);
-  }, [evaluationEnabled, readBoard, refreshEvaluation, refreshHistory, updateButtons, updateSelectable]);
+  }, [evaluationEnabled, refreshEvaluation, syncUi, updateButtons]);
 
   const ensureAiIdle = useCallback(() => aiPromiseRef.current, []);
 
@@ -1027,7 +1112,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       await syncUi();
       await refreshEvaluation();
 
-      setButtons((prev) => ({
+      updateButtonsState((prev) => ({
         ...prev,
         setupMode: false,
         setupTurn: 0,
@@ -1035,13 +1120,13 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       }));
     } catch (error) {
       console.error('Failed to finalize setup:', error);
-      setButtons((prev) => ({
+      updateButtonsState((prev) => ({
         ...prev,
         setupMode: true,
         status: 'Setup incomplete. Please place the workers again.',
       }));
     }
-  }, [refreshEvaluation, syncUi]);
+  }, [refreshEvaluation, syncUi, updateButtonsState]);
 
   const placeWorkerForSetup = useCallback(async (y: number, x: number) => {
     const game = gameRef.current;
@@ -1073,8 +1158,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     const newSetupTurn = setupTurn + 1;
     const steps = ['Place Green piece 1', 'Place Green piece 2', 'Place Red piece 1', 'Place Red piece 2'];
     const status = newSetupTurn < steps.length ? steps[newSetupTurn] : 'Setup complete';
-    
-    setButtons(prev => ({
+    updateButtonsState((prev) => ({
       ...prev,
       setupTurn: newSetupTurn,
       status
@@ -1084,7 +1168,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     await persistPracticeState();
 
     if (newSetupTurn >= 4) {
-      setButtons((prev) => ({
+      updateButtonsState((prev) => ({
         ...prev,
         status: 'Finalizing setup...'
       }));
@@ -1092,14 +1176,14 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
         await finalizeGuidedSetup();
       } catch (error) {
         console.error('Guided setup finalization failed:', error);
-        setButtons((prev) => ({
+        updateButtonsState((prev) => ({
           ...prev,
           setupMode: true,
           status: 'Setup incomplete. Please place the workers again.',
         }));
       }
     }
-  }, [buttons.setupTurn, finalizeGuidedSetup, persistPracticeState, readBoard]);
+  }, [buttons.setupTurn, finalizeGuidedSetup, persistPracticeState, readBoard, updateButtonsState]);
 
   const applyMove = useCallback(
     async (move: number, options: ApplyMoveOptions = {}) => {
@@ -1291,7 +1375,8 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     selector.resetAndStart();
     await syncUi();
     await refreshEvaluation();
-  }, [ensureAiIdle, refreshEvaluation, syncUi]);
+    await startGuidedSetup();
+  }, [ensureAiIdle, refreshEvaluation, startGuidedSetup, syncUi]);
 
   const setGameMode = useCallback(
     async (mode: 'P0' | 'P1' | 'Human' | 'AI') => {
@@ -1401,76 +1486,6 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   const updateCalcDepth = useCallback((depth: number | null) => {
     setCalcDepthOverride(depth);
   }, []);
-
-  const startGuidedSetup = useCallback(async () => {
-    const game = gameRef.current;
-    const selector = selectorRef.current;
-    if (!game || !selector) return;
-
-    guidedSetupPlacementsRef.current = [];
-
-    // Enter setup mode
-    setButtons(prev => ({
-      ...prev,
-      setupMode: true,
-      setupTurn: 0,
-      editMode: 2, // Edit workers mode
-      canUndo: false,
-      canRedo: false,
-      status: 'Place Green piece 1'
-    }));
-
-    // Ensure selector is in worker edit mode and clear existing highlights/history
-    selector.setEditMode(2);
-    selector.selectNone();
-    setSelectable(
-      Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () =>
-        Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () => false),
-      ),
-    );
-    setHistory([]);
-
-    // Clear all workers from the board
-    if (game.py) {
-      try {
-        // Inform backend to clear history so setup becomes baseline
-        if (game.py.begin_setup) {
-          game.py.begin_setup();
-        }
-        
-        // Clear all workers and levels from the board
-        for (let y = 0; y < GAME_CONSTANTS.BOARD_SIZE; y++) {
-          for (let x = 0; x < GAME_CONSTANTS.BOARD_SIZE; x++) {
-            // Clear levels (buildings) back to 0
-            let lvl = game.py._read_level(y, x);
-            let guard = 0;
-            while (lvl !== 0 && guard < 6) {
-              game.editCell(y, x, 1);
-              lvl = game.py._read_level(y, x);
-              guard++;
-            }
-
-            const w = game.py._read_worker(y, x);
-            if (w > 0) {
-              // >0 -> -1
-              game.editCell(y, x, 2);
-              // -1 -> 0
-              game.editCell(y, x, 2);
-            } else if (w < 0) {
-              // <0 -> 0
-              game.editCell(y, x, 2);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Failed to clear board for setup:', error);
-      }
-    }
-
-    // Clear selectable cells and refresh board
-    readBoard();
-    await persistPracticeState();
-  }, [persistPracticeState, readBoard]);
 
   const controls: Controls = useMemo(
     () => ({
