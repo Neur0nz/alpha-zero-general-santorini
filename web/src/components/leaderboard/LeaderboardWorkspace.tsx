@@ -111,11 +111,11 @@ function LeaderboardWorkspace({
           <Stack spacing={5}>
             <Stack spacing={2}>
               <Badge colorScheme={source === 'live' ? 'purple' : 'orange'} w="fit-content" borderRadius="full" px={3} py={1} textTransform="uppercase" fontSize="xs">
-                {source === 'live' ? 'Live ratings' : 'Sample snapshot'}
+                {source === 'live' ? 'Current rankings' : 'Sample snapshot'}
               </Badge>
-              <Heading size={{ base: 'md', md: 'lg' }}>Climb the Ascent leaderboard</Heading>
+              <Heading size={{ base: 'md', md: 'lg' }}>Player leaderboard</Heading>
               <Text color={mutedText} maxW="2xl">
-                Earn rating by playing rated Santorini matches. Strong fundamentals, precise tower positioning, and quick tactics are rewarded — just like the competitive ladders on chess.com and lichess.
+                Ratings are updated after each rated match
               </Text>
             </Stack>
             <HStack spacing={3} flexWrap="wrap">

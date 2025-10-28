@@ -5,6 +5,7 @@ import {
   Flex,
   Heading,
   HStack,
+  Link,
   Progress,
   Select,
   Stack,
@@ -119,7 +120,21 @@ function EvaluationPanel({
       {disclosure.isOpen ? (
         <>
           <Flex justify="space-between" align="center" mb={4}>
-            <Heading size="md">AI Evaluation</Heading>
+            <Box>
+              <Heading size="md">AI Evaluation</Heading>
+              <Text fontSize="xs" color={mutedText} mt={1}>
+                by{' '}
+                <Link
+                  href="https://github.com/cestpasphoto/alpha-zero-general"
+                  isExternal
+                  color="teal.500"
+                  fontWeight="medium"
+                  _hover={{ textDecoration: 'underline' }}
+                >
+                  cestpasphoto
+                </Link>
+              </Text>
+            </Box>
             <HStack spacing={3}>
               <Button size="sm" variant="outline" onClick={disclosure.onToggle}>
                 Hide
@@ -235,9 +250,23 @@ function EvaluationPanel({
         </>
       ) : (
         <Flex justify="space-between" align="center">
-          <Heading size="sm" color={strongText}>
-            AI Evaluation
-          </Heading>
+          <Box>
+            <Heading size="sm" color={strongText}>
+              AI Evaluation
+            </Heading>
+            <Text fontSize="xs" color={subtleText} mt={0.5}>
+              by{' '}
+              <Link
+                href="https://github.com/cestpasphoto/alpha-zero-general"
+                isExternal
+                color="teal.500"
+                fontWeight="medium"
+                _hover={{ textDecoration: 'underline' }}
+              >
+                cestpasphoto
+              </Link>
+            </Text>
+          </Box>
           <Button size="sm" colorScheme="teal" onClick={disclosure.onToggle}>
             Show
           </Button>

@@ -465,9 +465,11 @@ function ActiveMatchContent({
               </HStack>
             </Stack>
             <ButtonGroup size="sm" variant="outline" spacing={2} flexWrap="wrap">
-              <Button colorScheme="red" onClick={handleLeave} isLoading={leaveBusy}>
-                Leave
-              </Button>
+              <Tooltip label="Resign and lose the game (affects rating if rated)" hasArrow>
+                <Button colorScheme="red" onClick={handleLeave} isLoading={leaveBusy}>
+                  Resign
+                </Button>
+              </Tooltip>
               <Tooltip label="Offer a new game with the same settings" hasArrow>
                 <Button colorScheme="teal" onClick={handleOfferRematch} isLoading={offerBusy} isDisabled={!role || offerBusy}>
                   Rematch

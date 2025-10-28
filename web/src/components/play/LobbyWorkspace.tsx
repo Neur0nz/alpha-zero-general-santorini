@@ -140,7 +140,7 @@ function LobbyHero({
             </Badge>
             <Heading size={{ base: 'md', md: 'lg' }}>Jump into a Santorini match</Heading>
             <Text fontSize={{ base: 'sm', md: 'md' }} color={helperText}>
-              Queue instantly for a rated game, challenge friends, or warm up against the AI — inspired by the fast flows of chess.com and lichess.
+              Play rated matches, create custom games, or join with a friend's code
             </Text>
           </Stack>
           <Stack
@@ -232,11 +232,6 @@ function LobbyHero({
               View leaderboard
             </Button>
           </HStack>
-          <HStack spacing={3} flexWrap="wrap" color={subtleText} fontSize="sm">
-            <Text>Avg. lobby wait &lt; 2 minutes</Text>
-            <Text>Rated &amp; casual queues available</Text>
-            <Text>Invite friends with private codes</Text>
-          </HStack>
         </Stack>
       </CardBody>
     </Card>
@@ -255,22 +250,22 @@ function FeatureHighlights({
   const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
   const items = [
     {
-      title: 'Train with adaptive AI',
-      description: 'Sharpen tactics in Practice with undo, evaluation, and depth controls',
+      title: 'Practice with AI',
+      description: 'Play locally with move evaluation and undo',
       actionLabel: 'Open practice',
       onClick: onNavigateToPractice,
       icon: RepeatIcon,
     },
     {
-      title: 'Study every move',
-      description: 'Replay games and see what you missed.',
-      actionLabel: 'Analyze games',
+      title: 'Analyze games',
+      description: 'Review your completed games',
+      actionLabel: 'View analyzer',
       onClick: onNavigateToAnalyze,
       icon: SearchIcon,
     },
     {
-      title: 'Climb the ladder',
-      description: 'Track top Santorini Players on the Site',
+      title: 'View rankings',
+      description: 'See top players',
       actionLabel: 'See leaderboard',
       onClick: onNavigateToLeaderboard,
       icon: StarIcon,
@@ -458,7 +453,7 @@ function PublicLobbies({
   return (
     <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
       <CardHeader>
-        <Heading size="md">Open public lobbies</Heading>
+        <Heading size="md">Public games</Heading>
       </CardHeader>
       <CardBody>
         {loading ? (

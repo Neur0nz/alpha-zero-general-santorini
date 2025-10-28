@@ -517,8 +517,12 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
 
   const onCellClick = useCallback(
     (y: number, x: number) => {
-      if (!match || !role) {
-        toast({ title: 'Join a match first', status: 'info' });
+      if (!match) {
+        // Match is still loading, silently ignore clicks
+        return;
+      }
+      if (!role) {
+        toast({ title: 'Loading match...', status: 'info' });
         return;
       }
       if (match.status !== 'in_progress') {

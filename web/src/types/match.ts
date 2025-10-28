@@ -78,9 +78,35 @@ export type UndoResponseAction = {
   moveIndex: number;
 };
 
+export type AbortRequestAction = {
+  kind: 'abort.request';
+  by: 'creator' | 'opponent';
+  createdAt?: string;
+};
+
+export type AbortResponseAction = {
+  kind: 'abort.response';
+  by: 'creator' | 'opponent';
+  accepted: boolean;
+};
+
+export interface AbortRequestRecord {
+  id: string;
+  match_id: string;
+  requested_by: string;
+  requested_at: string;
+  status: 'pending' | 'accepted' | 'rejected' | 'expired';
+  responded_by: string | null;
+  responded_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type MatchAction =
   | SantoriniMoveAction
   | RematchOfferAction
   | UndoRequestAction
   | UndoResponseAction
+  | AbortRequestAction
+  | AbortResponseAction
   | Record<string, unknown>;

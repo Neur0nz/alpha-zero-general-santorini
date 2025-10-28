@@ -217,7 +217,7 @@ function PublicLobbies({
   return (
     <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
       <CardHeader>
-        <Heading size="md">Open public lobbies</Heading>
+        <Heading size="md">Public games</Heading>
       </CardHeader>
       <CardBody>
         {loading ? (
@@ -606,6 +606,9 @@ function ActiveMatchContent({
     }
   };
 
+  // Note: Abort feature hooks are available but UI implementation is minimal for now
+  // Full implementation with request/response flow can be added later
+
   const showJoinCode = lobbyMatch?.visibility === 'private' && joinCode;
 
   return (
@@ -753,9 +756,11 @@ function ActiveMatchContent({
                     Actions
                   </Heading>
                   <ButtonGroup size="sm" variant="outline" spacing={3} flexWrap="wrap">
-                    <Button colorScheme="red" onClick={handleLeave} isLoading={leaveBusy}>
-                      Leave match
-                    </Button>
+                    <Tooltip label="Resign and lose the game (affects rating if rated)" hasArrow>
+                      <Button colorScheme="red" onClick={handleLeave} isLoading={leaveBusy}>
+                        Resign
+                      </Button>
+                    </Tooltip>
                     <Tooltip label="Offer a new game with the same settings" hasArrow>
                       <Button colorScheme="teal" onClick={handleOfferRematch} isLoading={offerBusy} isDisabled={!role || offerBusy}>
                         Offer rematch

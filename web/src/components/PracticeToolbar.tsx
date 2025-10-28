@@ -77,17 +77,6 @@ function PracticeToolbar({ controls, onReset, onShowHistory, buttons }: Practice
             </Button>
           </WrapItem>
           <WrapItem>
-            <Button
-              colorScheme="blue"
-              size={{ base: 'sm', md: 'sm' }}
-              onClick={controls.startGuidedSetup}
-              isDisabled={buttons.setupMode}
-              title="Guided setup: place pieces then start"
-            >
-              Setup
-            </Button>
-          </WrapItem>
-          <WrapItem>
             <Button colorScheme="orange" size={{ base: 'sm', md: 'sm' }} onClick={controls.toggleEdit}>
               <Box display={{ base: 'none', sm: 'inline' }}>Toggle edit</Box>
               <Box display={{ base: 'inline', sm: 'none' }}>Edit</Box>

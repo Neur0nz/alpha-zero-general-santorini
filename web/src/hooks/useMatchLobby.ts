@@ -37,6 +37,14 @@ export interface UndoRequestState {
   respondedBy?: 'creator' | 'opponent';
 }
 
+export interface AbortRequestState {
+  matchId: string;
+  requestedBy: 'creator' | 'opponent';
+  requestedAt: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  respondedBy?: 'creator' | 'opponent';
+}
+
 export interface UseMatchLobbyState {
   matches: LobbyMatch[];
   myMatches: LobbyMatch[];
@@ -47,6 +55,7 @@ export interface UseMatchLobbyState {
   joinCode: string | null;
   sessionMode: 'local' | 'online' | null;
   undoRequests: Record<string, UndoRequestState | undefined>;
+  abortRequests: Record<string, AbortRequestState | undefined>;
 }
 
 const INITIAL_STATE: UseMatchLobbyState = {
@@ -59,6 +68,7 @@ const INITIAL_STATE: UseMatchLobbyState = {
   joinCode: null,
   sessionMode: null,
   undoRequests: {},
+  abortRequests: {},
 };
 
 export interface UseMatchLobbyOptions {
@@ -1451,6 +1461,188 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     });
   }, []);
 
+  const requestAbort = useCallback(
+    async () => {
+      if (!onlineEnabled) {
+        throw new Error('Online play is not enabled.');
+      }
+      const client = supabase;
+      const match = state.activeMatch;
+      if (!client || !match || state.sessionMode !== 'online') {
+        throw new Error('No active online match.');
+      }
+      if (!profile) {
+        throw new Error('Authentication required.');
+      }
+      if (match.status !== 'in_progress') {
+        throw new Error('Can only abort matches that are in progress.');
+      }
+      const role =
+        match.creator_id === profile.id
+          ? 'creator'
+          : match.opponent_id === profile.id
+            ? 'opponent'
+            : null;
+      if (!role) {
+        throw new Error('Only participants may request an abort.');
+      }
+      const existing = state.abortRequests[match.id];
+      if (existing && existing.status === 'pending') {
+        throw new Error('Abort request already pending.');
+      }
+      const requestedAt = new Date().toISOString();
+      
+      // Create abort request in database
+      const { data, error } = await client
+        .from('abort_requests')
+        .insert({
+          match_id: match.id,
+          requested_by: profile.id,
+          requested_at: requestedAt,
+          status: 'pending',
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('Failed to create abort request', error);
+        throw error;
+      }
+      
+      setState((prev) => ({
+        ...prev,
+        abortRequests: {
+          ...prev.abortRequests,
+          [match.id]: {
+            matchId: match.id,
+            requestedBy: role,
+            requestedAt,
+            status: 'pending',
+          },
+        },
+      }));
+      
+      // Broadcast to other player
+      const channel = channelRef.current;
+      if (channel) {
+        try {
+          await channel.send({
+            type: 'broadcast',
+            event: 'abort-request',
+            payload: {
+              match_id: match.id,
+              requested_by_role: role,
+              requested_by_user_id: profile.id,
+              requested_at: requestedAt,
+            },
+          });
+        } catch (broadcastError) {
+          console.warn('Failed to broadcast abort request', broadcastError);
+        }
+      }
+    },
+    [onlineEnabled, profile, state.abortRequests, state.activeMatch, state.sessionMode],
+  );
+
+  const respondAbort = useCallback(
+    async (accepted: boolean) => {
+      if (!onlineEnabled) {
+        throw new Error('Online play is not enabled.');
+      }
+      const client = supabase;
+      const match = state.activeMatch;
+      if (!client || !match || state.sessionMode !== 'online') {
+        throw new Error('No active online match to respond to.');
+      }
+      if (!profile) {
+        throw new Error('Authentication required.');
+      }
+      const pending = state.abortRequests[match.id];
+      if (!pending || pending.status !== 'pending') {
+        throw new Error('There is no pending abort request to respond to.');
+      }
+      const responderRole =
+        match.creator_id === profile.id
+          ? 'creator'
+          : match.opponent_id === profile.id
+            ? 'opponent'
+            : null;
+      if (!responderRole) {
+        throw new Error('Only participants may respond to abort requests.');
+      }
+      
+      const respondedAt = new Date().toISOString();
+      
+      // Update abort request in database
+      const { error: updateError } = await client
+        .from('abort_requests')
+        .update({
+          status: accepted ? 'accepted' : 'rejected',
+          responded_by: profile.id,
+          responded_at: respondedAt,
+        })
+        .eq('match_id', match.id)
+        .eq('status', 'pending');
+      
+      if (updateError) {
+        console.error('Failed to update abort request', updateError);
+        throw updateError;
+      }
+      
+      // If accepted, the database trigger will update the match status
+      
+      setState((prev) => {
+        const existing = prev.abortRequests[match.id];
+        if (!existing) {
+          return prev;
+        }
+        return {
+          ...prev,
+          abortRequests: {
+            ...prev.abortRequests,
+            [match.id]: {
+              ...existing,
+              status: accepted ? 'accepted' : 'rejected',
+              respondedBy: responderRole,
+            },
+          },
+        };
+      });
+      
+      // Broadcast response to other player
+      const channel = channelRef.current;
+      if (channel) {
+        try {
+          await channel.send({
+            type: 'broadcast',
+            event: 'abort-response',
+            payload: {
+              match_id: match.id,
+              accepted,
+              responded_by_role: responderRole,
+              responded_by_user_id: profile.id,
+              responded_at: respondedAt,
+            },
+          });
+        } catch (broadcastError) {
+          console.warn('Failed to broadcast abort response', broadcastError);
+        }
+      }
+    },
+    [onlineEnabled, profile, state.abortRequests, state.activeMatch, state.sessionMode],
+  );
+
+  const clearAbortRequest = useCallback((matchId: string) => {
+    setState((prev) => {
+      if (!prev.abortRequests[matchId]) {
+        return prev;
+      }
+      const nextAbort = { ...prev.abortRequests };
+      delete nextAbort[matchId];
+      return { ...prev, abortRequests: nextAbort };
+    });
+  }, []);
+
   const setActiveMatch = useCallback(
     (matchId: string | null) => {
       if (matchId === LOCAL_MATCH_ID) {
@@ -1596,6 +1788,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     onlineEnabled,
     hasActiveGame,
     undoRequests: state.undoRequests,
+    abortRequests: state.abortRequests,
     setActiveMatch,
     createMatch,
     joinMatch,
@@ -1610,6 +1803,9 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     requestUndo,
     respondUndo,
     clearUndoRequest,
+    requestAbort,
+    respondAbort,
+    clearAbortRequest,
   };
 }
 

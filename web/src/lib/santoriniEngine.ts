@@ -131,6 +131,7 @@ export class SantoriniEngine {
   private gameEnded: [number, number];
   private validMoves: boolean[];
   private history: HistoryEntry[];
+  private future: HistoryEntry[]; // For redo support
 
   private constructor(board: InternalBoardState, player: number, validMoves: boolean[], gameEnded: [number, number]) {
     this.workers = cloneGrid(board.workers);
@@ -140,6 +141,7 @@ export class SantoriniEngine {
     this.gameEnded = [Number(gameEnded[0]) || 0, Number(gameEnded[1]) || 0];
     this.validMoves = validMoves.slice();
     this.history = [];
+    this.future = [];
   }
 
   static createInitial(startingPlayer: number = 0): { engine: SantoriniEngine; snapshot: SantoriniSnapshot } {
@@ -197,6 +199,30 @@ export class SantoriniEngine {
       }
     }
     engine.history = historyEntries;
+
+    const futureEntries: HistoryEntry[] = [];
+    if (Array.isArray(snapshot.future)) {
+      for (const entry of snapshot.future) {
+        if (!entry || typeof entry !== 'object') continue;
+        const raw = entry as Record<string, unknown>;
+        const boardPayload = raw.board as number[][][] | undefined;
+        if (!boardPayload) continue;
+        try {
+          const parsedBoard = unpackBoard(boardPayload);
+          const playerValue = Number(raw.player);
+          const actionValue = raw.action === null || raw.action === undefined ? null : Number(raw.action);
+          futureEntries.push({
+            player: Number.isFinite(playerValue) ? playerValue : 0,
+            board: parsedBoard,
+            action: Number.isFinite(actionValue) ? Number(actionValue) : null,
+          });
+        } catch (_error) {
+          // Ignore malformed entries
+        }
+      }
+    }
+    engine.future = futureEntries;
+    
     return engine;
   }
 
@@ -225,12 +251,79 @@ export class SantoriniEngine {
       throw new Error('Action out of bounds');
     }
     
+    // Clear future when a new move is made
+    this.future = [];
+    
     const placement = this.getNextPlacement();
     if (placement) {
       return this.applyPlacement(action, placement);
     }
 
     return this.applyGameMove(action);
+  }
+
+  canUndo(): boolean {
+    return this.history.length > 0;
+  }
+
+  canRedo(): boolean {
+    return this.future.length > 0;
+  }
+
+  undo(): { snapshot: SantoriniSnapshot; success: boolean } {
+    if (this.history.length === 0) {
+      return { snapshot: this.toSnapshot(), success: false };
+    }
+
+    // Save current state to future
+    this.future.push({
+      player: this.currentPlayer,
+      board: cloneBoardState({ workers: this.workers, levels: this.levels, round: this.round }),
+      action: null,
+    });
+
+    // Restore previous state
+    const previousEntry = this.history.pop()!;
+    this.workers = cloneGrid(previousEntry.board.workers);
+    this.levels = cloneGrid(previousEntry.board.levels);
+    this.round = previousEntry.board.round;
+    this.currentPlayer = previousEntry.player;
+
+    // Recompute valid moves and game state
+    const placement = this.getNextPlacement();
+    const playerForValidMoves = placement?.player ?? this.currentPlayer;
+    this.validMoves = this.computeValidMoves(playerForValidMoves);
+    this.gameEnded = this.computeGameEnded(playerForValidMoves);
+
+    return { snapshot: this.toSnapshot(), success: true };
+  }
+
+  redo(): { snapshot: SantoriniSnapshot; success: boolean } {
+    if (this.future.length === 0) {
+      return { snapshot: this.toSnapshot(), success: false };
+    }
+
+    // Save current state to history
+    this.history.push({
+      player: this.currentPlayer,
+      board: cloneBoardState({ workers: this.workers, levels: this.levels, round: this.round }),
+      action: null,
+    });
+
+    // Restore future state
+    const futureEntry = this.future.pop()!;
+    this.workers = cloneGrid(futureEntry.board.workers);
+    this.levels = cloneGrid(futureEntry.board.levels);
+    this.round = futureEntry.board.round;
+    this.currentPlayer = futureEntry.player;
+
+    // Recompute valid moves and game state
+    const placement = this.getNextPlacement();
+    const playerForValidMoves = placement?.player ?? this.currentPlayer;
+    this.validMoves = this.computeValidMoves(playerForValidMoves);
+    this.gameEnded = this.computeGameEnded(playerForValidMoves);
+
+    return { snapshot: this.toSnapshot(), success: true };
   }
 
   private applyPlacement(action: number, placement: { player: 0 | 1; workerId: 1 | 2 | -1 | -2 }): { snapshot: SantoriniSnapshot; winner: 0 | 1 | null } {
@@ -327,7 +420,11 @@ export class SantoriniEngine {
         board: packBoard(entry.board),
         action: entry.action,
       })),
-      future: [],
+      future: this.future.map((entry) => ({
+        player: entry.player,
+        board: packBoard(entry.board),
+        action: entry.action,
+      })),
       gameEnded: [this.gameEnded[0], this.gameEnded[1]],
       validMoves: this.validMoves.slice(),
     };

@@ -35,7 +35,7 @@ const ONNX_OUTPUT_SIZE = 162;
 
 let onnxSessionPromise: Promise<any> | null = null;
 
-const PRACTICE_STATE_KEY = 'santorini:practiceState';
+const PRACTICE_STATE_KEY = 'santorini:practiceState:v2'; // Updated key for TypeScript-based state
 
 const COLUMN_LABELS = ['A', 'B', 'C', 'D', 'E'] as const;
 
@@ -190,8 +190,6 @@ export type Controls = {
   calculateOptions: () => Promise<void>;
   updateCalcDepth: (depth: number | null) => void;
   jumpToMove: (index: number) => Promise<void>;
-  startGuidedSetup: () => Promise<void>;
-  finalizeGuidedSetup: () => Promise<void>;
 };
 
 const INITIAL_BOARD: BoardCell[][] = Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () =>
@@ -454,66 +452,69 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     );
     setBoard(newBoard);
     setNextPlayer(snapshot.player);
-    updateSelectable();
+    
+    // Update selectable based on TypeScript engine state
+    const placement = engineRef.current.getPlacementContext();
+    const validMoves = engineRef.current.getValidMoves();
+    const game = gameRef.current;
+    
+    if (placement) {
+      // During placement, all empty cells are selectable
+      const cells = Array.from({ length: 5 }, (_, y) =>
+        Array.from({ length: 5 }, (_, x) => snapshot.board[y][x][0] === 0)
+      );
+      setSelectable(cells);
+    } else {
+      // During game phase, check if it's human's turn
+      let isHumanTurn = true; // Default to true if no game mode set
+      
+      if (game && game.gameMode && game.gameMode !== 'Human') {
+        const currentPlayer = snapshot.player; // 0 or 1
+        
+        if (game.gameMode === 'P0') {
+          // Human is Player 0 (Blue)
+          isHumanTurn = currentPlayer === 0;
+        } else if (game.gameMode === 'P1') {
+          // Human is Player 1 (Red)
+          isHumanTurn = currentPlayer === 1;
+        } else if (game.gameMode === 'AI') {
+          // Both are AI - no human turns
+          isHumanTurn = false;
+        }
+      }
+      
+      if (isHumanTurn) {
+        // Human's turn: show selectable pieces
+        const newSelectable = moveSelectorRef.current.computeSelectable(
+          snapshot.board,
+          validMoves,
+          snapshot.player
+        );
+        setSelectable(newSelectable);
+      } else {
+        // AI's turn: clear selectable
+        const emptySelectable = Array.from({ length: 5 }, () => Array(5).fill(false));
+        setSelectable(emptySelectable);
+      }
+    }
+    
     setEngineVersion(v => v + 1);
-  }, [updateSelectable]);
+  }, []);
 
+  // Persist TypeScript engine state (single source of truth)
   const persistPracticeState = useCallback(async () => {
     if (typeof window === 'undefined') {
       return;
     }
-    const game = gameRef.current;
-    if (!game?.py || !game.py.export_practice_state) {
-      return;
-    }
     try {
-      const snapshotProxy = game.py.export_practice_state();
-      if (!snapshotProxy) {
-        return;
-      }
-      const snapshot =
-        typeof snapshotProxy.toJs === 'function'
-          ? snapshotProxy.toJs({ create_proxies: false })
-          : snapshotProxy;
-      snapshotProxy.destroy?.();
-      if (!snapshot) {
-        return;
-      }
+      const snapshot = engineRef.current.snapshot;
       window.localStorage.setItem(PRACTICE_STATE_KEY, JSON.stringify(snapshot));
     } catch (error) {
       console.error('Failed to persist practice state:', error);
     }
   }, []);
 
-  const syncEngineFromPracticeState = useCallback(async () => {
-    const game = gameRef.current;
-    if (!game || !game.py || !game.py.export_practice_state) {
-      return;
-    }
-    try {
-      const snapshotProxy = game.py.export_practice_state();
-      if (!snapshotProxy) {
-        return;
-      }
-      const rawSnapshot =
-        typeof snapshotProxy.toJs === 'function'
-          ? (snapshotProxy.toJs({ create_proxies: false }) as unknown)
-          : snapshotProxy;
-      snapshotProxy.destroy?.();
-      if (!rawSnapshot || typeof rawSnapshot !== 'object') {
-        return;
-      }
-      const snapshot = rawSnapshot as SantoriniSnapshot;
-      engineRef.current = SantoriniEngine.fromSnapshot(snapshot);
-      moveSelectorRef.current.reset();
-      selectorRef.current?.resetAndStart();
-      updateSelectable();
-      setNextPlayer(engineRef.current.player);
-    } catch (error) {
-      console.error('Failed to sync practice engine state:', error);
-    }
-  }, [updateSelectable]);
-
+  // Restore TypeScript engine state from localStorage
   const restorePracticeState = useCallback(async () => {
     if (typeof window === 'undefined') {
       return false;
@@ -522,49 +523,43 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     if (!stored) {
       return false;
     }
-    let parsed: unknown;
     try {
-      parsed = JSON.parse(stored);
-    } catch (error) {
-      console.error('Failed to parse stored practice state:', error);
-      window.localStorage.removeItem(PRACTICE_STATE_KEY);
-      return false;
-    }
-
-    const game = gameRef.current;
-    if (!game?.py || !game.py.import_practice_state) {
-      return false;
-    }
-
-    try {
-      const resultProxy = game.py.import_practice_state(parsed);
-      if (!resultProxy) {
+      const snapshot = JSON.parse(stored) as SantoriniSnapshot;
+      if (!snapshot || snapshot.version !== 1) {
+        console.warn('Invalid or unsupported practice state version');
+        window.localStorage.removeItem(PRACTICE_STATE_KEY);
         return false;
       }
-      const result =
-        typeof resultProxy.toJs === 'function'
-          ? resultProxy.toJs({ create_proxies: false })
-          : resultProxy;
-      resultProxy.destroy?.();
-      if (!Array.isArray(result) || result.length < 3) {
-        return false;
-      }
-      const [nextPlayer, gameEndedRaw, validMovesRaw] = result as [
-        number,
-        ArrayLike<number> | number[],
-        ArrayLike<boolean> | boolean[],
-      ];
-      game.nextPlayer = typeof nextPlayer === 'number' ? nextPlayer : 0;
-      const endArray = Array.from(gameEndedRaw ?? [], (value) => Number(value));
-      game.gameEnded = (endArray.length === 2 ? endArray : [0, 0]) as [number, number];
-      const validArray = Array.from(validMovesRaw ?? [], (value) => Boolean(value));
-      game.validMoves =
-        validArray.length > 0 ? validArray : Array(GAME_CONSTANTS.TOTAL_MOVES).fill(false);
+      
+      // Restore TypeScript engine
+      engineRef.current = SantoriniEngine.fromSnapshot(snapshot);
+      moveSelectorRef.current.reset();
+      
+      // Note: Python engine will be out of sync after restore from localStorage
+      // It will resync as moves are played
+      
       return true;
     } catch (error) {
       console.error('Failed to restore practice state:', error);
       window.localStorage.removeItem(PRACTICE_STATE_KEY);
       return false;
+    }
+  }, []);
+
+  // Apply a move to Python engine (for keeping it in sync with TypeScript)
+  const applyMoveToPython = useCallback((action: number) => {
+    const game = gameRef.current;
+    if (!game?.py) {
+      console.error('🔄 Cannot apply move to Python: missing game');
+      return;
+    }
+    
+    try {
+      console.log('🔄 Applying move', action, 'to Python engine');
+      game.move(action, false);
+      console.log('🔄 Python move applied. Python player:', game.nextPlayer);
+    } catch (error) {
+      console.error('Failed to apply move to Python:', error);
     }
   }, []);
 
@@ -722,29 +717,24 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   }, []);
 
   const updateButtons = useCallback(async (loadingState = false) => {
-    const game = gameRef.current;
     const selector = selectorRef.current;
     const engine = engineRef.current;
-    if (!game || !selector || !engine) return;
-    const py = game.py;
-    let canUndo = false;
-    let canRedo = false;
-    if (py && py.get_history_length) {
-      canUndo = py.get_history_length() > 0;
-    }
-    if (py && py.get_redo_count) {
-      canRedo = py.get_redo_count() > 0;
-    }
-    const stage = selector.stage;
+    if (!selector || !engine) return;
+    
+    // Use TypeScript engine for undo/redo status
+    const canUndo = engine.canUndo();
+    const canRedo = engine.canRedo();
+    
+    const stage = moveSelectorRef.current.stage;
     const placement = getPlacementContext();
 
     updateButtonsState((prev) => {
       let status = prev.status;
-      if (!prev.setupMode && placement.phase === 'placement') {
+      if (placement.phase === 'placement') {
         const pieceNumber = placement.workerId === 1 || placement.workerId === -1 ? 1 : 2;
-        const playerLabel = placement.player === 0 ? 'Green' : 'Red';
-        status = `Setup: Place ${playerLabel} worker ${pieceNumber}`;
-      } else if (!prev.setupMode) {
+        const playerLabel = placement.player === 0 ? 'Blue' : 'Red';
+        status = `Place ${playerLabel} worker ${pieceNumber}`;
+      } else {
         if (stage <= 0) {
           status = 'Ready. Select a worker to start your move.';
         } else if (stage === 1) {
@@ -764,8 +754,8 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
         status,
       };
     });
-    setNextPlayer(typeof game.nextPlayer === 'number' ? game.nextPlayer : 0);
-  }, [updateButtonsState]);
+    setNextPlayer(engine.player);
+  }, [getPlacementContext, updateButtonsState]);
 
   const refreshHistory = useCallback(() => {
     const game = gameRef.current;
@@ -926,68 +916,39 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   }, [calcDepthOverride, evaluationEnabled]);
 
   const syncUi = useCallback(async (loadingState = false) => {
-    await syncEngineFromPracticeState();
-    readBoard();
+    // TypeScript engine is source of truth - sync UI from it
+    syncEngineToUi();
     await updateButtons(loadingState);
     refreshHistory();
     await persistPracticeState();
-  }, [persistPracticeState, readBoard, refreshHistory, syncEngineFromPracticeState, updateButtons]);
+  }, [persistPracticeState, refreshHistory, syncEngineToUi, updateButtons]);
 
   const startGuidedSetup = useCallback(async () => {
-    const game = gameRef.current;
-    const selector = selectorRef.current;
-    if (!game || !selector) return;
-
+    // Simply reset to initial state - no special setup mode needed!
+    // The placement phase is handled naturally by the engine
     guidedSetupPlacementsRef.current = [];
+
+    const { engine } = SantoriniEngine.createInitial();
+    engineRef.current = engine;
+    moveSelectorRef.current.reset();
+
+    const selector = selectorRef.current;
+    if (selector) {
+      selector.setEditMode(0);
+      selector.resetAndStart();
+    }
 
     updateButtonsState((prev) => ({
       ...prev,
-      setupMode: true,
+      setupMode: false, // No special setup mode
       setupTurn: 0,
-      editMode: 2,
+      editMode: 0,
       canUndo: false,
       canRedo: false,
-      status: 'Place Green piece 1',
+      status: 'Ready to place workers',
     }));
-
-    selector.setEditMode(2);
-    selector.selectNone();
-    setSelectable(
-      Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () =>
-        Array.from({ length: GAME_CONSTANTS.BOARD_SIZE }, () => false),
-      ),
-    );
+    
     setHistory([]);
-
-    if (game.py) {
-      try {
-        if (game.py.begin_setup) {
-          game.py.begin_setup();
-        }
-        for (let y = 0; y < GAME_CONSTANTS.BOARD_SIZE; y++) {
-          for (let x = 0; x < GAME_CONSTANTS.BOARD_SIZE; x++) {
-            let level = game.py._read_level(y, x);
-            let guard = 0;
-            while (level !== 0 && guard < 6) {
-              game.editCell(y, x, 1);
-              level = game.py._read_level(y, x);
-              guard += 1;
-            }
-            const worker = game.py._read_worker(y, x);
-            if (worker !== 0) {
-              game.editCell(y, x, 2);
-              if (game.py._read_worker(y, x) !== 0) {
-                game.editCell(y, x, 2);
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Failed to clear board for setup:', error);
-      }
-    }
-
-    moveSelectorRef.current.reset();
     await syncUi();
   }, [syncUi, updateButtonsState]);
 
@@ -1017,6 +978,10 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
           return;
         }
         game.init_game();
+        
+        // Set default game mode to "You vs AI"
+        game.gameMode = 'P0';
+        
         const restored = await restorePracticeState();
         selector.resetAndStart();
         await syncUi(true);
@@ -1052,160 +1017,114 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     const game = gameRef.current;
     const selector = selectorRef.current;
     if (!game || !selector) return;
+    
+    console.log('🤖 AI Check - Game mode:', game.gameMode, 'Current player:', engineRef.current.player);
+    
+    // Check if it's AI's turn using TypeScript engine (source of truth)
+    const engine = engineRef.current;
+    const currentPlayer = engine.player;
+    let isAiTurn = false;
+    
+    if (game.gameMode === 'P0') {
+      // Player 0 is human, Player 1 is AI
+      isAiTurn = currentPlayer === 1;
+    } else if (game.gameMode === 'P1') {
+      // Player 0 is AI, Player 1 is human
+      isAiTurn = currentPlayer === 0;
+    } else if (game.gameMode === 'AI') {
+      // Both are AI
+      isAiTurn = true;
+    }
+    
+    console.log('🤖 Is AI turn?', isAiTurn);
+    
+    if (!isAiTurn) {
+      console.log('🤖 Not AI\'s turn, skipping');
+      return;
+    }
+    
     await updateButtons(true);
-    while (game.gameEnded.every((x: number) => !x) && !game.is_human_player('next')) {
-      selector.selectNone();
-      await game.ai_guess_and_move();
+    
+    // Check if game is not ended
+    const gameEnded = engine.getGameEnded();
+    if (gameEnded[0] !== 0 || gameEnded[1] !== 0) {
+      console.log('🤖 Game ended, skipping AI');
+      await updateButtons(false);
+      return;
+    }
+    
+    console.log('🤖 AI making move...');
+    selector.selectNone();
+    
+    try {
+      // Get AI's chosen action
+      const bestAction = await game.py.guessBestAction();
+      console.log('🤖 AI chose action:', bestAction, 'Current TS player:', engineRef.current.player);
+      
+      // Apply to TypeScript engine (source of truth)
+      const result = engineRef.current.applyMove(bestAction);
+      engineRef.current = SantoriniEngine.fromSnapshot(result.snapshot);
+      moveSelectorRef.current.reset();
+      console.log('🤖 AI move applied to TypeScript, new player:', engineRef.current.player);
+      
+      // Python already applied this move (it came from guessBestAction which includes the move)
+      // So Python and TypeScript are now in sync
+      
       await syncUi();
       await refreshEvaluation();
+    } catch (error) {
+      console.error('🤖 AI move failed:', error);
     }
+    
     await updateButtons(false);
   }, [evaluationEnabled, refreshEvaluation, syncUi, updateButtons]);
 
   const ensureAiIdle = useCallback(() => aiPromiseRef.current, []);
 
+  // No longer needed - placement is handled naturally by the engine
   const finalizeGuidedSetup = useCallback(async () => {
-    const game = gameRef.current;
-    const selector = selectorRef.current;
-    if (!game || !selector) return;
-
-    try {
-      selector.setEditMode(0);
-
-      const py = game.py;
-      let dataTuple: unknown = null;
-      const placements = guidedSetupPlacementsRef.current;
-      const hasRecordedPlacements =
-        placements.length >= 4 &&
-        placements
-          .slice(0, 4)
-          .every((coords) => Array.isArray(coords) && coords.length === 2);
-
-      if (py) {
-        if (hasRecordedPlacements && typeof py.force_guided_setup === 'function') {
-          const [green1, green2, red1, red2] = placements.slice(0, 4) as Array<[number, number]>;
-          const resultProxy = py.force_guided_setup(green1, green2, red1, red2);
-          if (resultProxy && typeof resultProxy.toJs === 'function') {
-            dataTuple = resultProxy.toJs({ create_proxies: false });
-          }
-        } else if (typeof py.end_setup === 'function') {
-          const resultProxy = py.end_setup();
-          if (resultProxy && typeof resultProxy.toJs === 'function') {
-            dataTuple = resultProxy.toJs({ create_proxies: false });
-          }
-        }
-      }
-
-      if (Array.isArray(dataTuple) && dataTuple.length >= 3) {
-        [game.nextPlayer, game.gameEnded, game.validMoves] = dataTuple;
-        setNextPlayer(typeof game.nextPlayer === 'number' ? game.nextPlayer : 0);
-      } else if (hasRecordedPlacements) {
-        throw new Error('Unable to finalize guided setup after placing workers');
-      }
-
-      selector.resetAndStart();
-
-      if (hasRecordedPlacements) {
-        guidedSetupPlacementsRef.current = [];
-      }
-
-      await syncUi();
-      await refreshEvaluation();
-
-      updateButtonsState((prev) => ({
-        ...prev,
-        setupMode: false,
-        setupTurn: 0,
-        status: 'Setup complete. Ready to play!',
-      }));
-    } catch (error) {
-      console.error('Failed to finalize setup:', error);
-      updateButtonsState((prev) => ({
-        ...prev,
-        setupMode: true,
-        status: 'Setup incomplete. Please place the workers again.',
-      }));
-    }
-  }, [refreshEvaluation, syncUi, updateButtonsState]);
-
-  const placeWorkerForSetup = useCallback(async (y: number, x: number) => {
-    const game = gameRef.current;
-    if (!game || !game.py) return;
-
-    const setupTurn = buttons.setupTurn;
-    if (setupTurn >= 4) {
-      return;
-    }
-
-    const current = game.py._read_worker(y, x);
-    if (current !== 0) {
-      // Only allow placing on empty cells during setup
-      return;
-    }
-
-    // Place workers with proper cycling: green workers first (turns 0,1), then red workers (turns 2,3)
-    if (setupTurn < 2) {
-      // Green workers: just place with +1
-      game.editCell(y, x, 2); // 0 -> +1
-    } else {
-      // Red workers: cycle to -1
-      game.editCell(y, x, 2); // 0 -> +1
-      game.editCell(y, x, 2); // +1 -> -1
-    }
-
-    guidedSetupPlacementsRef.current[setupTurn] = [y, x];
+    // After 4 workers are placed, refresh evaluation and trigger AI if needed
+    await refreshEvaluation();
     
-    const newSetupTurn = setupTurn + 1;
-    const steps = ['Place Green piece 1', 'Place Green piece 2', 'Place Red piece 1', 'Place Red piece 2'];
-    const status = newSetupTurn < steps.length ? steps[newSetupTurn] : 'Setup complete';
-    updateButtonsState((prev) => ({
-      ...prev,
-      setupTurn: newSetupTurn,
-      status
-    }));
-    
-    readBoard();
-    await persistPracticeState();
-
-    if (newSetupTurn >= 4) {
-      updateButtonsState((prev) => ({
-        ...prev,
-        status: 'Finalizing setup...'
-      }));
-      try {
-        await finalizeGuidedSetup();
-      } catch (error) {
-        console.error('Guided setup finalization failed:', error);
-        updateButtonsState((prev) => ({
-          ...prev,
-          setupMode: true,
-          status: 'Setup incomplete. Please place the workers again.',
-        }));
-      }
+    // Trigger AI if it should move first
+    const game = gameRef.current;
+    if (game && game.gameMode) {
+      aiPromiseRef.current = aiPlayIfNeeded();
     }
-  }, [buttons.setupTurn, finalizeGuidedSetup, persistPracticeState, readBoard, updateButtonsState]);
+  }, [aiPlayIfNeeded, refreshEvaluation]);
 
   const applyMove = useCallback(
     async (move: number, options: ApplyMoveOptions = {}) => {
-      const { triggerAi = true, asHuman = true } = options;
-      const game = gameRef.current;
-      const selector = selectorRef.current;
-      if (!game || !selector) return;
+      const { triggerAi = true } = options;
       await ensureAiIdle();
-      game.move(move, asHuman);
-      if (selector.resetAndStart) {
-        selector.resetAndStart();
-      } else {
-        selector.reset();
-        selector.start();
-      }
-      await syncUi();
-      await refreshEvaluation();
-      if (triggerAi) {
-        aiPromiseRef.current = ensureAiIdle().then(() => aiPlayIfNeeded());
+      
+      console.log('👤 Human applying move:', move, 'Current player:', engineRef.current.player);
+      
+      // Apply move to TypeScript engine (source of truth)
+      try {
+        const result = engineRef.current.applyMove(move);
+        engineRef.current = SantoriniEngine.fromSnapshot(result.snapshot);
+        moveSelectorRef.current.reset();
+        
+        console.log('👤 Move applied to TS. New player:', engineRef.current.player);
+        
+        // Also apply to Python engine for AI/evaluation
+        applyMoveToPython(move);
+        
+        await syncUi();
+        await refreshEvaluation();
+        
+        // Only trigger AI if not in placement phase
+        const placement = engineRef.current.getPlacementContext();
+        if (triggerAi && !placement) {
+          aiPromiseRef.current = ensureAiIdle().then(() => aiPlayIfNeeded());
+        }
+      } catch (error) {
+        console.error('Failed to apply move:', error);
+        toast({ title: 'Invalid move', status: 'error' });
       }
     },
-    [aiPlayIfNeeded, ensureAiIdle, refreshEvaluation, syncUi],
+    [aiPlayIfNeeded, applyMoveToPython, ensureAiIdle, refreshEvaluation, syncUi, toast],
   );
 
   const onCellClick = useCallback(
@@ -1215,31 +1134,69 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
         return;
       }
 
-      // Skip if Python engine not ready yet (only needed for AI, not moves)
-      const game = gameRef.current;
+      // Use TypeScript engine for all game logic
+      const engine = engineRef.current;
+      const validMoves = engine.getValidMoves();
+      const placement = engine.getPlacementContext();
+      const moveSelector = moveSelectorRef.current;
       const pythonSelector = selectorRef.current;
-
-      // Handle setup mode (requires Python)
-      if (buttons.setupMode) {
-        if (!game || !pythonSelector) return;
+      const game = gameRef.current;
+      
+      // Edit mode (requires Python for board manipulation)
+      if (pythonSelector && (pythonSelector.editMode === 1 || pythonSelector.editMode === 2)) {
+        if (!game || !game.py) return;
         processingMoveRef.current = true;
         try {
-          await placeWorkerForSetup(y, x);
+          game.editCell(y, x, pythonSelector.editMode);
+          
+          // Sync back to TypeScript engine
+          const snapshotProxy = game.py.export_practice_state?.();
+          if (snapshotProxy) {
+            const rawSnapshot =
+              typeof snapshotProxy.toJs === 'function'
+                ? (snapshotProxy.toJs({ create_proxies: false }) as unknown)
+                : snapshotProxy;
+            snapshotProxy.destroy?.();
+            if (rawSnapshot && typeof rawSnapshot === 'object') {
+              const snapshot = rawSnapshot as SantoriniSnapshot;
+              engineRef.current = SantoriniEngine.fromSnapshot(snapshot);
+            }
+          }
+          
+          syncEngineToUi();
+          await updateButtons(false);
+          await persistPracticeState();
         } finally {
           processingMoveRef.current = false;
         }
         return;
       }
-
-      // Use TypeScript engine for fast, synchronous game logic
-      const engine = engineRef.current;
-      const validMoves = engine.getValidMoves();
-      const placement = engine.getPlacementContext();
-      const moveSelector = moveSelectorRef.current;
       
-      // Placement phase
-      const isPlacementPhase = Boolean(placement);
-      if (isPlacementPhase) {
+      // Check turn enforcement for game phase (not placement)
+      if (!placement && game && game.gameMode && game.gameMode !== 'Human') {
+        // Determine which player is human based on game mode
+        const currentPlayer = engine.player; // 0 or 1
+        let isHumanTurn = false;
+        
+        if (game.gameMode === 'P0') {
+          // Human is Player 0 (Blue)
+          isHumanTurn = currentPlayer === 0;
+        } else if (game.gameMode === 'P1') {
+          // Human is Player 1 (Red)
+          isHumanTurn = currentPlayer === 1;
+        } else if (game.gameMode === 'AI') {
+          // Both are AI - no human turns
+          isHumanTurn = false;
+        }
+        
+        if (!isHumanTurn) {
+          toast({ title: "It's the AI's turn", status: 'info' });
+          return;
+        }
+      }
+      
+      // Placement phase (like local mode)
+      if (placement) {
         const placementAction = y * 5 + x;
         if (placementAction >= validMoves.length || !validMoves[placementAction]) {
           toast({ title: 'Invalid placement', status: 'warning' });
@@ -1248,48 +1205,26 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
         
         processingMoveRef.current = true;
         try {
-          const result = engine.applyMove(placementAction);
-          engineRef.current = SantoriniEngine.fromSnapshot(result.snapshot);
-          moveSelector.reset();
-          await syncEngineToUi();
+          await applyMove(placementAction, { triggerAi: true });
           
-          // Sync to Python engine for AI (async, in background)
-          if (game && game.py) {
-            await applyMove(placementAction, { triggerAi: true });
+          // After 4th worker, sync to Python for AI
+          const newPlacement = engineRef.current.getPlacementContext();
+          if (!newPlacement) {
+            await finalizeGuidedSetup();
           }
-        } catch (error) {
-          console.error('Placement failed:', error);
-          toast({ title: 'Invalid move', status: 'error' });
         } finally {
           processingMoveRef.current = false;
         }
         return;
       }
-
-      // Edit mode (requires Python)
-      if (pythonSelector && (pythonSelector.editMode === 1 || pythonSelector.editMode === 2)) {
-        if (!game) return;
-        processingMoveRef.current = true;
-        game.editCell(y, x, pythonSelector.editMode);
-        readBoard();
-        updateSelectable();
-        try {
-          await updateButtons(false);
-        } finally {
-          await persistPracticeState();
-          processingMoveRef.current = false;
-        }
-        return;
-      }
-
-      // Game phase: Use TypeScript move selector (fast and synchronous!)
+      
+      // Game phase: Use TypeScript move selector
       processingMoveRef.current = true;
       try {
         const clicked = moveSelector.click(y, x, engine.snapshot.board, validMoves, engine.player);
         
         if (!clicked) {
           toast({ title: 'Invalid selection', status: 'warning' });
-          processingMoveRef.current = false;
           return;
         }
         
@@ -1300,21 +1235,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
         // Check if move is complete
         const action = moveSelector.getAction();
         if (action >= 0) {
-          // Apply move to TypeScript engine (instant!)
-          try {
-            const result = engine.applyMove(action);
-            engineRef.current = SantoriniEngine.fromSnapshot(result.snapshot);
-            moveSelector.reset();
-            await syncEngineToUi();
-            
-            // Sync to Python engine for AI evaluation (async, in background)
-            if (game && game.py) {
-              await applyMove(action, { triggerAi: true });
-            }
-          } catch (error) {
-            console.error('Move failed:', error);
-            toast({ title: 'Move failed', status: 'error' });
-          }
+          await applyMove(action, { triggerAi: true });
         }
       } finally {
         processingMoveRef.current = false;
@@ -1322,14 +1243,11 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     },
     [
       applyMove,
-      buttons.setupMode,
-      placeWorkerForSetup,
+      finalizeGuidedSetup,
       persistPracticeState,
-      readBoard,
       syncEngineToUi,
       toast,
       updateButtons,
-      updateSelectable,
     ],
   );
 
@@ -1342,41 +1260,58 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   }, []);
 
   const undo = useCallback(async () => {
-    const game = gameRef.current;
-    const selector = selectorRef.current;
-    if (!game || !selector || !game.py) return;
     await ensureAiIdle();
-    game.revert_to_previous_human_move();
-    selector.resetAndStart();
+    
+    // Use TypeScript engine for undo (source of truth)
+    const result = engineRef.current.undo();
+    if (!result.success) {
+      toast({ title: 'Nothing to undo', status: 'info' });
+      return;
+    }
+    
+    engineRef.current = SantoriniEngine.fromSnapshot(result.snapshot);
+    moveSelectorRef.current.reset();
+    
+    // Sync UI and Python engine
     await syncUi();
+    await syncPythonFromTypeScript();
     await refreshEvaluation();
-  }, [ensureAiIdle, refreshEvaluation, syncUi]);
+  }, [ensureAiIdle, refreshEvaluation, syncPythonFromTypeScript, syncUi, toast]);
 
   const redo = useCallback(async () => {
-    const game = gameRef.current;
-    const selector = selectorRef.current;
-    if (!game || !selector || !game.py || !game.py.redo_next_move) return;
     await ensureAiIdle();
-    const resultProxy = game.py.redo_next_move();
-    if (resultProxy && resultProxy.toJs) {
-      resultProxy.toJs({ create_proxies: false });
+    
+    // Use TypeScript engine for redo (source of truth)
+    const result = engineRef.current.redo();
+    if (!result.success) {
+      toast({ title: 'Nothing to redo', status: 'info' });
+      return;
     }
-    selector.resetAndStart();
+    
+    engineRef.current = SantoriniEngine.fromSnapshot(result.snapshot);
+    moveSelectorRef.current.reset();
+    
+    // Sync UI and Python engine
     await syncUi();
+    await syncPythonFromTypeScript();
     await refreshEvaluation();
-  }, [ensureAiIdle, refreshEvaluation, syncUi]);
+  }, [ensureAiIdle, refreshEvaluation, syncPythonFromTypeScript, syncUi, toast]);
 
   const reset = useCallback(async () => {
-    const game = gameRef.current;
-    const selector = selectorRef.current;
-    if (!game || !selector) return;
     await ensureAiIdle();
-    game.init_game();
-    selector.resetAndStart();
-    await syncUi();
-    await refreshEvaluation();
+    
+    // Reset TypeScript engine (source of truth)
+    const { engine } = SantoriniEngine.createInitial();
+    engineRef.current = engine;
+    moveSelectorRef.current.reset();
+    
+    const selector = selectorRef.current;
+    if (selector) {
+      selector.resetAndStart();
+    }
+    
     await startGuidedSetup();
-  }, [ensureAiIdle, refreshEvaluation, startGuidedSetup, syncUi]);
+  }, [ensureAiIdle, startGuidedSetup]);
 
   const setGameMode = useCallback(
     async (mode: 'P0' | 'P1' | 'Human' | 'AI') => {
@@ -1498,10 +1433,8 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       calculateOptions,
       updateCalcDepth,
       jumpToMove,
-      startGuidedSetup,
-      finalizeGuidedSetup,
     }),
-    [calculateOptions, changeDifficulty, jumpToMove, refreshEvaluation, reset, setEditMode, setGameMode, toggleEdit, updateCalcDepth, startGuidedSetup, finalizeGuidedSetup],
+    [calculateOptions, changeDifficulty, jumpToMove, refreshEvaluation, reset, setEditMode, setGameMode, toggleEdit, updateCalcDepth],
   );
 
   return {

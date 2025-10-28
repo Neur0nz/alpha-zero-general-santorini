@@ -4,10 +4,12 @@ import {
   Container,
   Flex,
   IconButton,
+  Link,
   Spinner,
   TabPanel,
   TabPanels,
   Tabs,
+  Text,
   Tooltip,
   useDisclosure,
   useColorModeValue,
@@ -50,6 +52,7 @@ function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
     calcOptionsBusy,
   } = useSantorini();
   const [, startInitializeTransition] = useTransition();
+  const creditColor = useColorModeValue('gray.600', 'whiteAlpha.700');
 
   useEffect(() => {
     // Initialize game engine in background without blocking urgent UI updates
@@ -125,6 +128,18 @@ function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
           />
         </Box>
       </Flex>
+      <Text fontSize="sm" color={creditColor} textAlign="center" mt={4}>
+        AI engine by{' '}
+        <Link
+          href="https://github.com/cestpasphoto/alpha-zero-general"
+          isExternal
+          color="teal.500"
+          fontWeight="medium"
+          _hover={{ textDecoration: 'underline' }}
+        >
+          cestpasphoto
+        </Link>
+      </Text>
     </Flex>
   );
 }
@@ -215,18 +230,7 @@ function App() {
       case 'leaderboard':
         return null;
       case 'practice':
-        return (
-          <Tooltip label="Review your move list" hasArrow>
-            <Button
-              size="sm"
-              colorScheme="teal"
-              leftIcon={<TimeIcon />}
-              onClick={openHistory}
-            >
-              Move history
-            </Button>
-          </Tooltip>
-        );
+        return null;
       case 'analyze':
         return (
           <Tooltip label="Search saved games (coming soon)" hasArrow>

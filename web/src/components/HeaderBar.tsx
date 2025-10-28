@@ -27,12 +27,12 @@ interface HeaderBarProps {
 }
 
 const NAV_TABS: Array<{ key: AppTab; label: string; helper: string }> = [
-  { key: 'lobby', label: 'Lobby', helper: 'Find players & matches' },
-  { key: 'play', label: 'Play', helper: 'Active games & moves' },
-  { key: 'leaderboard', label: 'Leaderboard', helper: 'Top rated players' },
-  { key: 'practice', label: 'Practice', helper: 'Train with the AI' },
-  { key: 'analyze', label: 'Analyze', helper: 'Review games & lines' },
-  { key: 'profile', label: 'Profile', helper: 'Track your progress' },
+  { key: 'lobby', label: 'Lobby', helper: 'Find & join games' },
+  { key: 'play', label: 'Play', helper: 'Your active game' },
+  { key: 'leaderboard', label: 'Leaderboard', helper: 'Player rankings' },
+  { key: 'practice', label: 'Practice', helper: 'Play vs AI' },
+  { key: 'analyze', label: 'Analyze', helper: 'Review games' },
+  { key: 'profile', label: 'Profile', helper: 'Your stats' },
 ];
 
 function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
@@ -77,7 +77,7 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
               Ascent Santorini
             </Heading>
             <Text fontSize={{ base: 'sm', md: 'md' }} color={helperMuted}>
-              Master Santorini with quick matchmaking, AI practice, and rich analysis.
+              Play Santorini online or practice against AI
             </Text>
           </VStack>
           <Spacer display={{ base: 'none', md: 'block' }} />
@@ -161,14 +161,6 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
           </TabList>
           <Spacer />
           <HStack spacing={3} align="center">
-            <Text 
-              fontSize="sm" 
-              color={descriptionColor} 
-              display={{ base: 'none', md: 'block' }}
-              aria-live="polite"
-            >
-              {activeTabDetails ? activeTabDetails.helper : 'Explore Ascent features'}
-            </Text>
             {actions && <HStack spacing={2} display={{ base: 'none', md: 'flex' }}>{actions}</HStack>}
           </HStack>
         </Flex>
