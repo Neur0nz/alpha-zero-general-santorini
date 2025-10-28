@@ -896,7 +896,9 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       client.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [attachProfiles, ensurePlayersLoaded, matchId, mergePlayers, onlineEnabled]);
+    // Note: attachProfiles and mergePlayers are intentionally omitted from dependencies
+    // to prevent subscription churn when player profiles update
+  }, [ensurePlayersLoaded, matchId, onlineEnabled]);
 
   const createMatch = useCallback(
     async (payload: CreateMatchPayload) => {
