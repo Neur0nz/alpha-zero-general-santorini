@@ -20,8 +20,8 @@ const DEFAULT_STATE: AuthState = {
 
 const PROFILE_QUERY_FIELDS =
   'id, auth_user_id, display_name, rating, games_played, created_at, updated_at';
-const PROFILE_FETCH_TIMEOUT = 5000; // Reduced to 5s for faster fallback (matches typical auth delays)
-const PROFILE_RETRY_DELAY = 2000; // Retry after 2s instead of 3s
+const PROFILE_FETCH_TIMEOUT = 30000; // 30s timeout to handle very slow networks
+const PROFILE_RETRY_DELAY = 5000; // Retry after 5s to reduce retry spam
 
 function getDisplayNameSeed(user: User): string | undefined {
   const metadataName = typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name : undefined;
@@ -73,20 +73,10 @@ async function ensureProfile(client: SupabaseClient, user: User): Promise<Player
         error.message.includes('network') ||
         error.message.includes('timeout'))
     ) {
-      console.warn('Profile fetch failed, using temporary fallback profile. Will retry in background.', error.message);
-      // Use generateDisplayName to properly sanitize the seed (removes spaces, special chars)
-      const seed = getDisplayNameSeed(user);
-      const sanitizedName = seed ? generateDisplayName(seed) : `Player${user.id.slice(0, 8)}`;
-      const fallbackProfile: PlayerProfile = {
-        id: `temp_${user.id}`,
-        auth_user_id: user.id,
-        display_name: sanitizedName,
-        rating: 1200,
-        games_played: 0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      return fallbackProfile;
+      console.warn('Profile fetch failed, will retry without creating temporary profile.', error.message);
+      // Don't create temporary profile - just throw the error and let retry logic handle it
+      // This prevents subscription teardown during network issues
+      throw error;
     }
     throw error;
   }
@@ -237,52 +227,39 @@ export function useSupabaseAuth() {
       try {
         console.log('Loading profile for session user:', session.user.id);
         
-        // Add a timeout wrapper for the profile loading
-        const profile = await ensureProfile(client, session.user);
+        // Load profile with retry logic
+        let retryCount = 0;
+        const maxRetries = 3;
+        let profile: PlayerProfile | null = null;
         
-        // If we got a temporary profile, schedule a retry in the background
-        if (profile.id.startsWith('temp_')) {
-          console.log(`Received temporary profile, scheduling retry in ${PROFILE_RETRY_DELAY}ms...`);
-          setTimeout(async () => {
-            try {
-              console.log('Retrying profile load after temporary fallback...');
-              const retryProfile = await ensureProfile(client, session.user);
-              if (!retryProfile.id.startsWith('temp_')) {
-                console.log('✅ Successfully upgraded from temporary to real profile');
-                const newState = { session, profile: retryProfile, loading: false, error: null };
-                setState(newState);
-                cacheAuthState(session, retryProfile);
-                cachedStateRef.current = { session, profile: retryProfile };
-              } else {
-                // First retry still got temp profile, try one more time after another delay
-                console.log('First retry still got temporary profile, scheduling second retry...');
-                setTimeout(async () => {
-                  try {
-                    const secondRetry = await ensureProfile(client, session.user);
-                    if (!secondRetry.id.startsWith('temp_')) {
-                      console.log('✅ Second retry successful - upgraded to real profile');
-                      const newState = { session, profile: secondRetry, loading: false, error: null };
-                      setState(newState);
-                      cacheAuthState(session, secondRetry);
-                      cachedStateRef.current = { session, profile: secondRetry };
-                    } else {
-                      console.warn('Second retry still got temporary profile, giving up');
-                    }
-                  } catch (secondRetryError) {
-                    console.warn('Second retry failed', secondRetryError);
-                  }
-                }, PROFILE_RETRY_DELAY);
-              }
-            } catch (retryError) {
-              console.warn('Retry failed, will keep temporary profile', retryError);
+        while (retryCount < maxRetries && !profile) {
+          try {
+            console.log(`Loading profile for session user: ${session.user.id} (attempt ${retryCount + 1})`);
+            profile = await ensureProfile(client, session.user);
+            console.log('✅ Profile loaded successfully');
+          } catch (error) {
+            retryCount++;
+            console.warn(`Profile load attempt ${retryCount} failed:`, error);
+            
+            if (retryCount < maxRetries) {
+              console.log(`Retrying profile load in ${PROFILE_RETRY_DELAY}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+              await new Promise(resolve => setTimeout(resolve, PROFILE_RETRY_DELAY));
+            } else {
+              console.error('All profile load attempts failed:', error);
+              const newState = { session, profile: null, loading: false, error: (error as Error).message };
+              setState(newState);
+              cachedStateRef.current = { session, profile: null as any };
+              return;
             }
-          }, PROFILE_RETRY_DELAY);
+          }
         }
         
-        const newState = { session, profile, loading: false, error: null };
-        setState(newState);
-        cacheAuthState(session, profile);
-        cachedStateRef.current = { session, profile };
+        if (profile) {
+          const newState = { session, profile, loading: false, error: null };
+          setState(newState);
+          cacheAuthState(session, profile);
+          cachedStateRef.current = { session, profile };
+        }
       } catch (profileError) {
         console.error('Failed to load player profile', profileError);
 

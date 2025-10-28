@@ -77,10 +77,6 @@ export interface UseMatchLobbyOptions {
 
 const LOCAL_MATCH_ID = 'local:match';
 
-// Helper to check if profile is temporary (fallback from network error)
-function isTemporaryProfile(profile: PlayerProfile | null): boolean {
-  return Boolean(profile?.id.startsWith('temp_'));
-}
 
 function createEmptySnapshot(): SantoriniStateSnapshot {
   return {
@@ -283,10 +279,6 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     if (!client || !profile || !onlineEnabled) return undefined;
     
     // Skip if we have a temporary profile (network error fallback)
-    if (isTemporaryProfile(profile)) {
-      console.log('Skipping cleanup with temporary profile ID');
-      return undefined;
-    }
 
     const cleanup = async () => {
       const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -398,22 +390,12 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         if (prev.sessionMode === 'local') {
           return { ...prev, myMatches: [] };
         }
-        return { ...prev, myMatches: [], activeMatchId: null, activeMatch: null };
+        // Only clear matches list, keep activeMatch to preserve subscription
+        return { ...prev, myMatches: [] };
       });
       return undefined;
     }
     
-    // Skip if we have a temporary profile (network error fallback)
-    if (isTemporaryProfile(profile)) {
-      console.log('Skipping match fetch with temporary profile ID - waiting for real profile');
-      setState((prev) => {
-        if (prev.sessionMode === 'local') {
-          return { ...prev, myMatches: [] };
-        }
-        return { ...prev, myMatches: [], activeMatchId: null, activeMatch: null };
-      });
-      return undefined;
-    }
 
     let isMounted = true;
 
