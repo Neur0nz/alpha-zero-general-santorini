@@ -263,6 +263,11 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
       return;
     }
 
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const globalWindow = window;
     let frame = 0;
     let observer: ResizeObserver | null = null;
     let didAttachWindowResize = false;
@@ -281,31 +286,31 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
     const ensureElement = () => {
       const element = cropContainerRef.current;
       if (!element) {
-        frame = window.requestAnimationFrame(ensureElement);
+        frame = globalWindow.requestAnimationFrame(ensureElement);
         return;
       }
       updateSize();
 
-      if ('ResizeObserver' in window) {
+      if (typeof ResizeObserver !== 'undefined') {
         observer = new ResizeObserver(() => updateSize());
         observer.observe(element);
       } else {
-        window.addEventListener('resize', updateSize);
+        globalWindow.addEventListener('resize', updateSize);
         didAttachWindowResize = true;
       }
     };
 
-    frame = window.requestAnimationFrame(ensureElement);
+    frame = globalWindow.requestAnimationFrame(ensureElement);
 
     return () => {
       if (frame) {
-        window.cancelAnimationFrame(frame);
+        globalWindow.cancelAnimationFrame(frame);
       }
       if (observer) {
         observer.disconnect();
       }
       if (didAttachWindowResize) {
-        window.removeEventListener('resize', updateSize);
+        globalWindow.removeEventListener('resize', updateSize);
       }
     };
   }, [isCropOpen]);

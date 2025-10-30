@@ -809,15 +809,10 @@ export function useSupabaseAuth() {
         throw new Error('Unable to upload profile picture. Please try again.');
       }
 
-      const { data: publicUrlData, error: publicUrlError } = bucket.getPublicUrl(storagePath);
-      if (publicUrlError) {
-        console.error('Failed to obtain public avatar URL', publicUrlError);
-        throw new Error('Unable to prepare your profile picture. Please try again.');
-      }
-
-      const publicUrl = publicUrlData?.publicUrl;
+      const publicUrlResult = bucket.getPublicUrl(storagePath);
+      const publicUrl = publicUrlResult.data?.publicUrl;
       if (!publicUrl) {
-        console.error('Failed to obtain public avatar URL', publicUrlData);
+        console.error('Failed to obtain public avatar URL', publicUrlResult);
         throw new Error('Unable to prepare your profile picture. Please try again.');
       }
 
