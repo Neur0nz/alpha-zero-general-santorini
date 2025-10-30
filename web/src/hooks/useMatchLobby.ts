@@ -450,22 +450,38 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
 
       setState((prev) => {
         const myMatches = hydrated;
-        const activeMatchId = (() => {
-          if (prev.activeMatchId && myMatches.some((match) => match.id === prev.activeMatchId)) {
-            return prev.activeMatchId;
-          }
+        let nextActiveMatchId = prev.activeMatchId;
+        let autoSelected = false;
+
+        const hasCurrentMatch =
+          nextActiveMatchId && myMatches.some((match) => match.id === nextActiveMatchId);
+
+        if (!hasCurrentMatch) {
           const preferred = selectPreferredMatch(myMatches);
-          return preferred?.id ?? null;
-        })();
-        const activeMatch = activeMatchId
-          ? myMatches.find((match) => match.id === activeMatchId) ?? prev.activeMatch
+          nextActiveMatchId = preferred?.id ?? null;
+          autoSelected = Boolean(nextActiveMatchId);
+        }
+
+        const nextActiveMatch = nextActiveMatchId
+          ? myMatches.find((match) => match.id === nextActiveMatchId) ?? prev.activeMatch
           : null;
+
+        const shouldForceOnline =
+          nextActiveMatch?.status === 'in_progress' &&
+          prev.sessionMode !== 'local' &&
+          (autoSelected || prev.sessionMode !== 'online');
+
+        const sessionMode = shouldForceOnline ? 'online' : prev.sessionMode;
+
         return {
           ...prev,
           myMatches,
-          activeMatchId,
-          activeMatch,
-          joinCode: activeMatchId ? activeMatch?.private_join_code ?? prev.joinCode : null,
+          activeMatchId: nextActiveMatchId,
+          activeMatch: nextActiveMatch,
+          sessionMode,
+          joinCode: nextActiveMatchId
+            ? nextActiveMatch?.private_join_code ?? prev.joinCode
+            : null,
         };
       });
 
