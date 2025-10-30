@@ -21,9 +21,10 @@ import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 
 interface AuthJourneyProps {
   auth: SupabaseAuthState;
+  onNavigateToProfile?: () => void;
 }
 
-function AuthJourney({ auth }: AuthJourneyProps) {
+function AuthJourney({ auth, onNavigateToProfile }: AuthJourneyProps) {
   const { profile, session, loading, error, isConfigured, signInWithGoogle, signOut, refreshProfile } = auth;
   const toast = useToast();
   const [signingOut, setSigningOut] = useBoolean(false);
@@ -145,7 +146,8 @@ function AuthJourney({ auth }: AuthJourneyProps) {
   }
 
   const ensuredProfile = profile!;
-  const avatarUrl = typeof session?.user.user_metadata?.avatar_url === 'string' ? session.user.user_metadata.avatar_url : undefined;
+  const avatarUrl = ensuredProfile.avatar_url
+    ?? (typeof session?.user.user_metadata?.avatar_url === 'string' ? session.user.user_metadata.avatar_url : undefined);
   const email = session?.user.email;
 
   return (
@@ -180,6 +182,15 @@ function AuthJourney({ auth }: AuthJourneyProps) {
           )}
         </Box>
         <MenuDivider borderColor={menuBorder} />
+        <MenuItem
+          onClick={() => {
+            onNavigateToProfile?.();
+          }}
+          _hover={{ bg: signInHoverBg }}
+          closeOnSelect
+        >
+          <Text>View profile</Text>
+        </MenuItem>
         {error && (
           <MenuItem onClick={handleRetry} isDisabled={retrying} _hover={{ bg: signInHoverBg }}>
             <HStack spacing={3} align="center">

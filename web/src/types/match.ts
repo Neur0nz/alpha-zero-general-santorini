@@ -15,6 +15,7 @@ export interface PlayerProfile {
   id: string;
   auth_user_id: string | null;
   display_name: string;
+  avatar_url: string | null;
   rating: number;
   games_played: number;
   created_at: string;

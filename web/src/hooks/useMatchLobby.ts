@@ -56,6 +56,7 @@ export interface UseMatchLobbyState {
   sessionMode: 'local' | 'online' | null;
   undoRequests: Record<string, UndoRequestState | undefined>;
   abortRequests: Record<string, AbortRequestState | undefined>;
+  rematchOffers: Record<string, LobbyMatch | undefined>;
 }
 
 const INITIAL_STATE: UseMatchLobbyState = {
@@ -69,6 +70,7 @@ const INITIAL_STATE: UseMatchLobbyState = {
   sessionMode: null,
   undoRequests: {},
   abortRequests: {},
+  rematchOffers: {},
 };
 
 export interface UseMatchLobbyOptions {
@@ -116,8 +118,8 @@ function createLocalMatch(): LobbyMatch {
 const TRACKED_MATCH_STATUSES: MatchStatus[] = ['waiting_for_opponent', 'in_progress'];
 
 const MATCH_WITH_PROFILES =
-  '*, creator:creator_id (id, auth_user_id, display_name, rating, games_played, created_at, updated_at), '
-  + 'opponent:opponent_id (id, auth_user_id, display_name, rating, games_played, created_at, updated_at)';
+  '*, creator:creator_id (id, auth_user_id, display_name, avatar_url, rating, games_played, created_at, updated_at), '
+  + 'opponent:opponent_id (id, auth_user_id, display_name, avatar_url, rating, games_played, created_at, updated_at)';
 
 function normalizeAction(action: unknown): MatchAction {
   if (typeof action === 'object' && action !== null) {
@@ -153,6 +155,14 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     if (typeof window !== 'undefined') {
       try {
         const stored = window.localStorage.getItem(ACTIVE_MATCH_STORAGE_KEY);
+        if (stored === LOCAL_MATCH_ID) {
+          return {
+            ...INITIAL_STATE,
+            activeMatchId: LOCAL_MATCH_ID,
+            activeMatch: createLocalMatch(),
+            sessionMode: 'local',
+          };
+        }
         if (stored) {
           return { ...INITIAL_STATE, activeMatchId: stored };
         }
@@ -162,7 +172,19 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     }
     return INITIAL_STATE;
   });
-  const [onlineEnabled, setOnlineEnabled] = useState<boolean>(options.autoConnectOnline ?? false);
+  const [onlineEnabled, setOnlineEnabled] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = window.localStorage.getItem(ACTIVE_MATCH_STORAGE_KEY);
+        if (stored === LOCAL_MATCH_ID) {
+          return false;
+        }
+      } catch (error) {
+        console.error('Failed to determine initial online connectivity', error);
+      }
+    }
+    return options.autoConnectOnline ?? false;
+  });
   const channelRef = useRef<ReturnType<NonNullable<typeof supabase>['channel']> | null>(null);
   const playersRef = useRef<Record<string, PlayerProfile>>({});
   const [playersVersion, setPlayersVersion] = useState(0);
@@ -513,7 +535,38 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
 
   useEffect(() => {
     const client = supabase;
-    if (!client || !matchId || !onlineEnabled) {
+
+    if (!matchId) {
+      if (channelRef.current) {
+        client?.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      setState((prev) => ({ ...prev, moves: [], activeMatch: null, joinCode: null }));
+      return undefined;
+    }
+
+    if (matchId === LOCAL_MATCH_ID) {
+      if (channelRef.current) {
+        client?.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      setState((prev) => {
+        if (prev.activeMatchId !== LOCAL_MATCH_ID) {
+          return prev;
+        }
+        const activeMatch = prev.activeMatch && prev.activeMatch.id === LOCAL_MATCH_ID ? prev.activeMatch : createLocalMatch();
+        return {
+          ...prev,
+          sessionMode: 'local',
+          activeMatch,
+          joinCode: null,
+          moves: [],
+        };
+      });
+      return undefined;
+    }
+
+    if (!client || !onlineEnabled) {
       if (channelRef.current) {
         client?.removeChannel(channelRef.current);
         channelRef.current = null;
@@ -794,6 +847,88 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         },
       )
       .on(
+        'broadcast',
+        { event: 'undo-applied' },
+        (payload: { type: string; event: string; payload: any }) => {
+          const data = payload.payload ?? {};
+          const moveIndexRaw = typeof data.move_index === 'number' ? data.move_index : null;
+          setState((prev) => {
+            if (prev.activeMatchId !== matchId) {
+              return prev;
+            }
+            const existing = prev.undoRequests[matchId];
+            const targetIndex = moveIndexRaw ?? existing?.moveIndex ?? prev.moves.length - 1;
+            const nextUndo = existing
+              ? {
+                  ...existing,
+                  moveIndex: targetIndex,
+                  status: 'applied' as const,
+                }
+              : undefined;
+            const nextUndoRequests = { ...prev.undoRequests };
+            if (nextUndo) {
+              nextUndoRequests[matchId] = nextUndo;
+            }
+            const updatedMoves = prev.moves.filter((move) => move.move_index !== targetIndex);
+            return {
+              ...prev,
+              moves: updatedMoves,
+              undoRequests: nextUndo ? nextUndoRequests : prev.undoRequests,
+            };
+          });
+        },
+      )
+      .on(
+        'broadcast',
+        { event: 'rematch-created' },
+        (payload: { type: string; event: string; payload: any }) => {
+          const data = payload.payload ?? {};
+          const newMatchId = typeof data.new_match_id === 'string' ? data.new_match_id : null;
+          const joinCode = typeof data.join_code === 'string' ? data.join_code : null;
+          if (!client || !newMatchId) {
+            return;
+          }
+
+          void (async () => {
+            const { data: matchData, error: rematchError } = await client
+              .from('matches')
+              .select(MATCH_WITH_PROFILES)
+              .eq('id', newMatchId)
+              .maybeSingle();
+
+            if (rematchError || !matchData) {
+              console.error('Failed to fetch rematch match details', rematchError);
+              return;
+            }
+
+            const record = matchData as unknown as MatchRecord & Partial<LobbyMatch>;
+            const profiles: PlayerProfile[] = [];
+            if (record.creator) profiles.push(record.creator);
+            if (record.opponent) profiles.push(record.opponent);
+            mergePlayers(profiles);
+            const hydrated = attachProfiles(record) ?? { ...record, creator: null, opponent: null };
+
+            // Ignore if we created this rematch ourselves
+            if (profile && hydrated.creator_id === profile.id) {
+              return;
+            }
+
+            setState((prev) => ({
+              ...prev,
+              rematchOffers: {
+                ...prev.rematchOffers,
+                [hydrated.id]: {
+                  ...hydrated,
+                  private_join_code: joinCode ?? hydrated.private_join_code ?? null,
+                },
+              },
+            }));
+
+            void ensurePlayersLoaded([hydrated.creator_id, hydrated.opponent_id ?? undefined]);
+          })();
+        },
+      )
+      .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'matches', filter: `id=eq.${matchId}` },
         (payload: RealtimePostgresChangesPayload<MatchRecord>) => {
@@ -934,7 +1069,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       client.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [attachProfiles, ensurePlayersLoaded, matchId, mergePlayers, onlineEnabled]);
+  }, [attachProfiles, ensurePlayersLoaded, matchId, mergePlayers, onlineEnabled, profile]);
 
   const createMatch = useCallback(
     async (payload: CreateMatchPayload) => {
@@ -1346,30 +1481,67 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         throw new Error('Online play is not enabled.');
       }
       const client = supabase;
-      if (!client || !profile || !state.activeMatch) return null;
-      const { data, error } = await client
-        .from('matches')
-        .insert({
-          creator_id: profile.id,
-          visibility: state.activeMatch.visibility,
-          rated: state.activeMatch.rated,
-          clock_initial_seconds: state.activeMatch.clock_initial_seconds,
-          clock_increment_seconds: state.activeMatch.clock_increment_seconds,
-          rematch_parent_id: state.activeMatch.id,
-          initial_state: state.activeMatch.initial_state, // Include the initial state from the parent match
-        })
-        .select(MATCH_WITH_PROFILES)
-        .single();
+      const currentMatch = state.activeMatch;
+      if (!client || !profile || !currentMatch) return null;
+
+      const hasClock = (currentMatch.clock_initial_seconds ?? 0) > 0;
+      const clockInitialMinutes = hasClock ? Math.round((currentMatch.clock_initial_seconds ?? 0) / 60) : 0;
+
+      const { data, error } = await client.functions.invoke('create-match', {
+        body: {
+          visibility: currentMatch.visibility,
+          rated: currentMatch.rated,
+          hasClock,
+          clockInitialMinutes,
+          clockIncrementSeconds: currentMatch.clock_increment_seconds,
+          startingPlayer: 'opponent',
+        },
+      });
+
       if (error) {
         console.error('Failed to create rematch', error);
         throw error;
       }
-      const record = data as unknown as MatchRecord & Partial<LobbyMatch>;
+
+      const rawResponse = data as unknown;
+      const createdResponse =
+        rawResponse && typeof rawResponse === 'object' && 'match' in rawResponse
+          ? (rawResponse as { match?: MatchRecord & Partial<LobbyMatch> | null }).match ?? null
+          : null;
+      if (!createdResponse) {
+        throw new Error('Rematch response was malformed.');
+      }
+
+      // Persist rematch link on the new match
+      await client
+        .from('matches')
+        .update({ rematch_parent_id: currentMatch.id })
+        .eq('id', createdResponse.id)
+        .throwOnError();
+
+      const record = createdResponse as MatchRecord & Partial<LobbyMatch>;
       const cachedProfiles: PlayerProfile[] = [];
       if (record.creator) cachedProfiles.push(record.creator);
       if (record.opponent) cachedProfiles.push(record.opponent);
       mergePlayers(cachedProfiles);
       const enriched = attachProfiles(record) ?? { ...record, creator: profile, opponent: null };
+
+      // Notify opponent via current match channel
+      const channel = channelRef.current;
+      if (channel) {
+        void channel.send({
+          type: 'broadcast',
+          event: 'rematch-created',
+          payload: {
+            match_id: currentMatch.id,
+            new_match_id: record.id,
+            join_code: record.private_join_code,
+          },
+        }).catch((broadcastError) => {
+          console.warn('Failed to broadcast rematch creation', broadcastError);
+        });
+      }
+
       setState((prev) => ({
         ...prev,
         sessionMode: 'online',
@@ -1383,6 +1555,41 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       return enriched;
     },
     [attachProfiles, ensurePlayersLoaded, mergePlayers, onlineEnabled, profile, state.activeMatch],
+  );
+
+  const dismissRematch = useCallback((matchId: string) => {
+    setState((prev) => {
+      if (!prev.rematchOffers[matchId]) {
+        return prev;
+      }
+      const next = { ...prev.rematchOffers };
+      delete next[matchId];
+      return { ...prev, rematchOffers: next };
+    });
+  }, []);
+
+  const acceptRematch = useCallback(
+    async (matchId: string) => {
+      const offer = state.rematchOffers[matchId];
+      if (!offer) {
+        throw new Error('Rematch offer not found.');
+      }
+      try {
+        const joined = await joinMatch(matchId);
+        setState((prev) => {
+          if (!prev.rematchOffers[matchId]) {
+            return prev;
+          }
+          const next = { ...prev.rematchOffers };
+          delete next[matchId];
+          return { ...prev, rematchOffers: next };
+        });
+        return joined;
+      } catch (error) {
+        throw error;
+      }
+    },
+    [joinMatch, state.rematchOffers],
   );
 
   const requestUndo = useCallback(
@@ -1486,11 +1693,12 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         throw new Error('Only participants may respond to undo requests.');
       }
       const moveIndex = pending.moveIndex;
+      let undoResult: { undone?: boolean; moveIndex?: number; snapshot?: SantoriniStateSnapshot | null } | null = null;
       if (accepted) {
         if (!client) {
           throw new Error('Supabase client unavailable.');
         }
-        const { error } = await client.functions.invoke('submit-move', {
+        const { data, error } = await client.functions.invoke('submit-move', {
           body: {
             matchId: match.id,
             moveIndex,
@@ -1504,6 +1712,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           console.error('Failed to apply undo on server', error);
           throw error;
         }
+        undoResult = (data ?? null) as { undone?: boolean; moveIndex?: number; snapshot?: SantoriniStateSnapshot | null } | null;
       }
       const respondedAt = new Date().toISOString();
       await channel.send({
@@ -1518,18 +1727,39 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           responded_at: respondedAt,
         },
       });
+      if (undoResult?.undone) {
+        try {
+          await channel.send({
+            type: 'broadcast',
+            event: 'undo-applied',
+            payload: {
+              match_id: match.id,
+              move_index: undoResult.moveIndex ?? moveIndex,
+              snapshot: undoResult.snapshot ?? null,
+            },
+          });
+        } catch (broadcastError) {
+          console.warn('Failed to broadcast undo-applied event', broadcastError);
+        }
+      }
       setState((prev) => {
         const existing = prev.undoRequests[match.id];
         if (!existing) {
           return prev;
         }
+        const targetIndex = undoResult?.moveIndex ?? existing.moveIndex ?? moveIndex;
+        const updatedMoves = undoResult?.undone
+          ? prev.moves.filter((move) => move.move_index !== targetIndex)
+          : prev.moves;
         return {
           ...prev,
+          moves: updatedMoves,
           undoRequests: {
             ...prev.undoRequests,
             [match.id]: {
               ...existing,
-              status: accepted ? 'accepted' : 'rejected',
+              moveIndex: targetIndex,
+              status: accepted ? (undoResult?.undone ? 'applied' : 'accepted') : 'rejected',
               respondedBy: responderRole,
             },
           },
@@ -1831,6 +2061,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       moves: [],
       joinCode: null,
       undoRequests: {},
+      rematchOffers: {},
     }));
   }, []);
 
@@ -1861,6 +2092,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       moves: [],
       joinCode: null,
       undoRequests: {},
+      rematchOffers: {},
     }));
   }, []);
 
@@ -1878,6 +2110,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     hasActiveGame,
     undoRequests: state.undoRequests,
     abortRequests: state.abortRequests,
+    rematchOffers: state.rematchOffers,
     setActiveMatch,
     createMatch,
     joinMatch,
@@ -1885,6 +2118,8 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     submitMove,
     updateMatchStatus,
     offerRematch,
+    acceptRematch,
+    dismissRematch,
     startLocalMatch,
     stopLocalMatch,
     enableOnline,

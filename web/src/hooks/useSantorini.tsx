@@ -1192,7 +1192,9 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       await syncPythonFromTypeScript();
       
       await syncUi();
-      await refreshEvaluation();
+      refreshEvaluation().catch((error) => {
+        console.error('Failed to refresh evaluation after importing state:', error);
+      });
     } catch (error) {
       console.error('🤖 AI move failed:', error);
     }
@@ -1511,47 +1513,35 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
 
   const importState = useCallback(
     async (snapshot: SantoriniStateSnapshot | null | undefined) => {
-      const game = gameRef.current;
-      const selector = selectorRef.current;
-      if (!game || !selector || !snapshot) {
+      if (!snapshot) {
         return;
       }
-      if (!game.py || typeof game.py.import_practice_state !== 'function') {
-        return;
-      }
+      await ensureAiIdle();
+
       try {
-        const resultProxy = game.py.import_practice_state(snapshot);
-        let result: unknown = resultProxy;
-        if (resultProxy && typeof resultProxy.toJs === 'function') {
-          result = resultProxy.toJs({ create_proxies: false });
-        }
-        if (Array.isArray(result) && result.length >= 3) {
-          const [nextPlayerRaw, gameEndedRaw, validMovesRaw] = result as [
-            number,
-            ArrayLike<number> | number[],
-            ArrayLike<boolean> | boolean[],
-          ];
-          game.nextPlayer = typeof nextPlayerRaw === 'number' ? nextPlayerRaw : 0;
-          const endArray = Array.from(gameEndedRaw ?? [], (value) => Number(value));
-          game.gameEnded = (endArray.length === 2 ? endArray : [0, 0]) as [number, number];
-          const validArray = Array.from(validMovesRaw ?? [], (value) => Boolean(value));
-          game.validMoves =
-            validArray.length > 0 ? validArray : Array(GAME_CONSTANTS.TOTAL_MOVES).fill(false);
-        }
+        engineRef.current = SantoriniEngine.fromSnapshot(snapshot as SantoriniSnapshot);
+        moveSelectorRef.current.reset();
+      } catch (error) {
+        console.error('Failed to update TypeScript engine from snapshot:', error);
+        throw error;
+      }
+
+      await syncPythonFromTypeScript();
+
+      const selector = selectorRef.current;
+      if (selector) {
         if (typeof selector.resetAndStart === 'function') {
           selector.resetAndStart();
         } else {
           selector.reset?.();
           selector.start?.();
         }
-        await syncUi();
-        await refreshEvaluation();
-      } catch (error) {
-        console.error('Failed to import game snapshot:', error);
-        throw error;
       }
+
+      await syncUi();
+      await refreshEvaluation();
     },
-    [refreshEvaluation, syncUi],
+    [ensureAiIdle, refreshEvaluation, syncPythonFromTypeScript, syncUi],
   );
 
   const updateCalcDepth = useCallback((depth: number | null) => {

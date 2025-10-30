@@ -32,6 +32,8 @@ interface GameBoardProps {
   showBoardSizeControl?: boolean;
   showPrimaryControls?: boolean;
   undoIsLoading?: boolean;
+  isTurnActive?: boolean;
+  turnHighlightColor?: string;
 }
 
 function GameBoard({
@@ -50,6 +52,8 @@ function GameBoard({
   showBoardSizeControl = true,
   showPrimaryControls = true,
   undoIsLoading = false,
+  isTurnActive = false,
+  turnHighlightColor,
 }: GameBoardProps) {
   const cellBg = useColorModeValue('gray.50', 'gray.700');
   const selectableBg = useColorModeValue('teal.100', 'teal.700');
@@ -97,6 +101,10 @@ function GameBoard({
   const gridTemplateColumns = `repeat(${boardColumns}, 1fr)`;
 
   const boardMaxWidth = useMemo(() => `min(${boardPixels}px, calc(100vw - 24px))`, [boardPixels]);
+  const activeGlowColor = turnHighlightColor ?? useColorModeValue('teal.400', 'teal.200');
+  const boardBoxShadow = isTurnActive
+    ? `0 0 0 3px ${activeGlowColor}, 0 0 30px ${activeGlowColor}66`
+    : '2xl';
 
   return (
     <Flex
@@ -140,7 +148,10 @@ function GameBoard({
             bg={boardFrameBg}
             p={{ base: 2, sm: 4, md: 6 }}
             borderRadius="xl"
-            boxShadow="2xl"
+            boxShadow={boardBoxShadow}
+            borderWidth={isTurnActive ? '2px' : '0px'}
+            borderColor={isTurnActive ? activeGlowColor : 'transparent'}
+            transition="box-shadow 0.3s ease, border-color 0.3s ease"
           >
             <Grid
               templateColumns={gridTemplateColumns}

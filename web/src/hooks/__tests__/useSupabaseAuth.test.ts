@@ -35,6 +35,7 @@ const mockSession = {
 const mockProfile: PlayerProfile = {
   id: 'profile-id',
   auth_user_id: 'user-id',
+  avatar_url: null,
   display_name: 'TestUser',
   rating: 1500,
   games_played: 0,

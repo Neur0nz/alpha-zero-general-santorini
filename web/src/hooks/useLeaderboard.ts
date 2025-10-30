@@ -20,6 +20,7 @@ const FALLBACK_PROFILES: PlayerProfile[] = [
   {
     id: 'sample-athena',
     auth_user_id: null,
+    avatar_url: null,
     display_name: 'AthenaMind',
     rating: 2145,
     games_played: 428,
@@ -29,6 +30,7 @@ const FALLBACK_PROFILES: PlayerProfile[] = [
   {
     id: 'sample-minos',
     auth_user_id: null,
+    avatar_url: null,
     display_name: 'MinosRampart',
     rating: 2098,
     games_played: 389,
@@ -38,6 +40,7 @@ const FALLBACK_PROFILES: PlayerProfile[] = [
   {
     id: 'sample-icarus',
     auth_user_id: null,
+    avatar_url: null,
     display_name: 'IcarusFlight',
     rating: 2050,
     games_played: 312,
@@ -47,6 +50,7 @@ const FALLBACK_PROFILES: PlayerProfile[] = [
   {
     id: 'sample-nike',
     auth_user_id: null,
+    avatar_url: null,
     display_name: 'NikeRush',
     rating: 2027,
     games_played: 280,
@@ -56,6 +60,7 @@ const FALLBACK_PROFILES: PlayerProfile[] = [
   {
     id: 'sample-dionysus',
     auth_user_id: null,
+    avatar_url: null,
     display_name: 'DionysusDance',
     rating: 1992,
     games_played: 365,
@@ -65,6 +70,7 @@ const FALLBACK_PROFILES: PlayerProfile[] = [
   {
     id: 'sample-hera',
     auth_user_id: null,
+    avatar_url: null,
     display_name: 'HeraSentinel',
     rating: 1978,
     games_played: 294,
@@ -74,6 +80,7 @@ const FALLBACK_PROFILES: PlayerProfile[] = [
   {
     id: 'sample-orion',
     auth_user_id: null,
+    avatar_url: null,
     display_name: 'OrionBuild',
     rating: 1944,
     games_played: 256,
@@ -83,6 +90,7 @@ const FALLBACK_PROFILES: PlayerProfile[] = [
   {
     id: 'sample-hera2',
     auth_user_id: null,
+    avatar_url: null,
     display_name: 'PoseidonWake',
     rating: 1910,
     games_played: 230,
@@ -92,6 +100,7 @@ const FALLBACK_PROFILES: PlayerProfile[] = [
   {
     id: 'sample-colossus',
     auth_user_id: null,
+    avatar_url: null,
     display_name: 'ColossusClimb',
     rating: 1888,
     games_played: 215,
@@ -101,6 +110,7 @@ const FALLBACK_PROFILES: PlayerProfile[] = [
   {
     id: 'sample-hestia',
     auth_user_id: null,
+    avatar_url: null,
     display_name: 'HestiaForge',
     rating: 1856,
     games_played: 198,
@@ -149,7 +159,7 @@ export function useLeaderboard(limit = 20) {
 
       const { data, error } = await supabase
         .from('players')
-        .select('id, auth_user_id, display_name, rating, games_played, created_at, updated_at')
+        .select('id, auth_user_id, display_name, avatar_url, rating, games_played, created_at, updated_at')
         .order('rating', { ascending: false })
         .limit(limit);
 
@@ -217,4 +227,3 @@ export function useLeaderboard(limit = 20) {
     refresh,
   };
 }
-

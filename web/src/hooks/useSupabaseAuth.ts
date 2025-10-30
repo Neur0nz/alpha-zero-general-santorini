@@ -19,8 +19,10 @@ const DEFAULT_STATE: AuthState = {
 };
 
 const PROFILE_QUERY_FIELDS =
-  'id, auth_user_id, display_name, rating, games_played, created_at, updated_at';
+  'id, auth_user_id, display_name, avatar_url, rating, games_played, created_at, updated_at';
 const PROFILE_RETRY_DELAY = 2000; // Retry quickly to mask transient hiccups
+const AVATAR_STORAGE_BUCKET = 'avatars';
+const MAX_AVATAR_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB cap keeps uploads lightweight
 
 const NETWORK_ERROR_TOKENS = ['fetch', 'network', 'timeout', 'offline'];
 const INVALID_SESSION_TOKENS = [
@@ -91,6 +93,49 @@ function getDisplayNameSeed(user: User): string | undefined {
   return undefined;
 }
 
+function getUserAvatarUrl(user: User): string | null {
+  const metadataUrl = typeof user.user_metadata?.avatar_url === 'string' ? user.user_metadata.avatar_url.trim() : '';
+  if (metadataUrl.length > 0) {
+    return metadataUrl;
+  }
+  return null;
+}
+
+function resolveAvatarExtension(file: File): string {
+  const mime = file.type.toLowerCase();
+  if (mime === 'image/jpeg') {
+    return 'jpg';
+  }
+  if (mime === 'image/png') {
+    return 'png';
+  }
+  if (mime === 'image/webp') {
+    return 'webp';
+  }
+  if (mime === 'image/gif') {
+    return 'gif';
+  }
+  const nameExt = file.name.split('.').pop()?.toLowerCase();
+  if (nameExt && nameExt.length <= 8) {
+    return nameExt;
+  }
+  return 'png';
+}
+
+function extractAvatarStoragePath(url: string | null | undefined): string | null {
+  if (!url) {
+    return null;
+  }
+
+  const marker = `/storage/v1/object/public/${AVATAR_STORAGE_BUCKET}/`;
+  const markerIndex = url.indexOf(marker);
+  if (markerIndex === -1) {
+    return null;
+  }
+
+  return url.slice(markerIndex + marker.length);
+}
+
 async function ensureProfile(client: SupabaseClient, user: User, signal?: AbortSignal): Promise<PlayerProfile> {
   try {
     const selectQuery = client
@@ -128,12 +173,13 @@ async function ensureProfile(client: SupabaseClient, user: User, signal?: AbortS
 
   // No profile exists yet, create one with a deterministic seed.
   const seed = getDisplayNameSeed(user);
+  const initialAvatarUrl = getUserAvatarUrl(user);
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const candidate = generateDisplayName(seed);
     try {
       const insertQuery = client
         .from('players')
-        .insert({ auth_user_id: user.id, display_name: candidate })
+        .insert({ auth_user_id: user.id, display_name: candidate, avatar_url: initialAvatarUrl })
         .select(PROFILE_QUERY_FIELDS)
         .single();
 
@@ -698,7 +744,7 @@ export function useSupabaseAuth() {
         .from('players')
         .update({ display_name: normalized })
         .eq('auth_user_id', userId)
-        .select('*')
+        .select(PROFILE_QUERY_FIELDS)
         .single();
 
       if (error) {
@@ -709,9 +755,132 @@ export function useSupabaseAuth() {
         throw error;
       }
 
-      setState((prev) => ({ ...prev, profile: data as PlayerProfile }));
+      const nextProfile = data as PlayerProfile;
+      const session = state.session;
+
+      setState((prev) => ({ ...prev, profile: nextProfile }));
+
+      if (session) {
+        cachedStateRef.current = { session, profile: nextProfile };
+        cacheAuthState(session, nextProfile);
+      }
     },
-    [userId]
+    [userId, state.session]
+  );
+
+  const updateAvatar = useCallback(
+    async (file: File) => {
+      const client = supabase;
+      if (!client) {
+        throw new Error('Supabase is not configured.');
+      }
+      if (!userId) {
+        throw new Error('You must be signed in to update your profile picture.');
+      }
+      const session = state.session;
+      if (!session) {
+        throw new Error('You must be signed in to update your profile picture.');
+      }
+
+      if (!file || typeof file.type !== 'string' || !file.type.startsWith('image/')) {
+        throw new Error('Please choose an image file.');
+      }
+
+      if (file.size > MAX_AVATAR_SIZE_BYTES) {
+        throw new Error('Please choose an image 2 MB or smaller.');
+      }
+
+      const uniqueId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+      const extension = resolveAvatarExtension(file);
+      const storagePath = `${userId}/${uniqueId}.${extension}`;
+      const bucket = client.storage.from(AVATAR_STORAGE_BUCKET);
+
+      const { error: uploadError } = await bucket.upload(storagePath, file, {
+        cacheControl: '3600',
+        contentType: file.type || `image/${extension}`,
+        upsert: true,
+      });
+
+      if (uploadError) {
+        console.error('Failed to upload avatar to Supabase storage', uploadError);
+        throw new Error('Unable to upload profile picture. Please try again.');
+      }
+
+      const { data: publicUrlData, error: publicUrlError } = bucket.getPublicUrl(storagePath);
+      if (publicUrlError) {
+        console.error('Failed to obtain public avatar URL', publicUrlError);
+        throw new Error('Unable to prepare your profile picture. Please try again.');
+      }
+
+      const publicUrl = publicUrlData?.publicUrl;
+      if (!publicUrl) {
+        console.error('Failed to obtain public avatar URL', publicUrlData);
+        throw new Error('Unable to prepare your profile picture. Please try again.');
+      }
+
+      const { data: authData, error: authError } = await client.auth.updateUser({
+        data: { avatar_url: publicUrl },
+      });
+      if (authError) {
+        console.error('Failed to update Supabase auth metadata with new avatar', authError);
+        throw new Error('Unable to save your profile picture. Please try again.');
+      }
+
+      const { data: playerData, error: profileError } = await client
+        .from('players')
+        .update({ avatar_url: publicUrl })
+        .eq('auth_user_id', userId)
+        .select(PROFILE_QUERY_FIELDS)
+        .single();
+
+      if (profileError || !playerData) {
+        console.error('Failed to update player profile with new avatar', profileError);
+        throw new Error('Unable to save your profile picture. Please try again.');
+      }
+
+      const nextProfile = playerData as PlayerProfile;
+      const updatedUser = authData.user
+        ? {
+            ...authData.user,
+            user_metadata: {
+              ...authData.user.user_metadata,
+              avatar_url: publicUrl,
+            },
+          }
+        : {
+            ...session.user,
+            user_metadata: {
+              ...session.user.user_metadata,
+              avatar_url: publicUrl,
+            },
+          };
+
+      const updatedSession: Session = {
+        ...session,
+        user: updatedUser,
+      };
+
+      setState((prev) => ({ ...prev, session: updatedSession, profile: nextProfile }));
+
+      cachedStateRef.current = { session: updatedSession, profile: nextProfile };
+      cacheAuthState(updatedSession, nextProfile);
+
+      const previousAvatarUrl = state.profile?.avatar_url;
+      const previousStoragePath = extractAvatarStoragePath(previousAvatarUrl);
+
+      if (previousStoragePath && previousStoragePath !== storagePath) {
+        const { error: removeError } = await bucket.remove([previousStoragePath]);
+        if (removeError) {
+          console.warn('Failed to remove previous avatar from storage', removeError);
+        }
+      }
+
+      return publicUrl;
+    },
+    [userId, state.session, state.profile]
   );
 
   useEffect(() => {
@@ -776,6 +945,7 @@ export function useSupabaseAuth() {
     signInWithGoogle,
     signOut,
     updateDisplayName,
+    updateAvatar,
   };
 }
 

@@ -52,9 +52,26 @@ function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
     calcOptionsBusy,
     gameMode,
     difficulty,
+    nextPlayer,
   } = useSantorini();
   const [, startInitializeTransition] = useTransition();
   const creditColor = useColorModeValue('gray.600', 'whiteAlpha.700');
+  const isHumanTurn = (() => {
+    if (gameMode === 'AI') {
+      return false;
+    }
+    if (gameMode === 'Human') {
+      return true;
+    }
+    if (gameMode === 'P0') {
+      return nextPlayer === 0;
+    }
+    if (gameMode === 'P1') {
+      return nextPlayer === 1;
+    }
+    return false;
+  })();
+  const practiceTurnColor = nextPlayer === 0 ? 'blue.400' : 'red.400';
 
   useEffect(() => {
     // Initialize game engine in background without blocking urgent UI updates
@@ -113,6 +130,8 @@ function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
               buttons={buttons}
               undo={undo}
               redo={redo}
+              isTurnActive={isHumanTurn}
+              turnHighlightColor={practiceTurnColor}
             />
           )}
         </Box>
@@ -282,7 +301,12 @@ function App() {
         minH="100vh"
       >
         <Flex direction="column" flex="1" minH="100vh" bgGradient={appBg} color={appColor}>
-          <HeaderBar activeTab={activeTab} actions={tabActions} auth={auth} />
+          <HeaderBar
+            activeTab={activeTab}
+            actions={tabActions}
+            auth={auth}
+            onNavigateToProfile={() => setActiveTab('profile')}
+          />
           <Flex flex="1" py={{ base: 6, md: 8 }}>
             <Container maxW="7xl" flex="1" px={{ base: 3, md: 6 }}>
               <TabPanels flex="1">

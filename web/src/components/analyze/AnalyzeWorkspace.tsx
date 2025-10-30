@@ -26,44 +26,14 @@ import GameBoard from '@components/GameBoard';
 import EvaluationPanel from '@components/EvaluationPanel';
 import { supabase } from '@/lib/supabaseClient';
 import { SantoriniEngine, type SantoriniSnapshot } from '@/lib/santoriniEngine';
-import { renderCellSvg } from '@game/svg';
 import { useSantorini } from '@hooks/useSantorini';
-import type { MatchMoveRecord, MatchRecord, SantoriniMoveAction, PlayerProfile } from '@/types/match';
+import type { MatchMoveRecord, MatchRecord, SantoriniMoveAction, PlayerProfile, SantoriniStateSnapshot } from '@/types/match';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import type { LobbyMatch } from '@hooks/useMatchLobby';
 
 interface LoadedAnalysis {
   match: MatchRecord;
   moves: MatchMoveRecord<SantoriniMoveAction>[];
-}
-
-interface BoardCell {
-  worker: number;
-  level: number;
-  levels: number;
-  svg: string;
-  highlight: boolean;
-}
-
-function engineToBoard(snapshot: SantoriniSnapshot): BoardCell[][] {
-  const board: BoardCell[][] = [];
-  for (let y = 0; y < 5; y++) {
-    const row: BoardCell[] = [];
-    for (let x = 0; x < 5; x++) {
-      const cell = snapshot.board[y][x];
-      const worker = cell[0] || 0;
-      const level = cell[1] || 0;
-      row.push({
-        worker,
-        level,
-        levels: level,
-        svg: renderCellSvg({ levels: level, worker }),
-        highlight: false,
-      });
-    }
-    board.push(row);
-  }
-  return board;
 }
 
 function describeMatch(match: LobbyMatch, profile: PlayerProfile | null) {
@@ -92,12 +62,11 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
   const [loaded, setLoaded] = useState<LoadedAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(-1);
-  const [engine, setEngine] = useState<SantoriniEngine | null>(null);
-  const [board, setBoard] = useState<BoardCell[][]>([]);
   const [myCompletedGames, setMyCompletedGames] = useState<LobbyMatch[]>([]);
   const [loadingMyGames, setLoadingMyGames] = useState(false);
   const [aiInitialized, setAiInitialized] = useState(false);
   const [replaying, setReplaying] = useState(false);
+  const [isExploring, setIsExploring] = useState(false);
 
   // Initialize AI engine on mount
   useEffect(() => {
@@ -106,6 +75,7 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
       try {
         await santorini.initialize();
         if (!cancelled) {
+          await santorini.controls.setGameMode('Human');
           setAiInitialized(true);
         }
       } catch (error) {
@@ -156,45 +126,32 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
   }, [auth?.profile]);
 
   // Replay game to a specific move index
-  const replayTo = useCallback(
-    async (index: number, sourceMoves: MatchMoveRecord<SantoriniMoveAction>[]) => {
-      if (!loaded || !aiInitialized || replaying) return;
+  const replayToSnapshot = useCallback(
+    async (index: number, analysis: LoadedAnalysis) => {
+      if (!aiInitialized || replaying) return;
 
       setReplaying(true);
       try {
-        // Start from initial state for TypeScript engine (fast display)
-        const initialState = loaded.match.initial_state as SantoriniSnapshot;
-        let currentEngine = SantoriniEngine.fromSnapshot(initialState);
+        const initialState = analysis.match.initial_state as SantoriniSnapshot;
+        const playbackEngine = SantoriniEngine.fromSnapshot(initialState);
 
-        // Update display immediately
-        setEngine(currentEngine);
-        setBoard(engineToBoard(currentEngine.snapshot));
-        setCurrentIndex(index);
-
-        // Reset AI engine and replay moves
-        await santorini.controls.reset();
-
-        // Apply moves up to index
         if (index >= 0) {
           for (let i = 0; i <= index; i++) {
-            const action = sourceMoves[i]?.action;
+            const action = analysis.moves[i]?.action;
             if (action && action.kind === 'santorini.move' && typeof action.move === 'number') {
-              // Update TypeScript engine for display
-              const result = currentEngine.applyMove(action.move);
-              currentEngine = SantoriniEngine.fromSnapshot(result.snapshot);
-              
-              // Apply to AI engine (without triggering automatic AI move)
-              await santorini.applyMove(action.move, { triggerAi: false });
+              try {
+                playbackEngine.applyMove(action.move);
+              } catch (moveError) {
+                console.warn('Skipping invalid move during replay', { index: i, move: action.move }, moveError);
+                break;
+              }
             }
           }
         }
 
-        // Update display with final state
-        setEngine(currentEngine);
-        setBoard(engineToBoard(currentEngine.snapshot));
-
-        // Refresh AI evaluation for current position (this triggers the analysis)
-        await santorini.controls.refreshEvaluation();
+        await santorini.importState(playbackEngine.snapshot as SantoriniStateSnapshot);
+        setCurrentIndex(index);
+        setIsExploring(false);
       } catch (error) {
         console.error('Failed to replay to move', index, error);
         toast({
@@ -206,7 +163,7 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
         setReplaying(false);
       }
     },
-    [loaded, aiInitialized, replaying, santorini, toast],
+    [aiInitialized, replaying, santorini, toast],
   );
 
   const loadMatchById = useCallback(async (id: string) => {
@@ -255,7 +212,7 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
       setLoaded(loadedData);
       
       // Start at the last move
-      await replayTo(typedMoves.length - 1, typedMoves);
+      await replayToSnapshot(typedMoves.length - 1, loadedData);
       
       localStorage.setItem('santorini:lastAnalyzedMatch', id.trim());
       setMatchId(id.trim());
@@ -275,29 +232,61 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
     } finally {
       setLoading(false);
     }
-  }, [replayTo, toast]);
+  }, [replayToSnapshot, toast]);
 
   const loadMatch = useCallback(() => {
     loadMatchById(matchId);
   }, [loadMatchById, matchId]);
 
-  const goToMove = useCallback(
-    async (index: number) => {
-      if (!loaded) return;
-      await replayTo(index, loaded.moves);
+  const handleCellClick = useCallback(
+    (y: number, x: number) => {
+      if (replaying) return;
+      const result = santorini.onCellClick(y, x);
+      if (result && typeof (result as Promise<unknown>).then === 'function') {
+        (result as Promise<unknown>)
+          .then(() => setIsExploring(true))
+          .catch(() => {});
+      } else {
+        setIsExploring(true);
+      }
     },
-    [loaded, replayTo],
+    [replaying, santorini],
   );
 
-  const goToStart = useCallback(() => goToMove(-1), [goToMove]);
+  const restorePosition = useCallback(() => {
+    if (loaded) {
+      void replayToSnapshot(currentIndex, loaded);
+    }
+  }, [currentIndex, loaded, replayToSnapshot]);
+
+  const goToMove = useCallback(
+    async (index: number) => {
+      if (!loaded || replaying) return;
+      await replayToSnapshot(index, loaded);
+    },
+    [loaded, replayToSnapshot, replaying],
+  );
+
+  const goToStart = useCallback(() => {
+    void goToMove(-1);
+  }, [goToMove]);
+
   const goToEnd = useCallback(() => {
-    if (loaded) goToMove(loaded.moves.length - 1);
+    if (loaded) {
+      void goToMove(loaded.moves.length - 1);
+    }
   }, [goToMove, loaded]);
+
   const stepBack = useCallback(() => {
-    if (currentIndex > -1) goToMove(currentIndex - 1);
+    if (currentIndex > -1) {
+      void goToMove(currentIndex - 1);
+    }
   }, [currentIndex, goToMove]);
+
   const stepForward = useCallback(() => {
-    if (loaded && currentIndex < loaded.moves.length - 1) goToMove(currentIndex + 1);
+    if (loaded && currentIndex < loaded.moves.length - 1) {
+      void goToMove(currentIndex + 1);
+    }
   }, [currentIndex, goToMove, loaded]);
 
   // Keyboard shortcuts
@@ -338,13 +327,12 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
   }, [loaded]);
 
   const gameResult = useMemo(() => {
-    if (!engine || !loaded) return null;
-    const [p0Score, p1Score] = engine.getGameEnded();
-    if (p0Score === 0 && p1Score === 0) return null;
-    
-    const winner = p0Score === 1 ? 'Creator' : p1Score === 1 ? 'Opponent' : 'Draw';
-    return winner;
-  }, [engine, loaded]);
+    const [p0Score, p1Score] = santorini.gameEnded;
+    if (p0Score === 0 && p1Score === 0) {
+      return null;
+    }
+    return p0Score === 1 ? 'Creator' : p1Score === 1 ? 'Opponent' : 'Draw';
+  }, [santorini.gameEnded]);
 
   const canStepBack = currentIndex > -1;
   const canStepForward = loaded ? currentIndex < loaded.moves.length - 1 : false;
@@ -355,6 +343,27 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
   const highlightBorder = useColorModeValue('teal.500', 'teal.300');
   const highlightBg = useColorModeValue('teal.50', 'teal.900');
   const badgeBorder = useColorModeValue('gray.200', 'whiteAlpha.200');
+
+  const analyzeButtons = useMemo(() => {
+    const totalMoves = loaded?.moves.length ?? 0;
+    const status = replaying
+      ? 'Loading position...'
+      : isExploring
+        ? currentIndex >= 0
+          ? `Exploring from move ${currentIndex + 1}`
+          : 'Exploring from initial position'
+        : currentIndex === -1
+          ? 'Initial position'
+          : `Move ${currentIndex + 1} of ${totalMoves}`;
+
+    return {
+      ...santorini.buttons,
+      loading: santorini.buttons.loading,
+      status,
+      setupMode: false,
+      editMode: 0,
+    };
+  }, [currentIndex, isExploring, loaded?.moves.length, replaying, santorini.buttons]);
 
   return (
     <Stack spacing={6} py={{ base: 6, md: 10 }}>
@@ -506,8 +515,11 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
               <Stack spacing={4}>
                 <Flex justify="space-between" align="center" gap={4} flexWrap="wrap">
                   <Text fontSize="sm" color={mutedText}>
-                    Move {currentIndex + 1} of {loaded.moves.length}
-                    {currentIndex === -1 && ' (Initial position)'}
+                    {isExploring
+                      ? currentIndex >= 0
+                        ? `Exploring from move ${currentIndex + 1}`
+                        : 'Exploring from initial position'
+                      : `Move ${currentIndex + 1} of ${loaded.moves.length}`}
                   </Text>
                   <ButtonGroup size="sm" isAttached variant="outline">
                     <Tooltip label="Go to start (Home)" hasArrow>
@@ -515,7 +527,7 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
                         aria-label="Go to start"
                         icon={<ArrowBackIcon />}
                         onClick={goToStart}
-                        isDisabled={!canStepBack}
+                        isDisabled={!canStepBack || replaying}
                       />
                     </Tooltip>
                     <Tooltip label="Previous move (←)" hasArrow>
@@ -523,7 +535,7 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
                         aria-label="Previous move"
                         icon={<ChevronLeftIcon />}
                         onClick={stepBack}
-                        isDisabled={!canStepBack}
+                        isDisabled={!canStepBack || replaying}
                       />
                     </Tooltip>
                     <Tooltip label="Next move (→)" hasArrow>
@@ -531,7 +543,7 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
                         aria-label="Next move"
                         icon={<ChevronRightIcon />}
                         onClick={stepForward}
-                        isDisabled={!canStepForward}
+                        isDisabled={!canStepForward || replaying}
                       />
                     </Tooltip>
                     <Tooltip label="Go to end (End)" hasArrow>
@@ -539,7 +551,7 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
                         aria-label="Go to end"
                         icon={<ArrowForwardIcon />}
                         onClick={goToEnd}
-                        isDisabled={!canStepForward}
+                        isDisabled={!canStepForward || replaying}
                       />
                     </Tooltip>
                   </ButtonGroup>
@@ -552,34 +564,38 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
           <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder}>
             <CardBody>
               <Flex direction={{ base: 'column', xl: 'row' }} gap={6} align="stretch">
-                {/* Game Board - Read-only for analysis */}
+                {/* Game Board */}
                 <Box flex="1" display="flex" justifyContent="center" pointerEvents={replaying ? 'none' : 'auto'}>
-                  <GameBoard
-                    board={board}
-                    selectable={Array.from({ length: 5 }, () => Array(5).fill(false))}
-                    cancelSelectable={Array.from({ length: 5 }, () => Array(5).fill(false))}
-                    onCellClick={() => {}}
-                    onCellHover={() => {}}
-                    onCellLeave={() => {}}
-                    buttons={{
-                      loading: replaying,
-                      canUndo: false,
-                      canRedo: false,
-                      status: replaying 
-                        ? 'Loading position...' 
-                        : currentIndex === -1 
-                          ? 'Initial position' 
-                          : `Move ${currentIndex + 1} of ${loaded?.moves.length ?? 0}`,
-                      editMode: 0,
-                      setupMode: false,
-                      setupTurn: 0,
-                    }}
-                    undo={async () => {}}
-                    redo={async () => {}}
-                    hideRedoButton={true}
-                    undoLabel="Previous"
-                    undoDisabledOverride={true}
-                  />
+                  <Stack spacing={4} w="100%" align="center">
+                    {isExploring && (
+                      <Badge colorScheme="purple" alignSelf="flex-start">
+                        Exploring custom variation
+                      </Badge>
+                    )}
+                    <GameBoard
+                      board={santorini.board}
+                      selectable={santorini.selectable}
+                      cancelSelectable={santorini.cancelSelectable}
+                      onCellClick={handleCellClick}
+                      onCellHover={santorini.onCellHover}
+                      onCellLeave={santorini.onCellLeave}
+                      buttons={analyzeButtons}
+                      undo={santorini.undo}
+                      redo={santorini.redo}
+                      showPrimaryControls={false}
+                      undoDisabledOverride={replaying}
+                    />
+                    {isExploring && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={restorePosition}
+                        isDisabled={replaying}
+                      >
+                        Restore to selected move
+                      </Button>
+                    )}
+                  </Stack>
                 </Box>
 
                 {/* Move List and Evaluation */}
@@ -609,8 +625,12 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
                           borderRadius="md"
                           px={3}
                           py={2}
-                          cursor="pointer"
-                          onClick={goToStart}
+                          cursor={replaying ? 'not-allowed' : 'pointer'}
+                          onClick={() => {
+                            if (!replaying) {
+                              goToStart();
+                            }
+                          }}
                           transition="all 0.2s"
                           _hover={{ borderColor: highlightBorder }}
                         >
@@ -631,8 +651,12 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
                               borderRadius="md"
                               px={3}
                               py={2}
-                              cursor="pointer"
-                              onClick={() => goToMove(index)}
+                              cursor={replaying ? 'not-allowed' : 'pointer'}
+                              onClick={() => {
+                                if (!replaying) {
+                                  void goToMove(index);
+                                }
+                              }}
                               transition="all 0.2s"
                               _hover={{ borderColor: highlightBorder }}
                             >

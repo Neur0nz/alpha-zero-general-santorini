@@ -24,6 +24,7 @@ interface HeaderBarProps {
   activeTab: AppTab;
   actions?: ReactNode;
   auth: SupabaseAuthState;
+  onNavigateToProfile: () => void;
 }
 
 export const NAV_TABS: ReadonlyArray<{ key: AppTab; label: string; helper: string }> = [
@@ -35,7 +36,7 @@ export const NAV_TABS: ReadonlyArray<{ key: AppTab; label: string; helper: strin
   { key: 'profile', label: 'Profile', helper: 'Your stats' },
 ];
 
-function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
+function HeaderBar({ activeTab, actions, auth, onNavigateToProfile }: HeaderBarProps) {
   const { colorMode, toggleColorMode } = useColorMode();
   const bg = useColorModeValue('white', 'gray.850');
   const borderColor = useColorModeValue('gray.200', 'whiteAlpha.200');
@@ -88,7 +89,7 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
             justify={{ base: 'flex-end', lg: 'flex-end' }}
           >
             {actions && <Box display={{ base: 'flex', md: 'none' }}>{actions}</Box>}
-            <AuthJourney auth={auth} />
+            <AuthJourney auth={auth} onNavigateToProfile={onNavigateToProfile} />
             <Tooltip label="Toggle color mode" hasArrow>
               <IconButton
                 aria-label="Toggle color mode"
@@ -126,38 +127,42 @@ function HeaderBar({ activeTab, actions, auth }: HeaderBarProps) {
               } 
             }}
           >
-            {NAV_TABS.map((tab) => (
-              <Tab
-                key={tab.key}
-                aria-label={`${tab.label}: ${tab.helper}`}
-                aria-current={activeTab === tab.key ? 'page' : undefined}
-                px={{ base: 3, md: 4 }}
-                py={{ base: 2, md: 3 }}
-                borderRadius="lg"
-                bg={tabBg}
-                color={descriptionColor}
-                transition="all 0.15s ease-in-out"
-                _hover={{ bg: tabHover, color: headingColor, transform: 'translateY(-1px)' }}
-                _selected={{
-                  bg: tabSelected,
-                  color: tabSelectedColor,
-                  boxShadow: 'md',
-                  transform: 'translateY(-1px)',
-                }}
-                _focusVisible={{
-                  outline: '2px solid',
-                  outlineColor: 'teal.500',
-                  outlineOffset: '2px',
-                }}
-              >
-                <VStack spacing={0} align="flex-start">
-                  <Text fontWeight="semibold">{tab.label}</Text>
-                  <Text fontSize="xs" color={tabHelperColor}>
-                    {tab.helper}
-                  </Text>
-                </VStack>
-              </Tab>
-            ))}
+            {NAV_TABS.map((tab) => {
+              const hidden = tab.key === 'profile';
+              return (
+                <Tab
+                  key={tab.key}
+                  aria-label={`${tab.label}: ${tab.helper}`}
+                  aria-current={activeTab === tab.key ? 'page' : undefined}
+                  px={{ base: 3, md: 4 }}
+                  py={{ base: 2, md: 3 }}
+                  borderRadius="lg"
+                  bg={tabBg}
+                  color={descriptionColor}
+                  transition="all 0.15s ease-in-out"
+                  _hover={{ bg: tabHover, color: headingColor, transform: 'translateY(-1px)' }}
+                  _selected={{
+                    bg: tabSelected,
+                    color: tabSelectedColor,
+                    boxShadow: 'md',
+                    transform: 'translateY(-1px)',
+                  }}
+                  _focusVisible={{
+                    outline: '2px solid',
+                    outlineColor: 'teal.500',
+                    outlineOffset: '2px',
+                  }}
+                  display={hidden ? 'none' : undefined}
+                >
+                  <VStack spacing={0} align="flex-start">
+                    <Text fontWeight="semibold">{tab.label}</Text>
+                    <Text fontSize="xs" color={tabHelperColor}>
+                      {tab.helper}
+                    </Text>
+                  </VStack>
+                </Tab>
+              );
+            })}
           </TabList>
           <Spacer />
           <HStack spacing={3} align="center">

@@ -93,8 +93,7 @@ function PracticeToolbar({
     }
   };
 
-  const isBusy = engineLoading || buttons.loading || isResetting || isModeUpdating;
-  const disableActions = isBusy;
+  const disableActions = engineLoading || isResetting || isModeUpdating;
 
   return (
     <Box
@@ -153,7 +152,7 @@ function PracticeToolbar({
                 variant="outline"
                 onClick={handleRefreshEvaluation}
                 isLoading={isRefreshing}
-                isDisabled={engineLoading || buttons.loading}
+                isDisabled={engineLoading || isRefreshing}
               />
             </Tooltip>
           </WrapItem>
@@ -175,7 +174,7 @@ function PracticeToolbar({
             _hover={{ borderColor: selectBorderColor }}
             _focus={{ borderColor: 'teal.400', boxShadow: '0 0 0 1px teal.400' }}
             maxW="220px"
-            isDisabled={engineLoading || buttons.loading}
+            isDisabled={engineLoading}
           >
             {difficultyPresets.map((preset) => (
               <option
@@ -200,7 +199,7 @@ function PracticeToolbar({
             _hover={{ borderColor: selectBorderColor }}
             _focus={{ borderColor: 'teal.400', boxShadow: '0 0 0 1px teal.400' }}
             maxW="220px"
-            isDisabled={engineLoading || buttons.loading || isModeUpdating}
+            isDisabled={engineLoading || isModeUpdating}
           >
             {gameModes.map((preset) => (
               <option

@@ -243,11 +243,12 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       setClock(deriveInitialClocks(match));
       lastSyncedStateRef.current = { matchId: match.id, snapshotMoveIndex: -1, appliedMoveCount: 0 };
       pendingLocalMoveRef.current = null;
+      resetMatch();
     }
 
     setClockEnabled(match.clock_initial_seconds ? match.clock_initial_seconds > 0 : false);
     previousMatchRef.current = next;
-  }, [match?.id, match?.clock_initial_seconds, match?.status, match]);
+  }, [match?.id, match?.clock_initial_seconds, match?.status, match, resetMatch]);
 
   // State synchronization effect - import snapshots and replay moves
   useEffect(() => {

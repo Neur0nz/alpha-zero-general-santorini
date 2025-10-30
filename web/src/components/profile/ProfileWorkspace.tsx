@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AlertDescription,
@@ -19,17 +19,33 @@ import {
   Heading,
   HStack,
   Input,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
   Spinner,
+  Slider,
+  SliderFilledTrack,
+  SliderThumb,
+  SliderTrack,
   Stack,
   Text,
   useBoolean,
   useColorModeValue,
+  useDisclosure,
   useToast,
 } from '@chakra-ui/react';
 import GoogleIcon from '@components/auth/GoogleIcon';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import { generateDisplayName, validateDisplayName } from '@/utils/generateDisplayName';
 import { useSurfaceTokens } from '@/theme/useSurfaceTokens';
+import Cropper, { type Area } from 'react-easy-crop';
+import { cropImageToFile } from '@/utils/cropImage';
+
+const MAX_AVATAR_FILE_BYTES = 2 * 1024 * 1024;
 
 interface ProfileWorkspaceProps {
   auth: SupabaseAuthState;
@@ -45,14 +61,24 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
     signInWithGoogle,
     signOut,
     updateDisplayName,
+    updateAvatar,
     refreshProfile,
   } = auth;
   const [savingName, setSavingName] = useBoolean(false);
   const [startingGoogle, setStartingGoogle] = useBoolean(false);
   const [signingOut, setSigningOut] = useBoolean(false);
   const [retrying, setRetrying] = useBoolean(false);
+  const [savingAvatar, setSavingAvatar] = useBoolean(false);
   const [displayNameValue, setDisplayNameValue] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const { isOpen: isCropOpen, onOpen: openCrop, onClose: closeCrop } = useDisclosure();
+  const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [crop, setCrop] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toast = useToast();
   const googleHoverBg = useColorModeValue('gray.100', 'whiteAlpha.300');
   const googleActiveBg = useColorModeValue('gray.200', 'whiteAlpha.200');
@@ -67,6 +93,26 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
       setNameError(null);
     }
   }, [profile]);
+
+  useEffect(() => {
+    setAvatarPreview(null);
+  }, [profile?.avatar_url]);
+
+  useEffect(() => {
+    return () => {
+      if (avatarPreview && avatarPreview.startsWith('blob:')) {
+        URL.revokeObjectURL(avatarPreview);
+      }
+    };
+  }, [avatarPreview]);
+
+  useEffect(() => {
+    return () => {
+      if (cropImageUrl) {
+        URL.revokeObjectURL(cropImageUrl);
+      }
+    };
+  }, [cropImageUrl]);
 
   const handleGoogleSignIn = async () => {
     try {
@@ -138,6 +184,105 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
       });
     } finally {
       setSigningOut.off();
+    }
+  };
+
+  const resetCropState = () => {
+    if (cropImageUrl) {
+      URL.revokeObjectURL(cropImageUrl);
+    }
+    setCropImageUrl(null);
+    setPendingFile(null);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCroppedAreaPixels(null);
+  };
+
+  const handleChooseAvatar = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleAvatarFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      toast({ title: 'Unsupported file', status: 'error', description: 'Please choose an image file.' });
+      event.target.value = '';
+      return;
+    }
+
+    if (file.size > MAX_AVATAR_FILE_BYTES) {
+      toast({ title: 'File too large', status: 'error', description: 'Please choose an image 2 MB or smaller.' });
+      event.target.value = '';
+      return;
+    }
+
+    if (cropImageUrl) {
+      URL.revokeObjectURL(cropImageUrl);
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setPendingFile(file);
+    setCropImageUrl(previewUrl);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCroppedAreaPixels(null);
+    openCrop();
+    event.target.value = '';
+  };
+
+  const handleCancelCrop = () => {
+    if (savingAvatar) {
+      return;
+    }
+    resetCropState();
+    closeCrop();
+  };
+
+  const handleCropComplete = (_: Area, areaPixels: Area) => {
+    setCroppedAreaPixels(areaPixels);
+  };
+
+  const handleConfirmCrop = async () => {
+    if (!pendingFile || !cropImageUrl || !croppedAreaPixels) {
+      toast({ title: 'Crop incomplete', status: 'error', description: 'Adjust the crop before saving.' });
+      return;
+    }
+
+    setSavingAvatar.on();
+
+    try {
+      const croppedFile = await cropImageToFile(cropImageUrl, croppedAreaPixels, {
+        mimeType: 'image/png',
+        size: 512,
+        fileName: `${pendingFile.name.replace(/\.[^/.]+$/, '')}-cropped.png`,
+      });
+
+      if (croppedFile.size > MAX_AVATAR_FILE_BYTES) {
+        toast({
+          title: 'Image too large',
+          status: 'error',
+          description: 'Try zooming out slightly so the final image is under 2 MB.',
+        });
+        return;
+      }
+
+      const uploadedUrl = await updateAvatar(croppedFile);
+      if (uploadedUrl) {
+        setAvatarPreview(uploadedUrl);
+      }
+
+      toast({ title: 'Profile picture updated', status: 'success' });
+      closeCrop();
+      resetCropState();
+    } catch (uploadError) {
+      const message = uploadError instanceof Error ? uploadError.message : 'Unable to update profile picture.';
+      toast({ title: 'Upload failed', status: 'error', description: message });
+    } finally {
+      setSavingAvatar.off();
     }
   };
 
@@ -228,10 +373,14 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
   }
 
   const displayNameChanged = Boolean(profile && displayNameValue.trim() !== profile.display_name);
+  const avatarSrc = avatarPreview
+    ?? profile?.avatar_url
+    ?? (typeof session?.user.user_metadata?.avatar_url === 'string' ? session.user.user_metadata.avatar_url : undefined);
 
   return (
-    <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} w="100%">
-      <CardBody as={Stack} spacing={6}>
+    <>
+      <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} w="100%">
+        <CardBody as={Stack} spacing={6}>
         <Flex
           justify="space-between"
           align={{ base: 'stretch', md: 'center' }}
@@ -239,11 +388,14 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
           gap={{ base: 4, md: 6 }}
         >
           <HStack spacing={4} align="center">
-            <Avatar
-              size="lg"
-              name={profile.display_name}
-              src={typeof session?.user.user_metadata?.avatar_url === 'string' ? session.user.user_metadata.avatar_url : undefined}
-            />
+            <Box position="relative">
+              <Avatar size="lg" name={profile.display_name} src={avatarSrc} opacity={savingAvatar ? 0.6 : 1} />
+              {savingAvatar && (
+                <Center position="absolute" inset={0}>
+                  <Spinner size="sm" />
+                </Center>
+              )}
+            </Box>
             <Box>
               <Heading size="sm">{profile.display_name}</Heading>
               {session?.user.email && (
@@ -254,6 +406,20 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
               <Text fontSize="sm" color={mutedText}>
                 Connected with Google
               </Text>
+              <HStack spacing={3} mt={3} align="center">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={handleChooseAvatar}
+                  isLoading={savingAvatar}
+                  isDisabled={savingAvatar || isCropOpen}
+                >
+                  Change photo
+                </Button>
+                <Text fontSize="xs" color={mutedText}>
+                  PNG, JPG, or WEBP up to 2MB
+                </Text>
+              </HStack>
               <HStack spacing={2} mt={3} flexWrap="wrap">
                 <Badge colorScheme="teal" variant="subtle" px={2} py={1} borderRadius="md">
                   Rating: {profile.rating}
@@ -264,6 +430,13 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
               </HStack>
             </Box>
           </HStack>
+          <Input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            display="none"
+            onChange={handleAvatarFile}
+          />
           <Button
             variant="outline"
             size="sm"
@@ -312,7 +485,60 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
           </Text>
         </Stack>
       </CardBody>
-    </Card>
+      </Card>
+      <Modal isOpen={isCropOpen} onClose={handleCancelCrop} size="lg" isCentered>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Adjust your profile picture</ModalHeader>
+          <ModalCloseButton isDisabled={savingAvatar} />
+          <ModalBody>
+            <Box
+              position="relative"
+              w="100%"
+              pt="100%"
+              bg={useColorModeValue('gray.100', 'gray.900')}
+              borderRadius="xl"
+              overflow="hidden"
+            >
+              {cropImageUrl && (
+                <Box position="absolute" inset={0}>
+                  <Cropper
+                    image={cropImageUrl}
+                    crop={crop}
+                    zoom={zoom}
+                    aspect={1}
+                    cropShape="round"
+                    showGrid={false}
+                    onCropChange={setCrop}
+                    onZoomChange={setZoom}
+                    onCropComplete={handleCropComplete}
+                  />
+                </Box>
+              )}
+            </Box>
+            <Stack spacing={3} mt={6}>
+              <Text fontSize="sm" color={mutedText}>
+                Drag the image to reposition it and use the slider to zoom.
+              </Text>
+              <Slider value={zoom} min={1} max={3} step={0.05} onChange={setZoom} isDisabled={savingAvatar}>
+                <SliderTrack>
+                  <SliderFilledTrack />
+                </SliderTrack>
+                <SliderThumb />
+              </Slider>
+            </Stack>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={handleCancelCrop} isDisabled={savingAvatar}>
+              Cancel
+            </Button>
+            <Button colorScheme="teal" onClick={handleConfirmCrop} isLoading={savingAvatar} loadingText="Saving">
+              Save
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    </>
   );
 }
 

@@ -90,6 +90,7 @@ function LocalMatchContent({
   }, [controls, initialize]);
 
   const currentPlayer = nextPlayer === 0 ? 'Blue (Player 1)' : 'Red (Player 2)';
+  const turnHighlightColor = nextPlayer === 0 ? 'blue.400' : 'red.400';
 
   return (
     <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} w="100%">
@@ -121,11 +122,13 @@ function LocalMatchContent({
                 onCellClick={onCellClick}
                 onCellHover={onCellHover}
                 onCellLeave={onCellLeave}
-                buttons={buttons}
-                undo={undo}
-                redo={redo}
-                showPrimaryControls={false}
-              />
+              buttons={buttons}
+              undo={undo}
+              redo={redo}
+              showPrimaryControls={false}
+              isTurnActive
+              turnHighlightColor={turnHighlightColor}
+            />
             )}
           </Box>
           <HStack spacing={3} justify="center" wrap="wrap">
@@ -242,6 +245,8 @@ function ActiveMatchContent({
   const opponentClock = santorini.formatClock(santorini.opponentClockMs);
   const creatorTurnActive = santorini.currentTurn === 'creator';
   const opponentTurnActive = santorini.currentTurn === 'opponent';
+  const isMyTurn = role === 'creator' ? creatorTurnActive : role === 'opponent' ? opponentTurnActive : false;
+  const turnGlowColor = role === 'creator' ? 'blue.400' : role === 'opponent' ? 'red.400' : undefined;
   const [requestingUndo, setRequestingUndo] = useBoolean(false);
   const [respondingUndo, setRespondingUndo] = useBoolean(false);
 
@@ -514,6 +519,8 @@ function ActiveMatchContent({
             hideRedoButton
             undoDisabledOverride={undoDisabledOverride}
             undoIsLoading={requestingUndo}
+            isTurnActive={isMyTurn}
+            turnHighlightColor={turnGlowColor}
           />
         </Box>
 
@@ -687,6 +694,39 @@ function WaitingForOpponentState({
 
 function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   const lobby = useMatchLobbyContext();
+  const workspaceToast = useToast();
+  const rematchOffers = useMemo(
+    () =>
+      Object.values(lobby.rematchOffers ?? {}).filter((offer): offer is LobbyMatch => Boolean(offer)),
+    [lobby.rematchOffers],
+  );
+  const [joiningRematchId, setJoiningRematchId] = useState<string | null>(null);
+
+  const handleAcceptRematch = useCallback(
+    async (matchId: string) => {
+      setJoiningRematchId(matchId);
+      try {
+        await lobby.acceptRematch(matchId);
+        workspaceToast({ title: 'Joined rematch', status: 'success', duration: 3000 });
+      } catch (error) {
+        workspaceToast({
+          title: 'Unable to join rematch',
+          status: 'error',
+          description: error instanceof Error ? error.message : 'Please try again.',
+        });
+      } finally {
+        setJoiningRematchId((current) => (current === matchId ? null : current));
+      }
+    },
+    [lobby, workspaceToast],
+  );
+
+  const handleDismissRematch = useCallback(
+    (matchId: string) => {
+      lobby.dismissRematch(matchId);
+    },
+    [lobby],
+  );
   const sessionMode = lobby.sessionMode ?? 'online';
   const { cardBg, cardBorder } = useSurfaceTokens();
   const { activeMatchId, clearUndoRequest, undoRequests } = lobby;
@@ -755,6 +795,42 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
           onSelectMatch={lobby.setActiveMatch}
         />
       )}
+
+      {sessionMode === 'online' && rematchOffers.map((offer) => {
+        const opponentName = offer.creator?.display_name ?? 'Opponent';
+        const joinCode = offer.private_join_code;
+        return (
+          <Alert
+            key={offer.id}
+            status="info"
+            variant="left-accent"
+            borderRadius="md"
+            alignItems="center"
+          >
+            <AlertIcon />
+            <Flex direction={{ base: 'column', md: 'row' }} gap={{ base: 3, md: 4 }} flex="1" align={{ base: 'flex-start', md: 'center' }}>
+              <Stack spacing={1} flex="1">
+                <AlertTitle>Rematch available</AlertTitle>
+                <AlertDescription>
+                  {opponentName} created a rematch{joinCode ? ` • Join code ${joinCode}` : ''}.
+                </AlertDescription>
+              </Stack>
+              <ButtonGroup size="sm" alignSelf={{ base: 'stretch', md: 'center' }}>
+                <Button
+                  colorScheme="teal"
+                  onClick={() => handleAcceptRematch(offer.id)}
+                  isLoading={joiningRematchId === offer.id}
+                >
+                  Join rematch
+                </Button>
+                <Button variant="outline" onClick={() => handleDismissRematch(offer.id)}>
+                  Dismiss
+                </Button>
+              </ButtonGroup>
+            </Flex>
+          </Alert>
+        );
+      })}
 
       {/* Game Board - Local */}
       {sessionMode === 'local' && <LocalMatchPanel onExit={lobby.stopLocalMatch} />}
