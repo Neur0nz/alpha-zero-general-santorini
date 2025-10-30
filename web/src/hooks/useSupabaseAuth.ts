@@ -20,8 +20,8 @@ const DEFAULT_STATE: AuthState = {
 
 const PROFILE_QUERY_FIELDS =
   'id, auth_user_id, display_name, rating, games_played, created_at, updated_at';
-const PROFILE_FETCH_TIMEOUT = 6000; // 6s timeout to prevent long UI stalls
-const PROFILE_RETRY_DELAY = 1500; // Retry quickly to mask transient hiccups
+const PROFILE_FETCH_TIMEOUT = 12000; // 12s timeout to prevent long UI stalls
+const PROFILE_RETRY_DELAY = 2000; // Retry quickly to mask transient hiccups
 
 const NETWORK_ERROR_TOKENS = ['fetch', 'network', 'timeout', 'offline'];
 const INVALID_SESSION_TOKENS = [
@@ -355,9 +355,12 @@ export function useSupabaseAuth() {
             return;
           }
 
-          const newState = { session, profile: null, loading: false, error: errorMessage };
-          setState(newState);
-          cachedStateRef.current = { session, profile: null as any };
+          setState((prev) => ({
+            session,
+            profile: prev.profile,
+            loading: true,
+            error: errorMessage,
+          }));
           return;
         }
       } catch (profileError) {
@@ -385,7 +388,7 @@ export function useSupabaseAuth() {
           setState((prev) => ({
             session,
             profile: prev.profile,
-            loading: false,
+            loading: true,
             error: errorMessage,
           }));
         }
