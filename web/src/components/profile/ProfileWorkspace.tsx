@@ -769,6 +769,8 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
                         position="absolute"
                         top="50%"
                         left="50%"
+                        maxW="none"
+                        maxH="none"
                         style={{
                           width: `${cropMetrics.scaledWidth}px`,
                           height: `${cropMetrics.scaledHeight}px`,
