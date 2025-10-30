@@ -145,7 +145,11 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     moveAction?: number;
   } | null>(null);
   const [pendingMoveVersion, setPendingMoveVersion] = useState(0); // Trigger submission effect
-  const gameCompletedRef = useRef<string | null>(null);
+  const gameCompletionRef = useRef<{ matchId: string | null; status: LobbyMatch['status'] | null; notified: boolean }>({
+    matchId: null,
+    status: null,
+    notified: false,
+  });
   const submissionLockRef = useRef<boolean>(false);
   const syncInProgressRef = useRef<boolean>(false); // Prevent moves during sync
   const processingMoveRef = useRef<boolean>(false); // Prevent rapid clicks
@@ -197,13 +201,14 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       // Atomically update all state
       updateEngineState(newEngine, myTurn);
       
-      lastSyncedStateRef.current = { 
-        matchId: match.id, 
+      lastSyncedStateRef.current = {
+        matchId: match.id,
         snapshotMoveIndex: -1,
         appliedMoveCount: 0
       };
       pendingLocalMoveRef.current = null;
       setClock(deriveInitialClocks(match));
+      gameCompletionRef.current = { matchId: match.id, status: match.status, notified: false };
     } catch (error) {
       console.error('Failed to reset match to server snapshot', error);
     }
@@ -224,6 +229,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       setClockEnabled(false);
       lastSyncedStateRef.current = { matchId: null, snapshotMoveIndex: -1, appliedMoveCount: 0 };
       pendingLocalMoveRef.current = null;
+      gameCompletionRef.current = { matchId: null, status: null, notified: false };
       previousMatchRef.current = { id: null, status: null, clockSeconds: null };
       return;
     }
@@ -243,6 +249,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       setClock(deriveInitialClocks(match));
       lastSyncedStateRef.current = { matchId: match.id, snapshotMoveIndex: -1, appliedMoveCount: 0 };
       pendingLocalMoveRef.current = null;
+      gameCompletionRef.current = { matchId: match.id, status: match.status, notified: false };
     }
 
     setClockEnabled(match.clock_initial_seconds ? match.clock_initial_seconds > 0 : false);
@@ -749,52 +756,61 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
 
   // Game completion detection
   useEffect(() => {
-    if (!match || !onGameComplete || match.status !== 'in_progress') {
-      if (!match || match.status !== 'in_progress') {
-        gameCompletedRef.current = null;
-      }
+    if (!match || !onGameComplete) {
+      gameCompletionRef.current = { matchId: null, status: null, notified: false };
       return;
     }
-    
-    if (gameCompletedRef.current === match.id) {
-      return;
+
+    let completionState = gameCompletionRef.current;
+    if (completionState.matchId !== match.id) {
+      completionState = { matchId: match.id, status: match.status, notified: false };
+      gameCompletionRef.current = completionState;
+    } else if (completionState.status !== match.status) {
+      completionState = { ...completionState, status: match.status };
+      gameCompletionRef.current = completionState;
     }
 
     const [p0Score, p1Score] = engineRef.current.getGameEnded();
-    if (p0Score === 0 && p1Score === 0) {
+    const hasWinner = p0Score === 1 || p1Score === 1;
+    const statusCompleted = match.status === 'completed';
+
+    if (!hasWinner && !statusCompleted) {
+      if (completionState.notified) {
+        gameCompletionRef.current = { matchId: match.id, status: match.status, notified: false };
+      }
       return;
     }
 
-    gameCompletedRef.current = match.id;
+    if (completionState.notified) {
+      return;
+    }
 
-    const winnerId = p0Score === 1 ? match.creator_id : p1Score === 1 ? match.opponent_id : null;
-    
-    console.log('useOnlineSantorini: Game end detected locally, winner:', winnerId);
-    console.log('useOnlineSantorini: Server will handle match status update - NOT calling onGameComplete to avoid 409 conflict');
-    // DON'T call onGameComplete here! The server already updates match status
-    // when it processes the winning move in submit-move edge function.
-    // Calling it from client causes 409 Conflict race condition.
-  }, [engineVersion, match, onGameComplete]);
+    const winnerId = match.winner_id ?? (p0Score === 1 ? match.creator_id : p1Score === 1 ? match.opponent_id : null);
+
+    console.log('useOnlineSantorini: Game end detected locally, notifying completion handler with winner:', winnerId);
+    gameCompletionRef.current = { matchId: match.id, status: match.status, notified: true };
+    onGameComplete(winnerId ?? null);
+  }, [engineVersion, match?.creator_id, match?.id, match?.opponent_id, match?.status, match?.winner_id, onGameComplete]);
 
   // Clock timeout detection
   useEffect(() => {
     if (!match || !onGameComplete || !clockEnabled || match.status !== 'in_progress') {
       return;
     }
-    
-    if (gameCompletedRef.current === match.id) {
+
+    if (gameCompletionRef.current.matchId === match.id && gameCompletionRef.current.notified) {
       return;
     }
 
     if (clock.creatorMs <= 100 && currentTurn === 'creator') {
-      gameCompletedRef.current = match.id;
+      gameCompletionRef.current = { matchId: match.id, status: match.status, notified: true };
       console.log('useOnlineSantorini: Creator ran out of time, opponent wins');
       onGameComplete(match.opponent_id);
       return;
     }
 
     if (clock.opponentMs <= 100 && currentTurn === 'opponent') {
-      gameCompletedRef.current = match.id;
+      gameCompletionRef.current = { matchId: match.id, status: match.status, notified: true };
       console.log('useOnlineSantorini: Opponent ran out of time, creator wins');
       onGameComplete(match.creator_id);
     }
