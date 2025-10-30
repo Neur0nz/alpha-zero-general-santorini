@@ -653,6 +653,32 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
               processingMovesRef.current.delete(broadcastMove.move_index);
               return prev;
             }
+
+          // Turn ownership guard: for index N, only accept optimistic apply if
+          // player_id matches the expected player based on move 0 parity.
+          if (prev.moves.length > 0) {
+            const first = prev.moves[0];
+            const firstPlayerId = first?.player_id ?? null;
+            const secondPlayerId = firstPlayerId && prev.activeMatch
+              ? (firstPlayerId === prev.activeMatch.creator_id
+                  ? prev.activeMatch.opponent_id
+                  : prev.activeMatch.creator_id)
+              : null;
+            if (firstPlayerId && secondPlayerId) {
+              const expectedPlayerId = (broadcastMove.move_index % 2 === 0)
+                ? firstPlayerId
+                : secondPlayerId;
+              if (broadcastMove.player_id !== expectedPlayerId) {
+                console.warn('⚡ BROADCAST: Player/turn mismatch for optimistic apply, deferring to DB', {
+                  moveIndex: broadcastMove.move_index,
+                  expectedPlayerId,
+                  gotPlayerId: broadcastMove.player_id,
+                });
+                processingMovesRef.current.delete(broadcastMove.move_index);
+                return prev;
+              }
+            }
+          }
             
             // Create optimistic move record
             const moveRecord: MatchMoveRecord<MatchAction> = {

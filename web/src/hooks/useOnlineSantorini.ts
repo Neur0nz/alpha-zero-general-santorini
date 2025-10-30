@@ -273,6 +273,19 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           
           // Use engineRef for current state (not stale useState value)
           const currentEngine = engineRef.current;
+
+          // Strict guards: only fast-apply if it's the correct player's turn and move is valid
+          const placementCtx = currentEngine.getPlacementContext();
+          const engineTurnRole = placementCtx
+            ? (placementCtx.player === 0 ? 'creator' : 'opponent')
+            : (currentEngine.player === 0 ? 'creator' : 'opponent');
+          if (action.by && action.by !== engineTurnRole) {
+            throw new Error(`Out-of-turn optimistic apply (expected ${engineTurnRole}, got ${action.by})`);
+          }
+          const valid = currentEngine.getValidMoves();
+          if (!valid[action.move]) {
+            throw new Error('Optimistic move not valid on current snapshot');
+          }
           const result = currentEngine.applyMove(action.move);
           const newEngine = SantoriniEngine.fromSnapshot(result.snapshot);
           
