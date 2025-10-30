@@ -19,6 +19,9 @@ export const supabase = supabaseUrl && supabaseAnonKey
         storageKey: 'sb-santorini-auth-token',
       },
       global: {
+        fetch: typeof window !== 'undefined' && typeof window.fetch === 'function'
+          ? ((...args: Parameters<typeof fetch>) => window.fetch(...args))
+          : undefined,
         headers: {
           'X-Client-Info': 'santorini-app',
         },

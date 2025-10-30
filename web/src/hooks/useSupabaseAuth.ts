@@ -223,6 +223,7 @@ export function useSupabaseAuth() {
   const loadingProfileRef = useRef<Promise<void> | null>(null);
   const activeRequestIdRef = useRef(0);
   const activeAbortControllerRef = useRef<AbortController | null>(null);
+  const activeUserIdRef = useRef<string | null>(null);
 
   const clearCachedSession = useCallback(async () => {
     const client = supabase;
@@ -249,15 +250,17 @@ export function useSupabaseAuth() {
       return;
     }
 
-    // Cancel any in-flight request before starting a new one
-    activeAbortControllerRef.current?.abort();
-    activeAbortControllerRef.current = null;
-
-    // Check if we're already loading a profile for this user
+    // Check if we're already loading a profile. If it's for the same user, just wait.
     if (loadingProfileRef.current) {
       console.log('Profile loading already in progress, waiting...');
       await loadingProfileRef.current;
       return;
+    }
+
+    // Cancel any in-flight request only if it exists for a different user
+    if (activeAbortControllerRef.current && activeUserIdRef.current && activeUserIdRef.current !== session.user.id) {
+      activeAbortControllerRef.current.abort();
+      activeAbortControllerRef.current = null;
     }
 
     // Check if we already have a profile for this user
@@ -282,6 +285,7 @@ export function useSupabaseAuth() {
     const requestId = activeRequestIdRef.current;
     const abortController = new AbortController();
     activeAbortControllerRef.current = abortController;
+    activeUserIdRef.current = session.user.id;
 
     setState((prev) => ({
       ...prev,
@@ -426,6 +430,9 @@ export function useSupabaseAuth() {
         if (activeAbortControllerRef.current === abortController) {
           activeAbortControllerRef.current = null;
         }
+        if (activeUserIdRef.current === session.user.id) {
+          activeUserIdRef.current = null;
+        }
         abortController.abort();
       }
     };
@@ -559,21 +566,21 @@ export function useSupabaseAuth() {
 
     init();
 
-    const { data: listener } = client.auth.onAuthStateChange(async (event: AuthChangeEvent, session: Session | null) => {
+    const { data: listener } = client.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
       console.log('Auth state change:', event, session?.user?.id);
       if (event === 'INITIAL_SESSION') {
         if (session) {
-          await loadSessionProfile(session);
+          void loadSessionProfile(session);
         }
         return;
       }
 
       if (!session && cachedStateRef.current?.session && (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN')) {
-        await loadSessionProfile(cachedStateRef.current.session);
+        void loadSessionProfile(cachedStateRef.current.session);
         return;
       }
 
-      await loadSessionProfile(session);
+      void loadSessionProfile(session);
     });
 
     return () => {
