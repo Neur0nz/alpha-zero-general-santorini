@@ -143,6 +143,7 @@ serve(async (req) => {
   const updates: Record<string, unknown> = {
     status: payload.status,
     winner_id: nextWinner ?? null,
+    clock_updated_at: new Date().toISOString(),
   };
 
   const { data: updatedMatch, error: updateError } = await supabase

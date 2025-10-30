@@ -656,6 +656,7 @@ serve(async (req) => {
 
     const previousMove = Array.isArray(previousMoves) && previousMoves.length > 0 ? previousMoves[0] : null;
 
+    const undoClockUpdatedAt = new Date().toISOString();
     const { error: deleteError } = await supabase
       .from('match_moves')
       .delete()
@@ -666,21 +667,24 @@ serve(async (req) => {
       return jsonResponse({ error: 'Failed to remove last move' }, { status: 500 });
     }
 
+    const undoUpdatePayload: Record<string, unknown> = { clock_updated_at: undoClockUpdatedAt };
     if (match.status === 'completed' || match.winner_id) {
-      const { error: updateError } = await supabase
-        .from('matches')
-        .update({ status: 'in_progress', winner_id: null })
-        .eq('id', match.id);
-      if (updateError) {
-        console.error('Failed to reset match status after undo', updateError);
-      }
+      undoUpdatePayload.status = 'in_progress';
+      undoUpdatePayload.winner_id = null;
+    }
+    const { error: undoUpdateError } = await supabase
+      .from('matches')
+      .update(undoUpdatePayload)
+      .eq('id', match.id);
+    if (undoUpdateError) {
+      console.error('Failed to update match during undo', undoUpdateError);
     }
 
     const restoredSnapshot = (previousMove?.state_snapshot ?? match.initial_state) as SantoriniStateSnapshot;
     match.status = 'in_progress';
     match.winner_id = null;
-    match.updated_at = new Date().toISOString();
-    match.clock_updated_at = match.updated_at;
+    match.updated_at = undoClockUpdatedAt;
+    match.clock_updated_at = undoClockUpdatedAt;
 
     updateMatchCacheAfterUndo(
       match.id,
@@ -801,26 +805,32 @@ serve(async (req) => {
     winnerId = match.opponent_id;
   }
 
-  if (winnerId && winnerId !== match.winner_id) {
-    const { error: updateError } = await supabase
-      .from('matches')
-      .update({ status: 'completed', winner_id: winnerId })
-      .eq('id', match.id);
-    if (updateError) {
-      console.error('Failed to mark match as completed', updateError);
-    }
-    console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Match status updated`);
+  const clockUpdatedAt = new Date().toISOString();
+  const matchUpdatePayload: Record<string, unknown> = {
+    clock_updated_at: clockUpdatedAt,
+  };
+  if (winnerId) {
+    matchUpdatePayload.status = 'completed';
+    matchUpdatePayload.winner_id = winnerId;
+  } else {
+    matchUpdatePayload.status = 'in_progress';
+    matchUpdatePayload.winner_id = null;
   }
 
-  match.updated_at = new Date().toISOString();
-  match.clock_updated_at = match.updated_at;
-  if (winnerId) {
-    match.status = 'completed';
-    match.winner_id = winnerId;
+  const { error: matchUpdateError } = await supabase
+    .from('matches')
+    .update(matchUpdatePayload)
+    .eq('id', match.id);
+  if (matchUpdateError) {
+    console.error('Failed to update match after move', matchUpdateError);
   } else {
-    match.status = 'in_progress';
-    match.winner_id = null;
+    console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Match metadata updated`);
   }
+
+  match.updated_at = clockUpdatedAt;
+  match.clock_updated_at = clockUpdatedAt;
+  match.status = matchUpdatePayload.status as string;
+  match.winner_id = matchUpdatePayload.winner_id as string | null;
 
   updateMatchCacheAfterMove(
     match.id,
