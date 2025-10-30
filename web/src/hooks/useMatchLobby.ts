@@ -815,6 +815,19 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
                 return { ...prev, moves: updatedMoves };
               }
               
+              // If a move with the same move_index already exists (non-optimistic), replace it to avoid duplicate application
+              const sameIndex = prev.moves.findIndex((m) => m.move_index === moveRecord.move_index);
+              if (sameIndex >= 0) {
+                console.warn('⚠️ DB: Replacing existing move with same index to avoid duplicate application', {
+                  moveIndex: moveRecord.move_index,
+                  existingId: prev.moves[sameIndex].id,
+                  confirmedId: moveRecord.id,
+                });
+                const updatedMoves = [...prev.moves];
+                updatedMoves[sameIndex] = moveRecord;
+                return { ...prev, moves: updatedMoves };
+              }
+
               // Check if confirmed move already exists (shouldn't happen but be safe)
               const exists = prev.moves.some((move) => move.id === moveRecord.id);
               if (exists) {
