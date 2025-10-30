@@ -58,6 +58,8 @@ interface AnalyzeWorkspaceProps {
 function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
   const toast = useToast();
   const santorini = useSantorini(); // AI engine for evaluation
+  const initializeSantorini = santorini.initialize;
+  const setSantoriniGameMode = santorini.controls.setGameMode;
   const [matchId, setMatchId] = useState(() => localStorage.getItem('santorini:lastAnalyzedMatch') ?? '');
   const [loaded, setLoaded] = useState<LoadedAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
@@ -73,9 +75,9 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
     let cancelled = false;
     (async () => {
       try {
-        await santorini.initialize();
+        await initializeSantorini();
         if (!cancelled) {
-          await santorini.controls.setGameMode('Human');
+          await setSantoriniGameMode('Human');
           setAiInitialized(true);
         }
       } catch (error) {
@@ -85,7 +87,7 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [santorini]);
+  }, [initializeSantorini, setSantoriniGameMode]);
 
   // Fetch user's completed games
   useEffect(() => {

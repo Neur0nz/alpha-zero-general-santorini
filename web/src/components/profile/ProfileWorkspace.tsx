@@ -21,7 +21,7 @@ import {
   Heading,
   HStack,
   Input,
-  Image,
+  Image as ChakraImage,
   Modal,
   ModalBody,
   ModalCloseButton,
@@ -419,20 +419,20 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
     }
 
     const previewUrl = URL.createObjectURL(file);
-    const image = new Image();
-    image.onload = () => {
+    const imageElement = new window.Image();
+    imageElement.onload = () => {
       setPendingFile(file);
       setCropImageUrl(previewUrl);
-      setImageSize({ width: image.naturalWidth, height: image.naturalHeight });
+      setImageSize({ width: imageElement.naturalWidth, height: imageElement.naturalHeight });
       setOffset({ x: 0, y: 0 });
       setZoom(1);
       openCrop();
     };
-    image.onerror = () => {
+    imageElement.onerror = () => {
       URL.revokeObjectURL(previewUrl);
       toast({ title: 'Image load failed', status: 'error', description: 'Unable to preview that image.' });
     };
-    image.src = previewUrl;
+    imageElement.src = previewUrl;
     event.target.value = '';
   };
 
@@ -732,7 +732,7 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
                 {cropImageUrl ? (
                   <>
                     {cropMetrics ? (
-                      <Image
+                      <ChakraImage
                         src={cropImageUrl}
                         alt="Profile being cropped"
                         draggable={false}
