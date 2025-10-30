@@ -521,7 +521,7 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
               <Text fontSize="sm" color={mutedText}>
                 Drag the image to reposition it and use the slider to zoom.
               </Text>
-              <Slider value={zoom} min={1} max={3} step={0.05} onChange={setZoom} isDisabled={savingAvatar}>
+              <Slider value={zoom} min={1} max={3} step={0.05} onChange={setZoom} isDisabled={savingAvatar} aria-label="Zoom level">
                 <SliderTrack>
                   <SliderFilledTrack />
                 </SliderTrack>
