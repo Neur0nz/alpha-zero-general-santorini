@@ -19,6 +19,7 @@ import type { BoardCell, ButtonsState } from '@hooks/useSantorini';
 interface GameBoardProps {
   board: BoardCell[][];
   selectable: boolean[][];
+  cancelSelectable?: boolean[][];
   onCellClick: (y: number, x: number) => void;
   onCellHover: (y: number, x: number) => void;
   onCellLeave: (y: number, x: number) => void;
@@ -36,6 +37,7 @@ interface GameBoardProps {
 function GameBoard({
   board,
   selectable,
+  cancelSelectable,
   onCellClick,
   onCellHover,
   onCellLeave,
@@ -51,6 +53,7 @@ function GameBoard({
 }: GameBoardProps) {
   const cellBg = useColorModeValue('gray.50', 'gray.700');
   const selectableBg = useColorModeValue('teal.100', 'teal.700');
+  const cancelSelectableBg = useColorModeValue('orange.200', 'orange.700');
   const setupSelectableBg = useColorModeValue('blue.100', 'blue.700');
   const labelColor = useColorModeValue('gray.600', 'whiteAlpha.700');
   const subtleLabelColor = useColorModeValue('gray.500', 'whiteAlpha.600');
@@ -149,9 +152,10 @@ function GameBoard({
               {board.map((row, y) =>
                 row.map((cell, x) => {
                   const isSelectable = selectable[y]?.[x];
+                      const isCancelSelectable = cancelSelectable?.[y]?.[x];
                   const isSetupSelectable = buttons.setupMode && cell.worker === 0; // Empty cells during setup
                   const highlight = cell.highlight;
-                  const canClick = isSelectable || isSetupSelectable;
+                      const canClick = isSelectable || isCancelSelectable || isSetupSelectable;
                   return (
                     <GridItem key={`${y}-${x}`}>
                       <AspectRatio ratio={1} w="100%">
@@ -175,6 +179,8 @@ function GameBoard({
                           bg={
                             isSetupSelectable
                               ? setupSelectableBg
+                                  : isCancelSelectable
+                                    ? cancelSelectableBg
                               : isSelectable
                                 ? selectableBg
                                 : cellBg

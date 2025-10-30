@@ -86,6 +86,9 @@ export function useLocalSantorini() {
       engineRef.current.getPlacementContext(),
     ),
   );
+  const [cancelSelectable, setCancelSelectable] = useState<boolean[][]>(
+    Array.from({ length: 5 }, () => Array(5).fill(false)),
+  );
   const [history, setHistory] = useState<Array<{ action: number; description: string }>>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const processingMoveRef = useRef<boolean>(false);
@@ -100,10 +103,22 @@ export function useLocalSantorini() {
       moveSelectorRef.current,
       newEngine.getPlacementContext()
     );
+    const cancelMask = Array.from({ length: 5 }, () => Array(5).fill(false));
+    const sel = moveSelectorRef.current as any;
+    if (sel.stage === 1) {
+      if (sel.workerY >= 0 && sel.workerY < 5 && sel.workerX >= 0 && sel.workerX < 5) {
+        cancelMask[sel.workerY][sel.workerX] = true;
+      }
+    } else if (sel.stage === 2) {
+      if (sel.newY >= 0 && sel.newY < 5 && sel.newX >= 0 && sel.newX < 5) {
+        cancelMask[sel.newY][sel.newX] = true;
+      }
+    }
     
     // Batch all state updates together
     setBoard(newBoard);
     setSelectable(newSelectable);
+    setCancelSelectable(cancelMask);
     setEngineVersion(v => v + 1);
   }, []);
   
@@ -194,6 +209,13 @@ export function useLocalSantorini() {
       setSelectable(
         computeSelectable(validMoves, engine.snapshot, moveSelector, engine.getPlacementContext()),
       );
+      const cancelMask = Array.from({ length: 5 }, () => Array(5).fill(false));
+      if (moveSelector.stage === 1) {
+        cancelMask[(moveSelector as any).workerY][(moveSelector as any).workerX] = true;
+      } else if (moveSelector.stage === 2) {
+        cancelMask[(moveSelector as any).newY][(moveSelector as any).newX] = true;
+      }
+      setCancelSelectable(cancelMask);
       
       // Check if move is complete
       const action = moveSelector.getAction();
@@ -294,6 +316,7 @@ export function useLocalSantorini() {
     loading: false,
     board,
     selectable,
+    cancelSelectable,
     onCellClick,
     onCellHover,
     onCellLeave,

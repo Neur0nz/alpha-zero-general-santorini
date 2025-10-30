@@ -344,6 +344,7 @@ function LocalMatchContent({
     initialize,
     board,
     selectable,
+    cancelSelectable,
     onCellClick,
     onCellHover,
     onCellLeave,
@@ -401,6 +402,7 @@ function LocalMatchContent({
               <GameBoard
                 board={board}
                 selectable={selectable}
+                cancelSelectable={cancelSelectable}
                 onCellClick={onCellClick}
                 onCellHover={onCellHover}
                 onCellLeave={onCellLeave}
@@ -663,6 +665,7 @@ function ActiveMatchContent({
                   <GameBoard
                     board={santorini.board}
                     selectable={santorini.selectable}
+                    cancelSelectable={santorini.cancelSelectable}
                     onCellClick={santorini.onCellClick}
                     onCellHover={santorini.onCellHover}
                     onCellLeave={santorini.onCellLeave}

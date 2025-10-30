@@ -360,6 +360,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   const [loading, setLoading] = useState(false); // Start with UI enabled
   const [board, setBoard] = useState<BoardCell[][]>(INITIAL_BOARD);
   const [selectable, setSelectable] = useState<boolean[][]>(INITIAL_SELECTABLE);
+  const [cancelSelectable, setCancelSelectable] = useState<boolean[][]>(INITIAL_SELECTABLE);
   const [buttons, setButtons] = useState<ButtonsState>({
     loading: false,
     canRedo: false,
@@ -494,6 +495,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
         Array.from({ length: 5 }, (_, x) => snapshot.board[y][x][0] === 0)
       );
       setSelectable(cells);
+      setCancelSelectable(INITIAL_SELECTABLE.map((row) => row.slice()));
     } else {
       // During game phase, check if it's human's turn
       let isHumanTurn = true; // Default to true if no game mode set
@@ -521,10 +523,24 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
           snapshot.player
         );
         setSelectable(newSelectable);
+
+        // Compute cancel-selectable mask based on selector stage
+        const cancelMask = INITIAL_SELECTABLE.map((row) => row.slice());
+        const selector = moveSelectorRef.current as any;
+        if (selector.stage === 1) {
+          cancelMask[selector.workerY]?.[selector.workerX] && (cancelMask[selector.workerY][selector.workerX] = true);
+          if (!cancelMask[selector.workerY]) cancelMask[selector.workerY] = Array(5).fill(false);
+          cancelMask[selector.workerY][selector.workerX] = true;
+        } else if (selector.stage === 2) {
+          if (!cancelMask[selector.newY]) cancelMask[selector.newY] = Array(5).fill(false);
+          cancelMask[selector.newY][selector.newX] = true;
+        }
+        setCancelSelectable(cancelMask);
       } else {
         // AI's turn: clear selectable
         const emptySelectable = Array.from({ length: 5 }, () => Array(5).fill(false));
         setSelectable(emptySelectable);
+        setCancelSelectable(emptySelectable.map((row) => row.slice()));
       }
     }
     
@@ -1337,6 +1353,15 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
         // Update selectable highlighting
         const newSelectable = moveSelector.computeSelectable(engine.snapshot.board, validMoves, engine.player);
         setSelectable(newSelectable);
+
+        // Update cancel-selectable highlighting
+        const cancelMask = INITIAL_SELECTABLE.map((row) => row.slice());
+        if (moveSelector.stage === 1) {
+          cancelMask[(moveSelector as any).workerY][(moveSelector as any).workerX] = true;
+        } else if (moveSelector.stage === 2) {
+          cancelMask[(moveSelector as any).newY][(moveSelector as any).newX] = true;
+        }
+        setCancelSelectable(cancelMask);
         
         // Check if move is complete
         const action = moveSelector.getAction();
@@ -1553,6 +1578,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     initialize,
     board,
     selectable,
+    cancelSelectable,
     onCellClick,
     applyMove,
     onCellHover,

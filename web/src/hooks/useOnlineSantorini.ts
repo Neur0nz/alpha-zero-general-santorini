@@ -124,6 +124,9 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       engineRef.current.getPlacementContext(),
     ),
   );
+  const [cancelSelectable, setCancelSelectable] = useState<boolean[][]>(
+    Array.from({ length: 5 }, () => Array(5).fill(false)),
+  );
   
   // Clock state
   const [clock, setClock] = useState<ClockState>(() => deriveInitialClocks(match));
@@ -160,10 +163,26 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           newEngine.getPlacementContext()
         )
       : Array.from({ length: 5 }, () => Array(5).fill(false));
+    const newCancelSelectable = (() => {
+      if (!myTurn) return Array.from({ length: 5 }, () => Array(5).fill(false));
+      const mask = Array.from({ length: 5 }, () => Array(5).fill(false));
+      const sel = moveSelectorRef.current as any;
+      if (sel.stage === 1) {
+        if (sel.workerY >= 0 && sel.workerY < 5 && sel.workerX >= 0 && sel.workerX < 5) {
+          mask[sel.workerY][sel.workerX] = true;
+        }
+      } else if (sel.stage === 2) {
+        if (sel.newY >= 0 && sel.newY < 5 && sel.newX >= 0 && sel.newX < 5) {
+          mask[sel.newY][sel.newX] = true;
+        }
+      }
+      return mask;
+    })();
     
     // Batch all state updates together to prevent intermediate renders
     setBoard(newBoard);
     setSelectable(newSelectable);
+    setCancelSelectable(newCancelSelectable);
     setEngineVersion(v => v + 1);
   }, []);
   
@@ -664,15 +683,21 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
         }
         
         // Update highlighting for next stage
-        setSelectable(
-          computeSelectable(
-            validMoves,
-            engine.snapshot,
-            moveSelector,
-            isMyTurn,
-            engine.getPlacementContext(),
-          ),
+        const nextSelectable = computeSelectable(
+          validMoves,
+          engine.snapshot,
+          moveSelector,
+          isMyTurn,
+          engine.getPlacementContext(),
         );
+        setSelectable(nextSelectable);
+        const cancelMask = Array.from({ length: 5 }, () => Array(5).fill(false));
+        if (moveSelector.stage === 1) {
+          cancelMask[(moveSelector as any).workerY][(moveSelector as any).workerX] = true;
+        } else if (moveSelector.stage === 2) {
+          cancelMask[(moveSelector as any).newY][(moveSelector as any).newX] = true;
+        }
+        setCancelSelectable(cancelMask);
         
         // Check if move is complete
         const action = moveSelector.getAction();
@@ -704,15 +729,15 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
             toast({ title: 'Move failed', status: 'error' });
             moveSelector.reset();
             // Restore selectable state on error
-            setSelectable(
-              computeSelectable(
-                validMoves,
-                engine.snapshot,
-                moveSelector,
-                isMyTurn,
-                engine.getPlacementContext(),
-              ),
+            const nextSel = computeSelectable(
+              validMoves,
+              engine.snapshot,
+              moveSelector,
+              isMyTurn,
+              engine.getPlacementContext(),
             );
+            setSelectable(nextSel);
+            setCancelSelectable(Array.from({ length: 5 }, () => Array(5).fill(false)));
           }
         }
       } finally {
@@ -800,6 +825,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   return {
     board,
     selectable,
+    cancelSelectable,
     onCellClick,
     onCellHover,
     onCellLeave,

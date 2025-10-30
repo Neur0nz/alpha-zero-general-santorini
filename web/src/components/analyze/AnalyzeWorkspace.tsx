@@ -557,6 +557,7 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
                   <GameBoard
                     board={board}
                     selectable={Array.from({ length: 5 }, () => Array(5).fill(false))}
+                    cancelSelectable={Array.from({ length: 5 }, () => Array(5).fill(false))}
                     onCellClick={() => {}}
                     onCellHover={() => {}}
                     onCellLeave={() => {}}

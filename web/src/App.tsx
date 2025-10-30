@@ -39,6 +39,7 @@ function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
     initialize,
     board,
     selectable,
+    cancelSelectable,
     onCellClick,
     onCellHover,
     onCellLeave,
@@ -105,6 +106,7 @@ function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
             <GameBoard
               board={board}
               selectable={selectable}
+              cancelSelectable={cancelSelectable}
               onCellClick={onCellClick}
               onCellHover={onCellHover}
               onCellLeave={onCellLeave}
