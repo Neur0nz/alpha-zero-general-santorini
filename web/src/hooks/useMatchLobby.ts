@@ -169,6 +169,8 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
   const isStartingLocalMatchRef = useRef(false);
   // Track moves being processed to prevent React setState race conditions
   const processingMovesRef = useRef<Set<number>>(new Set());
+  // Hydration guard to avoid optimistic apply while fetching fresh state on (re)subscribe
+  const hydratingRef = useRef<boolean>(false);
 
   const matchId = state.activeMatchId;
   
@@ -577,8 +579,13 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       });
     };
 
-    fetchMatch();
-    fetchMoves();
+    // Hydrate match and moves together
+    hydratingRef.current = true;
+    Promise.all([fetchMatch(), fetchMoves()])
+      .catch((e) => console.warn('Hydration fetch failed', e))
+      .finally(() => {
+        hydratingRef.current = false;
+      });
 
     const channel = client
       .channel(`match-${matchId}`, {
@@ -600,6 +607,11 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           const broadcastMove = payload.payload;
           if (!broadcastMove || typeof broadcastMove.move_index !== 'number') {
             console.warn('⚡ BROADCAST: Invalid move payload', payload);
+            return;
+          }
+          // Skip optimistic path during hydration to avoid applying on stale state
+          if (hydratingRef.current) {
+            console.log('⚡ BROADCAST: Skipping optimistic apply during hydration');
             return;
           }
           
@@ -879,9 +891,14 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         
         if (status === 'SUBSCRIBED') {
           console.log('useMatchLobby: Real-time subscription active, refreshing match state', { matchId });
-          // On (re)connection, refresh both match and moves to catch any missed updates
-          fetchMatch();
-          fetchMoves();
+          // Clear any pending processing and hydrate fresh before allowing optimistic applies
+          processingMovesRef.current = new Set();
+          hydratingRef.current = true;
+          Promise.all([fetchMatch(), fetchMoves()])
+            .catch((e) => console.warn('Hydration fetch failed', e))
+            .finally(() => {
+              hydratingRef.current = false;
+            });
         }
       });
 
