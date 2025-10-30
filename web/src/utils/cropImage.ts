@@ -1,4 +1,9 @@
-import type { Area } from 'react-easy-crop';
+export interface CropArea {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 interface CropToFileOptions {
   fileName?: string;
@@ -35,7 +40,7 @@ function getExtensionFromMime(mimeType: string): string {
 
 export async function cropImageToFile(
   imageSrc: string,
-  crop: Area,
+  crop: CropArea,
   { fileName, mimeType = 'image/png', quality = 0.92, size = 512 }: CropToFileOptions = {}
 ): Promise<File> {
   if (!crop || crop.width <= 0 || crop.height <= 0) {
