@@ -259,9 +259,8 @@ function App() {
   const appBg = useColorModeValue('linear(to-br, gray.50, gray.100)', 'linear(to-br, gray.900, gray.800)');
   const appColor = useColorModeValue('gray.900', 'whiteAlpha.900');
 
-  // Show loading screen during initial authentication or while resolving profile
-  const waitingForProfile = Boolean(auth.session && !auth.profile);
-  if (auth.loading || waitingForProfile) {
+  // Show loading screen during initial authentication
+  if (auth.loading) {
     const isTemporary = auth.profile?.id.startsWith('temp_');
     const message = auth.error ?? (isTemporary ? 'Almost there...' : 'Signing you in...');
 

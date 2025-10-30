@@ -91,13 +91,18 @@ function getDisplayNameSeed(user: User): string | undefined {
   return undefined;
 }
 
-async function ensureProfile(client: SupabaseClient, user: User): Promise<PlayerProfile> {
+async function ensureProfile(client: SupabaseClient, user: User, signal?: AbortSignal): Promise<PlayerProfile> {
   try {
-    const { data, error } = await client
+    const selectQuery = client
       .from('players')
       .select(PROFILE_QUERY_FIELDS)
-      .eq('auth_user_id', user.id)
-      .maybeSingle();
+      .eq('auth_user_id', user.id);
+
+    if (signal) {
+      (selectQuery as any).abortSignal?.(signal);
+    }
+
+    const { data, error } = await selectQuery.maybeSingle();
 
     if (error) {
       throw error;
@@ -126,11 +131,17 @@ async function ensureProfile(client: SupabaseClient, user: User): Promise<Player
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const candidate = generateDisplayName(seed);
     try {
-      const { data: insertData, error: insertError } = await client
+      const insertQuery = client
         .from('players')
         .insert({ auth_user_id: user.id, display_name: candidate })
         .select(PROFILE_QUERY_FIELDS)
         .single();
+
+      if (signal) {
+        (insertQuery as any).abortSignal?.(signal);
+      }
+
+      const { data: insertData, error: insertError } = await insertQuery;
 
       if (!insertError && insertData) {
         return insertData as PlayerProfile;
@@ -210,6 +221,8 @@ export function useSupabaseAuth() {
   
   const isConfigured = Boolean(supabase);
   const loadingProfileRef = useRef<Promise<void> | null>(null);
+  const activeRequestIdRef = useRef(0);
+  const activeAbortControllerRef = useRef<AbortController | null>(null);
 
   const clearCachedSession = useCallback(async () => {
     const client = supabase;
@@ -236,6 +249,10 @@ export function useSupabaseAuth() {
       return;
     }
 
+    // Cancel any in-flight request before starting a new one
+    activeAbortControllerRef.current?.abort();
+    activeAbortControllerRef.current = null;
+
     // Check if we're already loading a profile for this user
     if (loadingProfileRef.current) {
       console.log('Profile loading already in progress, waiting...');
@@ -244,13 +261,27 @@ export function useSupabaseAuth() {
     }
 
     // Check if we already have a profile for this user
-    if (state.profile?.auth_user_id === session.user.id) {
+    const cachedProfile = cachedStateRef.current?.profile;
+    if (cachedProfile?.auth_user_id === session.user.id && !cachedProfile.id.startsWith('temp_')) {
+      console.log('Using cached profile for this user');
+      const newState = { session, profile: cachedProfile, loading: false, error: null };
+      setState(newState);
+      cacheAuthState(session, cachedProfile);
+      return;
+    }
+
+    if (state.profile?.auth_user_id === session.user.id && !state.profile.id.startsWith('temp_')) {
       console.log('Profile already loaded for this user');
       const newState = { session, profile: state.profile, loading: false, error: null };
       setState(newState);
       cacheAuthState(session, state.profile);
       return;
     }
+
+    activeRequestIdRef.current += 1;
+    const requestId = activeRequestIdRef.current;
+    const abortController = new AbortController();
+    activeAbortControllerRef.current = abortController;
 
     setState((prev) => ({
       ...prev,
@@ -259,7 +290,8 @@ export function useSupabaseAuth() {
       error: null,
     }));
 
-    const loadPromise = (async () => {
+    let promiseRef: Promise<void>;
+    const run = async () => {
       try {
         console.log('Loading profile for session user:', session.user.id);
         
@@ -273,7 +305,7 @@ export function useSupabaseAuth() {
         while (retryCount < maxRetries && !profile) {
           try {
             console.log(`Loading profile for session user: ${session.user.id} (attempt ${retryCount + 1})`);
-            profile = await ensureProfile(client, session.user);
+            profile = await ensureProfile(client, session.user, abortController.signal);
             console.log('✅ Profile loaded successfully');
           } catch (error) {
             lastError = error;
@@ -300,7 +332,22 @@ export function useSupabaseAuth() {
           }
         }
 
+        if (!profile && cachedStateRef.current?.profile?.auth_user_id === session.user.id) {
+          console.warn('Falling back to cached profile after failed attempts.');
+          const cachedProfile = cachedStateRef.current.profile;
+          if (activeRequestIdRef.current !== requestId) {
+            return;
+          }
+          setState({ session, profile: cachedProfile, loading: false, error: lastError instanceof Error ? lastError.message : null });
+          cacheAuthState(session, cachedProfile);
+          return;
+        }
+
         if (profile) {
+          if (activeRequestIdRef.current !== requestId) {
+            return;
+          }
+
           const newState = { session, profile, loading: false, error: null };
           setState(newState);
           cacheAuthState(session, profile);
@@ -314,24 +361,33 @@ export function useSupabaseAuth() {
 
           if (networkError && cachedStateRef.current?.profile) {
             const cachedProfile = cachedStateRef.current.profile;
+            if (activeRequestIdRef.current !== requestId) {
+              return;
+            }
             setState({ session, profile: cachedProfile, loading: false, error: errorMessage });
             cacheAuthState(session, cachedProfile);
             console.warn('Using cached profile due to network issues during profile load.', errors);
             return;
           }
 
-          setState((prev) => ({
-            session,
-            profile: prev.profile,
-            loading: true,
-            error: errorMessage,
-          }));
+          if (activeRequestIdRef.current !== requestId) {
+            return;
+          }
+
+          setState({ session, profile: null, loading: false, error: errorMessage });
           return;
         }
       } catch (profileError) {
+        if (profileError instanceof Error && profileError.name === 'AbortError') {
+          console.log('Profile load request was aborted');
+          return;
+        }
         if (isInvalidSessionError(profileError) || isPostgrestUnauthorizedError(profileError)) {
           console.warn('Profile load failed after retries due to invalid session. Clearing cached auth state.', profileError);
           await clearCachedSession();
+          if (activeRequestIdRef.current !== requestId) {
+            return;
+          }
           setState({ session: null, profile: null, loading: false, error: 'Your session expired. Please sign in again.' });
           return;
         }
@@ -347,23 +403,37 @@ export function useSupabaseAuth() {
 
         if (networkError && cachedStateRef.current?.profile) {
           const cachedProfile = cachedStateRef.current.profile;
+          if (activeRequestIdRef.current !== requestId) {
+            return;
+          }
           setState({ session, profile: cachedProfile, loading: false, error: errorMessage });
           cacheAuthState(session, cachedProfile);
         } else {
+          if (activeRequestIdRef.current !== requestId) {
+            return;
+          }
           setState((prev) => ({
             session,
             profile: prev.profile,
-            loading: true,
+            loading: false,
             error: errorMessage,
           }));
         }
       } finally {
-        loadingProfileRef.current = null;
+        if (loadingProfileRef.current === promiseRef) {
+          loadingProfileRef.current = null;
+        }
+        if (activeAbortControllerRef.current === abortController) {
+          activeAbortControllerRef.current = null;
+        }
+        abortController.abort();
       }
-    })();
+    };
 
-    loadingProfileRef.current = loadPromise;
-    await loadPromise;
+    promiseRef = run();
+
+    loadingProfileRef.current = promiseRef;
+    await promiseRef;
   }, [clearCachedSession, state.profile]);
 
   const restoreSessionFromCache = useCallback(async (): Promise<Session | null> => {
@@ -654,8 +724,19 @@ export function useSupabaseAuth() {
 
         // Don't timeout if we're actively loading a profile
         if (loadingProfileRef.current) {
-          console.log('Profile loading in progress, extending timeout...');
-          return prev;
+          console.warn('Profile load timed out. Cancelling current attempt.');
+          activeRequestIdRef.current += 1;
+          activeAbortControllerRef.current?.abort();
+          activeAbortControllerRef.current = null;
+          loadingProfileRef.current = null;
+          return {
+            session: prev.session,
+            profile: prev.profile,
+            loading: false,
+            error: prev.session
+              ? 'We were unable to finish loading your profile. Please try refreshing the page or sign in again.'
+              : 'Unable to reach Supabase to verify your session. Please check your internet connection and try again.',
+          };
         }
 
         console.warn('Authentication request timed out. Resetting state to allow retry.');
