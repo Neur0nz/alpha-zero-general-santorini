@@ -82,6 +82,7 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
   const toast = useToast();
   const googleHoverBg = useColorModeValue('gray.100', 'whiteAlpha.300');
   const googleActiveBg = useColorModeValue('gray.200', 'whiteAlpha.200');
+  const cropModalBg = useColorModeValue('gray.100', 'gray.900');
   const { cardBg, cardBorder, mutedText, helperText, accentHeading } = useSurfaceTokens();
 
   useEffect(() => {
@@ -496,7 +497,7 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
               position="relative"
               w="100%"
               pt="100%"
-              bg={useColorModeValue('gray.100', 'gray.900')}
+              bg={cropModalBg}
               borderRadius="xl"
               overflow="hidden"
             >
