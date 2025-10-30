@@ -768,6 +768,22 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   const undo = useCallback(async () => {}, []);
   const redo = useCallback(async () => {}, []);
 
+  const moveHistory = useMemo(() => {
+    const creatorName = match?.creator?.display_name ?? 'Player 1 (Blue)';
+    const opponentName = match?.opponent?.display_name ?? 'Player 2 (Red)';
+    return moves
+      .filter((move) => isSantoriniMoveAction(move.action))
+      .sort((a, b) => a.move_index - b.move_index)
+      .map((move, index) => {
+        const action = move.action as SantoriniMoveAction;
+        const actorName = action.by === 'creator' ? creatorName : opponentName;
+        return {
+          action: action.move,
+          description: `${index + 1}. ${actorName} played action ${action.move}`,
+        };
+      });
+  }, [match?.creator?.display_name, match?.opponent?.display_name, moves]);
+
   return {
     board,
     selectable,
@@ -783,6 +799,6 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     buttons: { loading: false, canUndo: false, canRedo: false, status: '', editMode: 0, setupMode: false, setupTurn: 0 },
     undo,
     redo,
-    history: [] as Array<{ action: number; description: string }>,
+    history: moveHistory,
   };
 }

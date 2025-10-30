@@ -1,4 +1,5 @@
 import { GREEN, RED } from './constants';
+import { sanitizeSvgMarkup } from '@/utils/sanitizeSvg';
 
 export type CellState = {
   levels: number;
@@ -46,5 +47,5 @@ export function renderCellSvg({ levels, worker }: CellState): string {
   }
 
   svg += '</svg>';
-  return svg;
+  return sanitizeSvgMarkup(svg);
 }

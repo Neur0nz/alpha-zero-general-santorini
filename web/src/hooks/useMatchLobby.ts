@@ -1112,15 +1112,21 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           ? state.activeMatch
           : state.myMatches.find((match) => match.id === targetId) ?? null;
 
-      const updates: Partial<MatchRecord> = { status: 'abandoned' };
-      if (candidate?.status === 'in_progress') {
-        const opponentId = profile.id === candidate.creator_id ? candidate.opponent_id : candidate.creator_id;
-        if (opponentId) {
-          updates.winner_id = opponentId;
-        }
-      }
+      const opponentId =
+        candidate?.status === 'in_progress'
+          ? profile.id === candidate.creator_id
+            ? candidate.opponent_id
+            : candidate.creator_id
+          : null;
 
-      const { error } = await client.from('matches').update(updates).eq('id', targetId);
+      const { error } = await client.functions.invoke('update-match-status', {
+        body: {
+          matchId: targetId,
+          status: 'abandoned',
+          winnerId: opponentId ?? null,
+        },
+      });
+
       if (error) {
         console.error('Failed to mark match as abandoned', error);
         return;
@@ -1242,16 +1248,40 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
     async (status: MatchStatus, payload?: { winner_id?: string | null }) => {
       if (!onlineEnabled) return;
       const client = supabase;
-      if (!client || !state.activeMatchId) return;
-      const { error } = await client
-        .from('matches')
-        .update({ status, winner_id: payload?.winner_id ?? null })
-        .eq('id', state.activeMatchId);
+      const matchId = state.activeMatchId;
+      if (!client || !matchId) return;
+
+      const { data, error } = await client.functions.invoke('update-match-status', {
+        body: {
+          matchId,
+          status,
+          winnerId: payload?.winner_id ?? null,
+        },
+      });
+
       if (error) {
         console.error('Failed to update match status', error);
+        throw error;
       }
+
+      const response = (data ?? null) as { match?: MatchRecord & Partial<LobbyMatch> } | null;
+      const record = response?.match ?? null;
+      if (!record) {
+        return;
+      }
+      const enriched = attachProfiles(record) ?? { ...record, creator: null, opponent: null };
+      setState((prev) => {
+        const myMatches = upsertMatch(prev.myMatches, enriched);
+        const activeMatch = prev.activeMatchId === matchId ? enriched : prev.activeMatch;
+        return {
+          ...prev,
+          myMatches,
+          activeMatch,
+          joinCode: prev.activeMatchId === matchId ? enriched.private_join_code ?? null : prev.joinCode,
+        };
+      });
     },
-    [onlineEnabled, state.activeMatchId],
+    [attachProfiles, onlineEnabled, state.activeMatchId],
   );
 
   const offerRematch = useCallback(

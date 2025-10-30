@@ -26,7 +26,7 @@ interface HeaderBarProps {
   auth: SupabaseAuthState;
 }
 
-const NAV_TABS: Array<{ key: AppTab; label: string; helper: string }> = [
+export const NAV_TABS: ReadonlyArray<{ key: AppTab; label: string; helper: string }> = [
   { key: 'lobby', label: 'Lobby', helper: 'Find & join games' },
   { key: 'play', label: 'Play', helper: 'Your active game' },
   { key: 'leaderboard', label: 'Leaderboard', helper: 'Player rankings' },

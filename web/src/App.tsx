@@ -18,7 +18,7 @@ import { useEffect, useMemo, useState, useTransition } from 'react';
 import { SearchIcon, TimeIcon } from '@chakra-ui/icons';
 import { SantoriniProvider, useSantorini } from '@hooks/useSantorini';
 import { useSupabaseAuth } from '@hooks/useSupabaseAuth';
-import HeaderBar, { type AppTab } from '@components/HeaderBar';
+import HeaderBar, { type AppTab, NAV_TABS } from '@components/HeaderBar';
 import GameBoard from '@components/GameBoard';
 import EvaluationPanel from '@components/EvaluationPanel';
 import HistoryModal from '@components/HistoryModal';
@@ -31,7 +31,6 @@ import LeaderboardWorkspace from '@components/leaderboard/LeaderboardWorkspace';
 import { MatchLobbyProvider } from '@hooks/matchLobbyContext';
 import { AuthLoadingScreen } from '@components/auth/AuthLoadingScreen';
 
-const TAB_ORDER: AppTab[] = ['lobby', 'play', 'leaderboard', 'practice', 'analyze', 'profile'];
 const TAB_STORAGE_KEY = 'santorini:lastTab';
 
 function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
@@ -50,6 +49,8 @@ function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
     redo,
     undo,
     calcOptionsBusy,
+    gameMode,
+    difficulty,
   } = useSantorini();
   const [, startInitializeTransition] = useTransition();
   const creditColor = useColorModeValue('gray.600', 'whiteAlpha.700');
@@ -68,6 +69,9 @@ function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
         onReset={controls.reset}
         onShowHistory={onShowHistory}
         buttons={buttons}
+        engineLoading={loading}
+        currentMode={gameMode}
+        currentDifficulty={difficulty}
       />
       <Flex
         direction={{ base: 'column', lg: 'row' }}
@@ -158,7 +162,7 @@ function PracticeHistoryModal({ isOpen, onClose }: { isOpen: boolean; onClose: (
 
 function App() {
   const { isOpen: isHistoryOpen, onOpen: openHistory, onClose: closeHistory } = useDisclosure();
-  const tabOrder = TAB_ORDER;
+  const tabOrder = useMemo<AppTab[]>(() => NAV_TABS.map((tab) => tab.key), []);
   const [activeTab, setActiveTab] = useState<AppTab>('lobby');
   const activeIndex = Math.max(0, tabOrder.indexOf(activeTab));
   const auth = useSupabaseAuth();
@@ -255,13 +259,12 @@ function App() {
   const appBg = useColorModeValue('linear(to-br, gray.50, gray.100)', 'linear(to-br, gray.900, gray.800)');
   const appColor = useColorModeValue('gray.900', 'whiteAlpha.900');
 
-  // Show loading screen during initial authentication
-  if (auth.loading) {
+  // Show loading screen during initial authentication or while resolving profile
+  const waitingForProfile = Boolean(auth.session && !auth.profile);
+  if (auth.loading || waitingForProfile) {
     const isTemporary = auth.profile?.id.startsWith('temp_');
-    const message = isTemporary 
-      ? 'Almost there...' 
-      : 'Signing you in...';
-    
+    const message = auth.error ?? (isTemporary ? 'Almost there...' : 'Signing you in...');
+
     return <AuthLoadingScreen message={message} isTemporary={isTemporary} />;
   }
 

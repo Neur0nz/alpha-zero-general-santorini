@@ -96,6 +96,30 @@ function AuthJourney({ auth }: AuthJourneyProps) {
     );
   }
 
+  if (session && !profile) {
+    const retryButton = (
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={handleRetry}
+        isLoading={loading || retrying}
+        loadingText="Loading profile"
+        _hover={{ bg: signInHoverBg, transform: 'translateY(-1px)' }}
+        _active={{ bg: signInActiveBg }}
+      >
+        {loading || retrying ? 'Loading profile…' : 'Retry profile sync'}
+      </Button>
+    );
+
+    return error ? (
+      <Tooltip label={error} hasArrow>
+        {retryButton}
+      </Tooltip>
+    ) : (
+      retryButton
+    );
+  }
+
   if (!profile) {
     const signInButton = (
       <Button
@@ -120,6 +144,7 @@ function AuthJourney({ auth }: AuthJourneyProps) {
     );
   }
 
+  const ensuredProfile = profile!;
   const avatarUrl = typeof session?.user.user_metadata?.avatar_url === 'string' ? session.user.user_metadata.avatar_url : undefined;
   const email = session?.user.email;
 
@@ -135,9 +160,9 @@ function AuthJourney({ auth }: AuthJourneyProps) {
         _active={{ bg: signInActiveBg }}
       >
         <HStack spacing={2} align="center">
-          <Avatar size="xs" name={profile.display_name} src={avatarUrl} />
+          <Avatar size="xs" name={ensuredProfile.display_name} src={avatarUrl} />
           <Text fontSize="sm" fontWeight="semibold">
-            {profile.display_name}
+            {ensuredProfile.display_name}
           </Text>
           <ChevronDownIcon />
         </HStack>
@@ -147,7 +172,7 @@ function AuthJourney({ auth }: AuthJourneyProps) {
           <Text fontSize="xs" textTransform="uppercase" color={menuMuted} letterSpacing="wide">
             Signed in
           </Text>
-          <Text fontWeight="semibold">{profile.display_name}</Text>
+          <Text fontWeight="semibold">{ensuredProfile.display_name}</Text>
           {email && (
             <Text fontSize="sm" color={menuMuted}>
               {email}

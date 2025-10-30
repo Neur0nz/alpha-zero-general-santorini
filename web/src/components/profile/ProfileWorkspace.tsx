@@ -29,15 +29,7 @@ import {
 import GoogleIcon from '@components/auth/GoogleIcon';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import { generateDisplayName, validateDisplayName } from '@/utils/generateDisplayName';
-
-function useSurfaceTokens() {
-  const cardBg = useColorModeValue('white', 'whiteAlpha.100');
-  const cardBorder = useColorModeValue('gray.200', 'whiteAlpha.200');
-  const mutedText = useColorModeValue('gray.600', 'whiteAlpha.700');
-  const helperText = useColorModeValue('gray.500', 'whiteAlpha.600');
-  const accentHeading = useColorModeValue('teal.600', 'teal.200');
-  return { cardBg, cardBorder, mutedText, helperText, accentHeading };
-}
+import { useSurfaceTokens } from '@/theme/useSurfaceTokens';
 
 interface ProfileWorkspaceProps {
   auth: SupabaseAuthState;

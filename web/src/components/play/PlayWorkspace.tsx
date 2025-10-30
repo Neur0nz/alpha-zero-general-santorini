@@ -52,20 +52,10 @@ import GameBoard from '@components/GameBoard';
 import GoogleIcon from '@components/auth/GoogleIcon';
 import type { SantoriniMoveAction, MatchStatus } from '@/types/match';
 import MyMatchesPanel from './MyMatchesPanel';
+import { useSurfaceTokens } from '@/theme/useSurfaceTokens';
 
 function formatDate(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function useSurfaceTokens() {
-  const cardBg = useColorModeValue('white', 'whiteAlpha.100');
-  const cardBorder = useColorModeValue('gray.200', 'whiteAlpha.200');
-  const mutedText = useColorModeValue('gray.600', 'whiteAlpha.700');
-  const helperText = useColorModeValue('gray.500', 'whiteAlpha.600');
-  const strongText = useColorModeValue('gray.900', 'whiteAlpha.900');
-  const accentHeading = useColorModeValue('teal.600', 'teal.200');
-  const panelBg = useColorModeValue('gray.50', 'blackAlpha.400');
-  return { cardBg, cardBorder, mutedText, helperText, strongText, accentHeading, panelBg };
 }
 
 function MatchCreationModal({
@@ -85,10 +75,13 @@ function MatchCreationModal({
   const [minutes, setMinutes] = useState(10);
   const [increment, setIncrement] = useState(5);
   const [startingPlayer, setStartingPlayer] = useState<StartingPlayer>('random');
+  const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
   const { mutedText } = useSurfaceTokens();
 
   const handleSubmit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     try {
       await onCreate({
         visibility,
@@ -106,6 +99,8 @@ function MatchCreationModal({
         status: 'error',
         description: error instanceof Error ? error.message : 'Unknown error',
       });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -171,7 +166,13 @@ function MatchCreationModal({
             </Stack>
           )}
         </FormControl>
-        <Button colorScheme="teal" onClick={handleSubmit} isDisabled={loading} isLoading={loading} w="full">
+        <Button
+          colorScheme="teal"
+          onClick={handleSubmit}
+          isDisabled={loading || submitting}
+          isLoading={loading || submitting}
+          w="full"
+        >
           Create Match
         </Button>
         </ModalBody>

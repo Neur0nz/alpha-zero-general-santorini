@@ -60,6 +60,11 @@ function GameBoard({
   const actionBorderColor = useColorModeValue('gray.200', 'whiteAlpha.200');
   const panelTextColor = useColorModeValue('gray.800', 'whiteAlpha.800');
   const buildingColor = useColorModeValue('gray.900', 'whiteAlpha.900');
+  const setupPanelBg = useColorModeValue('blue.500', 'blue.600');
+  const setupPanelBorder = useColorModeValue('blue.300', 'blue.500');
+  const setupPrimaryTextColor = useColorModeValue('white', 'white');
+  const setupSecondaryTextColor = useColorModeValue('whiteAlpha.900', 'whiteAlpha.800');
+  const loadingStatusColor = useColorModeValue('teal.600', 'teal.200');
   const boardSizeControlVisible = useBreakpointValue({ base: false, md: true });
   const [boardPixels, setBoardPixels] = useState<number>(() => {
     if (typeof window === 'undefined') {
@@ -249,21 +254,25 @@ function GameBoard({
         px={4}
         py={3}
         borderRadius="md"
-        bg={buttons.setupMode ? 'blue.500' : boardFrameBg}
+        bg={buttons.setupMode ? setupPanelBg : boardFrameBg}
         borderWidth="1px"
-        borderColor={buttons.setupMode ? 'blue.300' : actionBorderColor}
+        borderColor={buttons.setupMode ? setupPanelBorder : actionBorderColor}
         textAlign={{ base: 'center', sm: 'left' }}
       >
-        <Text fontSize="sm" color={panelTextColor}>
+        <Text fontSize="sm" color={buttons.setupMode ? setupPrimaryTextColor : panelTextColor}>
           {buttons.status}
         </Text>
         {buttons.loading && (
-          <Text mt={2} fontSize="sm" color="teal.200">
+          <Text
+            mt={2}
+            fontSize="sm"
+            color={buttons.setupMode ? setupSecondaryTextColor : loadingStatusColor}
+          >
             AI thinking...
           </Text>
         )}
         {buttons.setupMode && (
-          <Text mt={2} fontSize="sm" color="blue.200">
+          <Text mt={2} fontSize="sm" color={setupSecondaryTextColor}>
             Setup Mode: Click empty cells to place workers
           </Text>
         )}

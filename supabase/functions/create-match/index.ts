@@ -186,6 +186,25 @@ serve(async (req) => {
     .single();
 
   if (insertError || !match) {
+    const postgresError = insertError as { code?: string; message?: string } | null;
+    if (postgresError?.code === '23505') {
+      const { data: activeMatch } = await supabase
+        .from('matches')
+        .select('id')
+        .or(`creator_id.eq.${profile.id},opponent_id.eq.${profile.id}`)
+        .in('status', ['waiting_for_opponent', 'in_progress'])
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return jsonResponse(
+        {
+          error: 'You already have an active game. Please finish or cancel your current game before creating a new one.',
+          code: 'ACTIVE_GAME_EXISTS',
+          activeMatchId: activeMatch?.id ?? null,
+        },
+        { status: 409 },
+      );
+    }
     console.error('Failed to create match', insertError);
     return jsonResponse({ error: 'Failed to create match' }, { status: 500 });
   }

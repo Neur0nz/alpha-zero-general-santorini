@@ -31,24 +31,8 @@ const components = {
       borderRadius: 'md',
       fontWeight: '600',
     },
-    variants: {
-      solid: {
-        bg: 'brand.500',
-        color: 'white',
-        _hover: {
-          bg: 'brand.400',
-        },
-        _active: {
-          bg: 'brand.600',
-        },
-      },
-      outline: {
-        borderColor: 'brand.400',
-        color: 'brand.200',
-        _hover: {
-          bg: 'brand.900',
-        },
-      },
+    defaultProps: {
+      colorScheme: 'brand',
     },
   },
   Modal: {

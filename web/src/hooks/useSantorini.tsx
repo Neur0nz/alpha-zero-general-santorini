@@ -36,6 +36,8 @@ const ONNX_OUTPUT_SIZE = 162;
 let onnxSessionPromise: Promise<any> | null = null;
 
 const PRACTICE_STATE_KEY = 'santorini:practiceState:v2'; // Updated key for TypeScript-based state
+const PRACTICE_MODE_KEY = 'santorini:practiceGameMode';
+const PRACTICE_DIFFICULTY_KEY = 'santorini:practiceDifficulty';
 
 const COLUMN_LABELS = ['A', 'B', 'C', 'D', 'E'] as const;
 
@@ -145,6 +147,11 @@ export type ButtonsState = {
   setupTurn: number;
 };
 
+export type PracticeGameMode = 'P0' | 'P1' | 'Human' | 'AI';
+
+const DEFAULT_PRACTICE_MODE: PracticeGameMode = 'P0';
+const DEFAULT_PRACTICE_DIFFICULTY = 50;
+
 type UiPlacementContext =
   | { phase: 'placement'; player: 0 | 1; workerId: 1 | 2 | -1 | -2 }
   | { phase: 'play' };
@@ -182,7 +189,7 @@ export type ApplyMoveOptions = {
 
 export type Controls = {
   reset: () => Promise<void>;
-  setGameMode: (mode: 'P0' | 'P1' | 'Human' | 'AI') => Promise<void>;
+  setGameMode: (mode: PracticeGameMode) => Promise<void>;
   changeDifficulty: (sims: number) => void;
   toggleEdit: () => void;
   setEditMode: (mode: number) => void;
@@ -362,6 +369,8 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     setupMode: false,
     setupTurn: 0
   });
+  const [practiceMode, setPracticeMode] = useState<PracticeGameMode>(DEFAULT_PRACTICE_MODE);
+  const [practiceDifficulty, setPracticeDifficulty] = useState<number>(DEFAULT_PRACTICE_DIFFICULTY);
   const buttonsRef = useRef(buttons);
   useEffect(() => {
     buttonsRef.current = buttons;
@@ -380,6 +389,27 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     },
     [],
   );
+  const persistPracticeMode = useCallback((mode: PracticeGameMode) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      window.localStorage.setItem(PRACTICE_MODE_KEY, mode);
+    } catch (error) {
+      console.error('Failed to persist practice mode:', error);
+    }
+  }, []);
+
+  const persistPracticeDifficulty = useCallback((value: number) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    try {
+      window.localStorage.setItem(PRACTICE_DIFFICULTY_KEY, String(value));
+    } catch (error) {
+      console.error('Failed to persist practice difficulty:', error);
+    }
+  }, []);
   const [evaluation, setEvaluation] = useState<EvaluationState>({ value: 0, advantage: 'Balanced', label: '0.00' });
   const [topMoves, setTopMoves] = useState<TopMove[]>([]);
   const [history, setHistory] = useState<MoveSummary[]>([]);
@@ -512,6 +542,53 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     } catch (error) {
       console.error('Failed to persist practice state:', error);
     }
+  }, []);
+
+  const restorePracticeSettings = useCallback((game: Santorini) => {
+    const validModes: PracticeGameMode[] = ['P0', 'P1', 'Human', 'AI'];
+    let modeToApply: PracticeGameMode = DEFAULT_PRACTICE_MODE;
+
+    if (typeof game.gameMode === 'string' && validModes.includes(game.gameMode as PracticeGameMode)) {
+      modeToApply = game.gameMode as PracticeGameMode;
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        const storedMode = window.localStorage.getItem(PRACTICE_MODE_KEY) as PracticeGameMode | null;
+        if (storedMode && validModes.includes(storedMode)) {
+          modeToApply = storedMode;
+        }
+      } catch (error) {
+        console.error('Failed to read practice mode from storage:', error);
+      }
+    }
+
+    game.gameMode = modeToApply;
+    setPracticeMode(modeToApply);
+
+    let difficultyToApply = DEFAULT_PRACTICE_DIFFICULTY;
+    if (typeof window !== 'undefined') {
+      try {
+        const storedDifficulty = window.localStorage.getItem(PRACTICE_DIFFICULTY_KEY);
+        if (storedDifficulty !== null) {
+          const parsed = Number(storedDifficulty);
+          if (Number.isFinite(parsed) && parsed > 0) {
+            difficultyToApply = parsed;
+          } else {
+            window.localStorage.removeItem(PRACTICE_DIFFICULTY_KEY);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to read practice difficulty from storage:', error);
+      }
+    }
+
+    try {
+      game.change_difficulty(difficultyToApply);
+    } catch (error) {
+      console.error('Failed to apply difficulty to practice game:', error);
+    }
+    setPracticeDifficulty(difficultyToApply);
   }, []);
 
   // Restore TypeScript engine state from localStorage
@@ -1008,10 +1085,8 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
           return;
         }
         game.init_game();
-        
-        // Set default game mode to "You vs AI"
-        game.gameMode = 'P0';
-        
+        restorePracticeSettings(game);
+
         const restored = await restorePracticeState();
         selector.resetAndStart();
         await syncUi(true);
@@ -1038,7 +1113,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
 
     initializePromiseRef.current = initPromise;
     await initPromise;
-  }, [loadPyodideRuntime, refreshEvaluation, restorePracticeState, startGuidedSetup, syncUi, updateButtonsState]);
+  }, [loadPyodideRuntime, refreshEvaluation, restorePracticeSettings, restorePracticeState, startGuidedSetup, syncUi, updateButtonsState]);
 
   const aiPlayIfNeeded = useCallback(async () => {
     if (!evaluationEnabled) {
@@ -1345,24 +1420,29 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   }, [ensureAiIdle, startGuidedSetup]);
 
   const setGameMode = useCallback(
-    async (mode: 'P0' | 'P1' | 'Human' | 'AI') => {
+    async (mode: PracticeGameMode) => {
       const game = gameRef.current;
       const selector = selectorRef.current;
       if (!game || !selector) return;
       game.gameMode = mode;
+      setPracticeMode(mode);
+      persistPracticeMode(mode);
       await ensureAiIdle();
       selector.resetAndStart();
       await aiPlayIfNeeded();
       await syncUi();
     },
-    [aiPlayIfNeeded, ensureAiIdle, syncUi],
+    [aiPlayIfNeeded, ensureAiIdle, persistPracticeMode, syncUi],
   );
 
   const changeDifficulty = useCallback((sims: number) => {
     const game = gameRef.current;
     if (!game) return;
-    game.change_difficulty(sims);
-  }, []);
+    const sanitized = Number.isFinite(sims) && sims > 0 ? sims : DEFAULT_PRACTICE_DIFFICULTY;
+    game.change_difficulty(sanitized);
+    setPracticeDifficulty(sanitized);
+    persistPracticeDifficulty(sanitized);
+  }, [persistPracticeDifficulty]);
 
   const toggleEdit = useCallback(() => {
     const selector = selectorRef.current;
@@ -1488,6 +1568,8 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     nextPlayer,
     gameEnded: gameRef.current?.gameEnded ?? [0, 0],
     importState,
+    gameMode: practiceMode,
+    difficulty: practiceDifficulty,
   };
 }
 

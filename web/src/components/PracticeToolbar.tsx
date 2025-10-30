@@ -1,4 +1,4 @@
-import { ChangeEvent, useState } from 'react';
+import { ChangeEvent } from 'react';
 import {
   Box,
   Button,
@@ -11,9 +11,10 @@ import {
   useColorModeValue,
   Wrap,
   WrapItem,
+  useBoolean,
 } from '@chakra-ui/react';
 import { RepeatIcon, TimeIcon } from '@chakra-ui/icons';
-import type { Controls, ButtonsState } from '@hooks/useSantorini';
+import type { Controls, ButtonsState, PracticeGameMode } from '@hooks/useSantorini';
 
 const difficultyPresets: Array<{ label: string; value: number }> = [
   { label: 'God-like (12800)', value: 12800 },
@@ -25,7 +26,7 @@ const difficultyPresets: Array<{ label: string; value: number }> = [
   { label: 'Come on (3)', value: 3 },
 ];
 
-const gameModes: Array<{ label: string; value: 'P0' | 'P1' | 'Human' | 'AI' }> = [
+const gameModes: Array<{ label: string; value: PracticeGameMode }> = [
   { label: 'You vs AI', value: 'P0' },
   { label: 'AI vs You', value: 'P1' },
   { label: 'No AI', value: 'Human' },
@@ -37,27 +38,63 @@ interface PracticeToolbarProps {
   onReset: () => Promise<void>;
   onShowHistory: () => void;
   buttons: ButtonsState;
+  engineLoading: boolean;
+  currentMode: PracticeGameMode;
+  currentDifficulty: number;
 }
 
-function PracticeToolbar({ controls, onReset, onShowHistory, buttons }: PracticeToolbarProps) {
-  const [difficulty, setDifficulty] = useState<number>(50);
-  const [mode, setMode] = useState<'P0' | 'P1' | 'Human' | 'AI'>('P0');
+function PracticeToolbar({
+  controls,
+  onReset,
+  onShowHistory,
+  buttons,
+  engineLoading,
+  currentMode,
+  currentDifficulty,
+}: PracticeToolbarProps) {
   const selectBg = useColorModeValue('white', 'gray.700');
   const selectBorderColor = useColorModeValue('gray.300', 'gray.600');
   const selectTextColor = useColorModeValue('gray.900', 'white');
   const { colorMode } = useColorMode();
+  const [isResetting, setIsResetting] = useBoolean(false);
+  const [isRefreshing, setIsRefreshing] = useBoolean(false);
+  const [isModeUpdating, setIsModeUpdating] = useBoolean(false);
 
   const handleDifficulty = (event: ChangeEvent<HTMLSelectElement>) => {
     const value = Number(event.target.value);
-    setDifficulty(value);
     controls.changeDifficulty(value);
   };
 
   const handleMode = async (event: ChangeEvent<HTMLSelectElement>) => {
-    const value = event.target.value as 'P0' | 'P1' | 'Human' | 'AI';
-    setMode(value);
-    await controls.setGameMode(value);
+    const value = event.target.value as PracticeGameMode;
+    setIsModeUpdating.on();
+    try {
+      await controls.setGameMode(value);
+    } finally {
+      setIsModeUpdating.off();
+    }
   };
+
+  const handleReset = async () => {
+    setIsResetting.on();
+    try {
+      await onReset();
+    } finally {
+      setIsResetting.off();
+    }
+  };
+
+  const handleRefreshEvaluation = async () => {
+    setIsRefreshing.on();
+    try {
+      await controls.refreshEvaluation();
+    } finally {
+      setIsRefreshing.off();
+    }
+  };
+
+  const isBusy = engineLoading || buttons.loading || isResetting || isModeUpdating;
+  const disableActions = isBusy;
 
   return (
     <Box
@@ -71,13 +108,25 @@ function PracticeToolbar({ controls, onReset, onShowHistory, buttons }: Practice
       <Flex direction={{ base: 'column', lg: 'row' }} gap={{ base: 3, lg: 6 }} align={{ base: 'stretch', lg: 'center' }}>
         <Wrap spacing={{ base: 2, md: 3 }} align="center">
           <WrapItem>
-            <Button colorScheme="teal" size={{ base: 'sm', md: 'sm' }} onClick={onReset} leftIcon={<RepeatIcon />}>
+            <Button
+              colorScheme="teal"
+              size={{ base: 'sm', md: 'sm' }}
+              onClick={handleReset}
+              leftIcon={<RepeatIcon />}
+              isDisabled={disableActions}
+              isLoading={isResetting}
+            >
               <Box display={{ base: 'none', sm: 'inline' }}>New game</Box>
               <Box display={{ base: 'inline', sm: 'none' }}>New</Box>
             </Button>
           </WrapItem>
           <WrapItem>
-            <Button colorScheme="orange" size={{ base: 'sm', md: 'sm' }} onClick={controls.toggleEdit}>
+            <Button
+              colorScheme="orange"
+              size={{ base: 'sm', md: 'sm' }}
+              onClick={controls.toggleEdit}
+              isDisabled={disableActions}
+            >
               <Box display={{ base: 'none', sm: 'inline' }}>Toggle edit</Box>
               <Box display={{ base: 'inline', sm: 'none' }}>Edit</Box>
             </Button>
@@ -91,6 +140,7 @@ function PracticeToolbar({ controls, onReset, onShowHistory, buttons }: Practice
                 variant="outline"
                 colorScheme="blue"
                 onClick={onShowHistory}
+                isDisabled={disableActions}
               />
             </Tooltip>
           </WrapItem>
@@ -101,7 +151,9 @@ function PracticeToolbar({ controls, onReset, onShowHistory, buttons }: Practice
                 icon={<RepeatIcon />}
                 size="sm"
                 variant="outline"
-                onClick={controls.refreshEvaluation}
+                onClick={handleRefreshEvaluation}
+                isLoading={isRefreshing}
+                isDisabled={engineLoading || buttons.loading}
               />
             </Tooltip>
           </WrapItem>
@@ -115,7 +167,7 @@ function PracticeToolbar({ controls, onReset, onShowHistory, buttons }: Practice
         >
           <Select
             size="sm"
-            value={difficulty}
+            value={currentDifficulty}
             onChange={handleDifficulty}
             bg={selectBg}
             borderColor={selectBorderColor}
@@ -123,6 +175,7 @@ function PracticeToolbar({ controls, onReset, onShowHistory, buttons }: Practice
             _hover={{ borderColor: selectBorderColor }}
             _focus={{ borderColor: 'teal.400', boxShadow: '0 0 0 1px teal.400' }}
             maxW="220px"
+            isDisabled={engineLoading || buttons.loading}
           >
             {difficultyPresets.map((preset) => (
               <option
@@ -139,7 +192,7 @@ function PracticeToolbar({ controls, onReset, onShowHistory, buttons }: Practice
           </Select>
           <Select
             size="sm"
-            value={mode}
+            value={currentMode}
             onChange={handleMode}
             bg={selectBg}
             borderColor={selectBorderColor}
@@ -147,6 +200,7 @@ function PracticeToolbar({ controls, onReset, onShowHistory, buttons }: Practice
             _hover={{ borderColor: selectBorderColor }}
             _focus={{ borderColor: 'teal.400', boxShadow: '0 0 0 1px teal.400' }}
             maxW="220px"
+            isDisabled={engineLoading || buttons.loading || isModeUpdating}
           >
             {gameModes.map((preset) => (
               <option

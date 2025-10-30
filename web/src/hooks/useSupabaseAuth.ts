@@ -20,8 +20,8 @@ const DEFAULT_STATE: AuthState = {
 
 const PROFILE_QUERY_FIELDS =
   'id, auth_user_id, display_name, rating, games_played, created_at, updated_at';
-const PROFILE_FETCH_TIMEOUT = 30000; // 30s timeout to handle very slow networks
-const PROFILE_RETRY_DELAY = 5000; // Retry after 5s to reduce retry spam
+const PROFILE_FETCH_TIMEOUT = 6000; // 6s timeout to prevent long UI stalls
+const PROFILE_RETRY_DELAY = 1500; // Retry quickly to mask transient hiccups
 
 const NETWORK_ERROR_TOKENS = ['fetch', 'network', 'timeout', 'offline'];
 const INVALID_SESSION_TOKENS = [
@@ -246,6 +246,19 @@ export function useSupabaseAuth() {
   const isConfigured = Boolean(supabase);
   const loadingProfileRef = useRef<Promise<void> | null>(null);
 
+  const clearCachedSession = useCallback(async () => {
+    const client = supabase;
+    if (client) {
+      try {
+        await client.auth.signOut({ scope: 'local' });
+      } catch (signOutError) {
+        console.warn('Failed to clear Supabase local session cache', signOutError);
+      }
+    }
+    cacheAuthState(null, null);
+    cachedStateRef.current = null;
+  }, []);
+
   const loadSessionProfile = useCallback(async (session: Session | null) => {
     const client = supabase;
     if (!client) {
@@ -289,13 +302,17 @@ export function useSupabaseAuth() {
         let retryCount = 0;
         const maxRetries = 3;
         let profile: PlayerProfile | null = null;
-        
+        let lastError: unknown = null;
+        const errors: unknown[] = [];
+
         while (retryCount < maxRetries && !profile) {
           try {
             console.log(`Loading profile for session user: ${session.user.id} (attempt ${retryCount + 1})`);
             profile = await ensureProfile(client, session.user);
             console.log('✅ Profile loaded successfully');
           } catch (error) {
+            lastError = error;
+            errors.push(error);
             if (isInvalidSessionError(error) || isPostgrestUnauthorizedError(error)) {
               console.warn('Profile load failed due to invalid or expired session. Clearing cached auth state.', error);
               await clearCachedSession();
@@ -306,24 +323,42 @@ export function useSupabaseAuth() {
             retryCount++;
             console.warn(`Profile load attempt ${retryCount} failed:`, error);
 
-            if (retryCount < maxRetries) {
+            const shouldStopEarly = isNetworkError(error);
+
+            if (retryCount < maxRetries && !shouldStopEarly) {
               console.log(`Retrying profile load in ${PROFILE_RETRY_DELAY}ms... (attempt ${retryCount + 1}/${maxRetries})`);
-              await new Promise(resolve => setTimeout(resolve, PROFILE_RETRY_DELAY));
+              await new Promise((resolve) => setTimeout(resolve, PROFILE_RETRY_DELAY));
             } else {
               console.error('All profile load attempts failed:', error);
-              const newState = { session, profile: null, loading: false, error: (error as Error).message };
-              setState(newState);
-              cachedStateRef.current = { session, profile: null as any };
-              return;
+              break;
             }
           }
         }
-        
+
         if (profile) {
           const newState = { session, profile, loading: false, error: null };
           setState(newState);
           cacheAuthState(session, profile);
           cachedStateRef.current = { session, profile };
+        } else {
+          const networkError = lastError && (isNetworkError(lastError) || (lastError instanceof Error && lastError.message.includes('Profile loading timed out')));
+
+          const errorMessage = networkError
+            ? 'Network connection issue. Please check your internet connection and try again.'
+            : 'Failed to load player profile. Please try again.';
+
+          if (networkError && cachedStateRef.current?.profile) {
+            const cachedProfile = cachedStateRef.current.profile;
+            setState({ session, profile: cachedProfile, loading: false, error: errorMessage });
+            cacheAuthState(session, cachedProfile);
+            console.warn('Using cached profile due to network issues during profile load.', errors);
+            return;
+          }
+
+          const newState = { session, profile: null, loading: false, error: errorMessage };
+          setState(newState);
+          cachedStateRef.current = { session, profile: null as any };
+          return;
         }
       } catch (profileError) {
         if (isInvalidSessionError(profileError) || isPostgrestUnauthorizedError(profileError)) {
@@ -342,12 +377,18 @@ export function useSupabaseAuth() {
           ? 'Network connection issue. Please check your internet connection and try again.'
           : 'Failed to load player profile. Please try again.';
 
-        setState((prev) => ({
-          session,
-          profile: prev.profile,
-          loading: false,
-          error: errorMessage,
-        }));
+        if (networkError && cachedStateRef.current?.profile) {
+          const cachedProfile = cachedStateRef.current.profile;
+          setState({ session, profile: cachedProfile, loading: false, error: errorMessage });
+          cacheAuthState(session, cachedProfile);
+        } else {
+          setState((prev) => ({
+            session,
+            profile: prev.profile,
+            loading: false,
+            error: errorMessage,
+          }));
+        }
       } finally {
         loadingProfileRef.current = null;
       }
@@ -356,19 +397,6 @@ export function useSupabaseAuth() {
     loadingProfileRef.current = loadPromise;
     await loadPromise;
   }, [clearCachedSession, state.profile]);
-
-  const clearCachedSession = useCallback(async () => {
-    const client = supabase;
-    if (client) {
-      try {
-        await client.auth.signOut({ scope: 'local' });
-      } catch (signOutError) {
-        console.warn('Failed to clear Supabase local session cache', signOutError);
-      }
-    }
-    cacheAuthState(null, null);
-    cachedStateRef.current = null;
-  }, []);
 
   const restoreSessionFromCache = useCallback(async (): Promise<Session | null> => {
     const client = supabase;
@@ -696,3 +724,12 @@ export function useSupabaseAuth() {
 }
 
 export type SupabaseAuthState = ReturnType<typeof useSupabaseAuth>;
+
+export const __TESTING__ = {
+  getErrorMessage,
+  isNetworkError,
+  isInvalidSessionError,
+  isPostgrestUnauthorizedError,
+  cacheAuthState,
+  getCachedAuthState,
+};
