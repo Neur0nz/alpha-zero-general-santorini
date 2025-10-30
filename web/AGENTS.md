@@ -30,3 +30,17 @@
 - Copy `.env.example` to `.env.local` for local secrets and keep real credentials out of git.
 - Coordinate Supabase configuration or schema changes with backend maintainers and document any new RPCs.
 - Update this guide whenever scripts, directories, or workflows change meaningfully.
+
+## Python Engine Integration
+- The canonical Santorini engine lives in `web/public/santorini/` (Python modules plus `model_no_god.onnx`). Vite serves these files verbatim, so keep them unbundled and avoid TypeScript imports.
+- `src/hooks/useSantorini.tsx` is the single entry-point that wires Pyodide into the UI. On mount it loads the Pyodide runtime from `VITE_PYODIDE_URL`, fetches every file listed in `PY_FILES`, writes them into the in-memory Pyodide FS, and instantiates the `Santorini` bridge class from `src/game/santorini.ts`.
+- The bridge exposes helper methods (`_findWorker`, `_read_level`, etc.) that mirror the Python API. React state is synced by calling those methods after each move and by forwarding player actions back into Pyodide.
+- Neural-network evaluation is optional: when `evaluationEnabled` is true the hook also loads ONNX Runtime Web from `VITE_ONNX_URL`, downloads `model_no_god.onnx`, and keeps a singleton inference session on `window.ort`. Missing URLs will hard-fail initialization.
+- The Supabase edge functions reuse a TypeScript port of the Python logic (`supabase/functions/_shared/santorini.ts`) to validate moves server-side. Keep behaviour changes in sync across Python, the TS bridge, and the shared engine.
+
+## Supabase Backend & Configuration
+- Front-end code accesses Supabase through `src/lib/supabaseClient.ts`, which creates a browser client when `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are present. Without them the Play/Analyze tabs gracefully disable online features but leave Practice offline mode untouched.
+- Provision Supabase using the CLI config in `supabase/config.toml`. The project expects the `players`, `matches`, and `match_moves` schema plus the RLS policies defined in `SUPABASE_SETUP.md`; run `supabase start` locally to mirror the hosted stack.
+- Three edge functions (`supabase/functions/create-match`, `submit-move`, and `update-match-status`) enforce server authority. They authenticate the caller with a bearer token, load match data via RPCs, run the shared `SantoriniEngine` to validate requested actions, and then write back to `public.matches` / `public.match_moves`.
+- Deploy edge functions with `supabase functions deploy <name>`; each function needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` environment variables in production. Keep their return payloads aligned with the React callers in `src/hooks/useMatchLobby.ts`.
+- Supabase realtime is required for lobby updates and in-game clocks—ensure `public.matches` and `public.match_moves` are part of the `supabase_realtime` publication (see step 5 in `SUPABASE_SETUP.md`). Realtime channels are created in `useMatchLobby` whenever a user joins or creates a match.

@@ -23,6 +23,64 @@ const PROFILE_QUERY_FIELDS =
 const PROFILE_FETCH_TIMEOUT = 30000; // 30s timeout to handle very slow networks
 const PROFILE_RETRY_DELAY = 5000; // Retry after 5s to reduce retry spam
 
+const NETWORK_ERROR_TOKENS = ['fetch', 'network', 'timeout', 'offline'];
+const INVALID_SESSION_TOKENS = [
+  'invalid refresh token',
+  'refresh token not found',
+  'session not found',
+  'invalid grant',
+  'expired',
+  'jwt expired',
+  'token has expired',
+  'invalid_token',
+];
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return '';
+}
+
+function isNetworkError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return NETWORK_ERROR_TOKENS.some((token) => message.includes(token));
+}
+
+function isInvalidSessionError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  if (!message) {
+    return false;
+  }
+  return INVALID_SESSION_TOKENS.some((token) => message.includes(token));
+}
+
+function isPostgrestUnauthorizedError(error: unknown): boolean {
+  if (error && typeof error === 'object') {
+    const maybePostgrest = error as Partial<PostgrestError> & { status?: number };
+    const code = typeof maybePostgrest.code === 'string' ? maybePostgrest.code.toLowerCase() : '';
+    const message = typeof maybePostgrest.message === 'string' ? maybePostgrest.message.toLowerCase() : '';
+
+    if (
+      code === '42501' ||
+      code === 'pgrst301' ||
+      code === 'pgrst302' ||
+      code === 'pgrst303' ||
+      message.includes('jwt expired') ||
+      message.includes('invalid jwt') ||
+      message.includes('permission denied') ||
+      message.includes('no auth header')
+    ) {
+      return true;
+    }
+  }
+
+  return INVALID_SESSION_TOKENS.some((token) => getErrorMessage(error).toLowerCase().includes(token));
+}
+
 function getDisplayNameSeed(user: User): string | undefined {
   const metadataName = typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name : undefined;
   if (metadataName && metadataName.trim().length > 0) {
@@ -238,9 +296,16 @@ export function useSupabaseAuth() {
             profile = await ensureProfile(client, session.user);
             console.log('✅ Profile loaded successfully');
           } catch (error) {
+            if (isInvalidSessionError(error) || isPostgrestUnauthorizedError(error)) {
+              console.warn('Profile load failed due to invalid or expired session. Clearing cached auth state.', error);
+              await clearCachedSession();
+              setState({ session: null, profile: null, loading: false, error: 'Your session expired. Please sign in again.' });
+              return;
+            }
+
             retryCount++;
             console.warn(`Profile load attempt ${retryCount} failed:`, error);
-            
+
             if (retryCount < maxRetries) {
               console.log(`Retrying profile load in ${PROFILE_RETRY_DELAY}ms... (attempt ${retryCount + 1}/${maxRetries})`);
               await new Promise(resolve => setTimeout(resolve, PROFILE_RETRY_DELAY));
@@ -261,19 +326,22 @@ export function useSupabaseAuth() {
           cachedStateRef.current = { session, profile };
         }
       } catch (profileError) {
+        if (isInvalidSessionError(profileError) || isPostgrestUnauthorizedError(profileError)) {
+          console.warn('Profile load failed after retries due to invalid session. Clearing cached auth state.', profileError);
+          await clearCachedSession();
+          setState({ session: null, profile: null, loading: false, error: 'Your session expired. Please sign in again.' });
+          return;
+        }
+
         console.error('Failed to load player profile', profileError);
 
         // Check if it's a network error or timeout
-        const isNetworkError = profileError instanceof Error && 
-          (profileError.message.includes('fetch') || 
-           profileError.message.includes('network') ||
-           profileError.message.includes('timeout') ||
-           profileError.message.includes('Profile loading timed out'));
-        
-        const errorMessage = isNetworkError 
+        const networkError = isNetworkError(profileError) || (profileError instanceof Error && profileError.message.includes('Profile loading timed out'));
+
+        const errorMessage = networkError 
           ? 'Network connection issue. Please check your internet connection and try again.'
           : 'Failed to load player profile. Please try again.';
-          
+
         setState((prev) => ({
           session,
           profile: prev.profile,
@@ -287,7 +355,20 @@ export function useSupabaseAuth() {
 
     loadingProfileRef.current = loadPromise;
     await loadPromise;
-  }, [state.profile]);
+  }, [clearCachedSession, state.profile]);
+
+  const clearCachedSession = useCallback(async () => {
+    const client = supabase;
+    if (client) {
+      try {
+        await client.auth.signOut({ scope: 'local' });
+      } catch (signOutError) {
+        console.warn('Failed to clear Supabase local session cache', signOutError);
+      }
+    }
+    cacheAuthState(null, null);
+    cachedStateRef.current = null;
+  }, []);
 
   const restoreSessionFromCache = useCallback(async (): Promise<Session | null> => {
     const client = supabase;
@@ -298,22 +379,46 @@ export function useSupabaseAuth() {
     if (!cached?.session) {
       return null;
     }
+    const { access_token: accessToken, refresh_token: refreshToken } = cached.session;
+    if (!accessToken || !refreshToken) {
+      return null;
+    }
+
     try {
-      const { access_token: accessToken, refresh_token: refreshToken } = cached.session;
-      if (!accessToken || !refreshToken) {
-        return null;
-      }
       const { data, error } = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
       if (error) {
-        console.warn('Failed to restore Supabase session from cache', error);
+        if (isInvalidSessionError(error)) {
+          console.warn('Cached Supabase session is no longer valid. Clearing cache.', error);
+          await clearCachedSession();
+          return null;
+        }
+
+        if (isNetworkError(error)) {
+          console.warn('Network error while restoring Supabase session from cache. Falling back to cached data.', error);
+          return cached.session;
+        }
+
+        console.warn('Unexpected error while restoring Supabase session from cache', error);
         return cached.session;
       }
+
       return data.session ?? cached.session;
     } catch (error) {
+      if (isInvalidSessionError(error)) {
+        console.warn('Cached Supabase session is invalid. Clearing cache.', error);
+        await clearCachedSession();
+        return null;
+      }
+
+      if (isNetworkError(error)) {
+        console.warn('Network issue while restoring Supabase session from cache. Falling back to cached data.', error);
+        return cached.session;
+      }
+
       console.warn('Unexpected error while restoring Supabase session from cache', error);
       return cached.session;
     }
-  }, []);
+  }, [clearCachedSession]);
 
   useEffect(() => {
     const client = supabase;
@@ -332,18 +437,19 @@ export function useSupabaseAuth() {
         if (error) {
           console.error('Failed to load Supabase session', error);
 
-          // Check if it's a network error
-          const isNetworkError = error.message &&
-            (error.message.includes('fetch') ||
-             error.message.includes('network') ||
-             error.message.includes('timeout'));
+          if (isInvalidSessionError(error)) {
+            await clearCachedSession();
+            setState({ session: null, profile: null, loading: false, error: 'Your session expired. Please sign in again.' });
+            return;
+          }
 
-          const errorMessage = isNetworkError
+          const networkIssue = isNetworkError(error);
+          const errorMessage = networkIssue
             ? 'Network connection issue. Please check your internet connection and refresh the page.'
             : 'Unable to load authentication session. Please refresh and try again.';
 
           const cached = cachedStateRef.current;
-          if (cached) {
+          if (cached && networkIssue) {
             setState({ session: cached.session, profile: cached.profile, loading: false, error: errorMessage });
           } else {
             setState({ session: null, profile: null, loading: false, error: errorMessage });
@@ -365,18 +471,19 @@ export function useSupabaseAuth() {
       } catch (err) {
         console.error('Failed to initialize authentication', err);
 
-        // Check if it's a network error
-        const isNetworkError = err instanceof Error &&
-          (err.message.includes('fetch') ||
-           err.message.includes('network') ||
-           err.message.includes('timeout'));
+        if (isInvalidSessionError(err)) {
+          await clearCachedSession();
+          setState({ session: null, profile: null, loading: false, error: 'Your session expired. Please sign in again.' });
+          return;
+        }
 
-        const errorMessage = isNetworkError
+        const networkIssue = isNetworkError(err);
+        const errorMessage = networkIssue
           ? 'Network connection issue. Please check your internet connection and refresh the page.'
           : 'Failed to initialize authentication. Please refresh the page and try again.';
 
         const cached = cachedStateRef.current;
-        if (cached) {
+        if (cached && networkIssue) {
           setState({ session: cached.session, profile: cached.profile, loading: false, error: errorMessage });
         } else {
           setState({ session: null, profile: null, loading: false, error: errorMessage });
