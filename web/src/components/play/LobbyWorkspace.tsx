@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { ReactNode, useState } from 'react';
 import {
   Alert,
   AlertDescription,
@@ -7,18 +7,19 @@ import {
   Badge,
   Box,
   Button,
+  ButtonGroup,
   Card,
   CardBody,
   CardHeader,
   Center,
+  CloseButton,
   Flex,
   FormControl,
   FormLabel,
   Heading,
   HStack,
+  Icon,
   Input,
-  List,
-  ListItem,
   Modal,
   ModalBody,
   ModalCloseButton,
@@ -31,14 +32,17 @@ import {
   Spinner,
   Stack,
   Switch,
+  Tag,
   Text,
   Tooltip,
+  Wrap,
+  WrapItem,
   useColorModeValue,
   useDisclosure,
   useToast,
   useBoolean,
 } from '@chakra-ui/react';
-import { AddIcon, ArrowForwardIcon } from '@chakra-ui/icons';
+import { AddIcon, ArrowForwardIcon, RepeatIcon, SearchIcon, StarIcon } from '@chakra-ui/icons';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import type { CreateMatchPayload, LobbyMatch, StartingPlayer } from '@hooks/useMatchLobby';
 import { useMatchLobbyContext } from '@hooks/matchLobbyContext';
