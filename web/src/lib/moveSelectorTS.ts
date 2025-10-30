@@ -74,6 +74,11 @@ export class TypeScriptMoveSelector {
       return true;
       
     } else if (this.stage === 1) {
+      // Allow clicking the same worker again to deselect and return to start
+      if (y === this.workerY && x === this.workerX) {
+        this.reset();
+        return true;
+      }
       // Stage 1: Select move destination
       this.moveDirection = encodeDirection(this.workerY, this.workerX, y, x);
       
@@ -94,6 +99,11 @@ export class TypeScriptMoveSelector {
       return true;
       
     } else if (this.stage === 2) {
+      // Allow clicking the moved-to position again to cancel and return to start
+      if (y === this.newY && x === this.newX) {
+        this.reset();
+        return true;
+      }
       // Stage 2: Select build location
       this.buildDirection = encodeDirection(this.newY, this.newX, y, x);
       
@@ -173,6 +183,8 @@ export class TypeScriptMoveSelector {
           selectable[newY][newX] = true;
         }
       }
+      // Also allow clicking the selected worker again to deselect
+      selectable[this.workerY][this.workerX] = true;
       
     } else if (this.stage === 2) {
       // Highlight valid build locations from new position
@@ -190,6 +202,8 @@ export class TypeScriptMoveSelector {
           }
         }
       }
+      // Also allow clicking the moved-to position to cancel back to start
+      selectable[this.newY][this.newX] = true;
     }
     
     return selectable;
