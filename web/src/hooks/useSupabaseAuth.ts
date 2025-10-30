@@ -20,7 +20,6 @@ const DEFAULT_STATE: AuthState = {
 
 const PROFILE_QUERY_FIELDS =
   'id, auth_user_id, display_name, rating, games_played, created_at, updated_at';
-const PROFILE_FETCH_TIMEOUT = 12000; // 12s timeout to prevent long UI stalls
 const PROFILE_RETRY_DELAY = 2000; // Retry quickly to mask transient hiccups
 
 const NETWORK_ERROR_TOKENS = ['fetch', 'network', 'timeout', 'offline'];
@@ -94,28 +93,11 @@ function getDisplayNameSeed(user: User): string | undefined {
 
 async function ensureProfile(client: SupabaseClient, user: User): Promise<PlayerProfile> {
   try {
-    const selectPromise = client
+    const { data, error } = await client
       .from('players')
       .select(PROFILE_QUERY_FIELDS)
       .eq('auth_user_id', user.id)
       .maybeSingle();
-
-    const { data, error } = await new Promise<Awaited<typeof selectPromise>>((resolve, reject) => {
-      const timeoutHandle = setTimeout(() => {
-        reject(new Error('Profile fetch timed out'));
-      }, PROFILE_FETCH_TIMEOUT);
-
-      selectPromise.then(
-        (result) => {
-          clearTimeout(timeoutHandle);
-          resolve(result);
-        },
-        (err: unknown) => {
-          clearTimeout(timeoutHandle);
-          reject(err);
-        },
-      );
-    });
 
     if (error) {
       throw error;
@@ -144,28 +126,11 @@ async function ensureProfile(client: SupabaseClient, user: User): Promise<Player
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const candidate = generateDisplayName(seed);
     try {
-      const insertPromise = client
+      const { data: insertData, error: insertError } = await client
         .from('players')
         .insert({ auth_user_id: user.id, display_name: candidate })
         .select(PROFILE_QUERY_FIELDS)
         .single();
-
-      const { data: insertData, error: insertError } = await new Promise<Awaited<typeof insertPromise>>((resolve, reject) => {
-        const timeoutHandle = setTimeout(() => {
-          reject(new Error('Profile creation timed out'));
-        }, PROFILE_FETCH_TIMEOUT);
-
-      insertPromise.then(
-        (result) => {
-          clearTimeout(timeoutHandle);
-          resolve(result);
-        },
-        (err: unknown) => {
-          clearTimeout(timeoutHandle);
-          reject(err);
-        },
-      );
-      });
 
       if (!insertError && insertData) {
         return insertData as PlayerProfile;
