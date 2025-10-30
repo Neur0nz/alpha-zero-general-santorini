@@ -687,6 +687,91 @@ function ActiveMatchContent({
   );
 }
 
+function CompletedMatchSummary({
+  match,
+  profileId,
+  onRequestRematch,
+  rematchLoading,
+  onPrepareAnalyze,
+}: {
+  match: LobbyMatch;
+  profileId: string | null;
+  onRequestRematch: () => void;
+  rematchLoading: boolean;
+  onPrepareAnalyze: () => void;
+}) {
+  const { cardBg, cardBorder, mutedText, accentHeading } = useSurfaceTokens();
+
+  const winnerProfile = match.winner_id
+    ? match.winner_id === match.creator_id
+      ? match.creator
+      : match.opponent
+    : null;
+  const isDraw = !match.winner_id;
+  const isWinnerUser = winnerProfile?.id && winnerProfile.id === profileId;
+
+  const title = (() => {
+    if (isDraw) {
+      return 'Game drawn';
+    }
+    if (isWinnerUser) {
+      return 'You win!';
+    }
+    return `${winnerProfile?.display_name ?? 'Opponent'} wins`;
+  })();
+
+  const description = (() => {
+    if (match.status === 'abandoned') {
+      if (isWinnerUser) {
+        return 'Opponent resigned or ran out of time.';
+      }
+      if (winnerProfile) {
+        return 'You resigned or ran out of time.';
+      }
+      return 'The game ended early.';
+    }
+    if (isDraw) {
+      return 'Neither player could secure a win.';
+    }
+    if (isWinnerUser) {
+      return 'Your worker reached level 3.';
+    }
+    return `${winnerProfile?.display_name ?? 'Opponent'} reached level 3.`;
+  })();
+
+  return (
+    <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} shadow="md">
+      <CardBody>
+        <Stack spacing={4}>
+          <Heading size="md" color={accentHeading}>
+            {title}
+          </Heading>
+          <Text color={mutedText}>{description}</Text>
+          <HStack spacing={2} flexWrap="wrap">
+            {match.rated && <Badge colorScheme="purple">Rated match</Badge>}
+            {match.clock_initial_seconds > 0 && (
+              <Badge colorScheme="blue">
+                {Math.round(match.clock_initial_seconds / 60)}+{match.clock_increment_seconds}
+              </Badge>
+            )}
+          </HStack>
+          <HStack spacing={3} flexWrap="wrap">
+            <Button colorScheme="teal" onClick={onRequestRematch} isLoading={rematchLoading} isDisabled={rematchLoading}>
+              Request rematch
+            </Button>
+            <Button variant="outline" onClick={onPrepareAnalyze}>
+              Review in Analyze
+            </Button>
+          </HStack>
+          <Text fontSize="xs" color={mutedText}>
+            Rematch invitations from your opponent will appear above. Share the join code if needed.
+          </Text>
+        </Stack>
+      </CardBody>
+    </Card>
+  );
+}
+
 interface PlayerSummaryProps {
   profile: PlayerProfile | null | undefined;
   displayName: string;
@@ -871,6 +956,19 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   );
   const [joiningRematchId, setJoiningRematchId] = useState<string | null>(null);
   const [cancellingActiveMatch, setCancellingActiveMatch] = useBoolean(false);
+  const [requestingSummaryRematch, setRequestingSummaryRematch] = useBoolean(false);
+
+  useEffect(() => {
+    if (!auth.profile) {
+      return;
+    }
+    const hasOnlineActivity = lobby.myMatches.some(
+      (match) => match.status === 'in_progress' || match.status === 'waiting_for_opponent',
+    );
+    if (hasOnlineActivity && lobby.sessionMode !== 'online') {
+      lobby.enableOnline();
+    }
+  }, [auth.profile, lobby.enableOnline, lobby.myMatches, lobby.sessionMode]);
 
   const handleAcceptRematch = useCallback(
     async (matchId: string) => {
@@ -917,6 +1015,12 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
     }
   }, [lobby, setCancellingActiveMatch, workspaceToast]);
   const sessionMode = lobby.sessionMode ?? 'online';
+  const completedMatch =
+    sessionMode === 'online' &&
+    lobby.activeMatch &&
+    (lobby.activeMatch.status === 'completed' || lobby.activeMatch.status === 'abandoned')
+      ? lobby.activeMatch
+      : null;
   const { cardBg, cardBorder } = useSurfaceTokens();
   const { activeMatchId, clearUndoRequest, undoRequests } = lobby;
   const activeUndoState = activeMatchId ? undoRequests[activeMatchId] : undefined;
@@ -965,6 +1069,48 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
     lobby.activeMatch &&
     !lobby.activeMatch.opponent_id
   );
+
+  const handleRequestSummaryRematch = useCallback(async () => {
+    setRequestingSummaryRematch.on();
+    try {
+      const rematch = await lobby.offerRematch();
+      if (rematch) {
+        workspaceToast({
+          title: 'Rematch created',
+          description: rematch.private_join_code
+            ? `Share code ${rematch.private_join_code} if needed.`
+            : 'Waiting for your opponent to join…',
+          status: 'success',
+          duration: 4000,
+        });
+      }
+    } catch (error) {
+      workspaceToast({
+        title: 'Unable to create rematch',
+        status: 'error',
+        description: error instanceof Error ? error.message : 'Please try again.',
+      });
+    } finally {
+      setRequestingSummaryRematch.off();
+    }
+  }, [lobby, setRequestingSummaryRematch, workspaceToast]);
+
+  const handlePrepareAnalyze = useCallback(() => {
+    if (!lobby.activeMatch) {
+      return;
+    }
+    try {
+      localStorage.setItem('santorini:lastAnalyzedMatch', lobby.activeMatch.id);
+    } catch (error) {
+      console.warn('Unable to store last analyzed match', error);
+    }
+    workspaceToast({
+      title: 'Ready for analysis',
+      description: 'Open the Analyze tab to review this game.',
+      status: 'info',
+      duration: 4000,
+    });
+  }, [lobby.activeMatch, workspaceToast]);
 
   return (
     <Stack spacing={6} py={{ base: 6, md: 10 }}>
@@ -1052,6 +1198,16 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
           </Alert>
         );
       })}
+
+      {sessionMode === 'online' && completedMatch && (
+        <CompletedMatchSummary
+          match={completedMatch}
+          profileId={auth.profile?.id ?? null}
+          onRequestRematch={handleRequestSummaryRematch}
+          rematchLoading={requestingSummaryRematch}
+          onPrepareAnalyze={handlePrepareAnalyze}
+        />
+      )}
 
       {/* Game Board - Local */}
       {sessionMode === 'local' && <LocalMatchPanel onExit={lobby.stopLocalMatch} />}

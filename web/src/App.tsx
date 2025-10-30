@@ -6,6 +6,7 @@ import {
   IconButton,
   Link,
   Spinner,
+  Stack,
   TabPanel,
   TabPanels,
   Tabs,
@@ -13,8 +14,9 @@ import {
   Tooltip,
   useDisclosure,
   useColorModeValue,
+  useToast,
 } from '@chakra-ui/react';
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { SearchIcon, TimeIcon } from '@chakra-ui/icons';
 import { SantoriniProvider, useSantorini } from '@hooks/useSantorini';
 import { useSupabaseAuth } from '@hooks/useSupabaseAuth';
@@ -28,7 +30,7 @@ import GamePlayWorkspace from '@components/play/GamePlayWorkspace';
 import AnalyzeWorkspace from '@components/analyze/AnalyzeWorkspace';
 import ProfileWorkspace from '@components/profile/ProfileWorkspace';
 import LeaderboardWorkspace from '@components/leaderboard/LeaderboardWorkspace';
-import { MatchLobbyProvider } from '@hooks/matchLobbyContext';
+import { MatchLobbyProvider, useMatchLobbyContext } from '@hooks/matchLobbyContext';
 import { AuthLoadingScreen } from '@components/auth/AuthLoadingScreen';
 
 const TAB_STORAGE_KEY = 'santorini:lastTab';
@@ -181,6 +183,111 @@ function PracticeHistoryModal({ isOpen, onClose }: { isOpen: boolean; onClose: (
   );
 }
 
+function MatchLobbySideEffects({
+  profileId,
+  onNavigateToPlay,
+}: {
+  profileId: string | null;
+  onNavigateToPlay: () => void;
+}) {
+  const lobby = useMatchLobbyContext();
+  const toast = useToast();
+  const toastBg = useColorModeValue('white', 'gray.700');
+  const toastColor = useColorModeValue('gray.800', 'whiteAlpha.900');
+  const toastBorder = useColorModeValue('teal.200', 'teal.500');
+  const previousOpponentsRef = useRef(new Map<string, string | null>());
+
+  useEffect(() => {
+    const previous = previousOpponentsRef.current;
+    if (!profileId) {
+      previous.clear();
+      return;
+    }
+
+    if (lobby.sessionMode === 'local') {
+      return;
+    }
+
+    const relevantMatches = lobby.myMatches.filter(
+      (match) =>
+        match.creator_id === profileId &&
+        match.id !== 'local:match' &&
+        (match.status === 'in_progress' || match.status === 'waiting_for_opponent'),
+    );
+
+    const activeIds = new Set<string>(relevantMatches.map((match) => match.id));
+
+    for (const match of relevantMatches) {
+      const prevOpponent = previous.get(match.id) ?? null;
+      const currentOpponent = match.opponent_id ?? null;
+
+      if (!prevOpponent && currentOpponent) {
+        const toastId = `opponent-joined-${match.id}`;
+        if (!toast.isActive(toastId)) {
+          const opponentName = match.opponent?.display_name ?? 'Opponent';
+          toast({
+            id: toastId,
+            position: 'top-right',
+            duration: 9000,
+            isClosable: true,
+            render: () => (
+              <Box
+                bg={toastBg}
+                color={toastColor}
+                px={4}
+                py={3}
+                borderRadius="md"
+                boxShadow="lg"
+                borderWidth="1px"
+                borderColor={toastBorder}
+                maxW="sm"
+              >
+                <Stack spacing={2}>
+                  <Text fontWeight="semibold">Opponent joined!</Text>
+                  <Text fontSize="sm">{opponentName} just joined your game.</Text>
+                  <Button
+                    size="sm"
+                    colorScheme="teal"
+                    alignSelf="flex-start"
+                    onClick={() => {
+                      lobby.setActiveMatch(match.id);
+                      onNavigateToPlay();
+                      toast.close(toastId);
+                    }}
+                  >
+                    Go to game
+                  </Button>
+                </Stack>
+              </Box>
+            ),
+          });
+        }
+      }
+
+      previous.set(match.id, currentOpponent);
+    }
+
+    // Clean up matches that no longer exist in the list
+    for (const id of Array.from(previous.keys())) {
+      if (!activeIds.has(id)) {
+        previous.delete(id);
+      }
+    }
+  }, [
+    lobby.myMatches,
+    lobby.sessionMode,
+    lobby.setActiveMatch,
+    onNavigateToPlay,
+    profileId,
+    toast,
+    toastBg,
+    toastBorder,
+    toastColor,
+  ]);
+
+  return null;
+}
+
 function App() {
   const { isOpen: isHistoryOpen, onOpen: openHistory, onClose: closeHistory } = useDisclosure();
   const tabOrder = useMemo<AppTab[]>(() => NAV_TABS.map((tab) => tab.key), []);
@@ -290,6 +397,10 @@ function App() {
 
   return (
     <MatchLobbyProvider profile={auth.profile}>
+      <MatchLobbySideEffects
+        profileId={auth.profile?.id ?? null}
+        onNavigateToPlay={() => setActiveTab('play')}
+      />
       <Tabs
         index={activeIndex}
         onChange={handleTabChange}

@@ -36,6 +36,21 @@ export interface BoardCell {
 
 const TICK_INTERVAL = 1000;
 
+const resolveActiveRole = (engine: SantoriniEngine): 'creator' | 'opponent' => {
+  const placement = engine.getPlacementContext();
+  if (placement) {
+    return placement.player === 0 ? 'creator' : 'opponent';
+  }
+  return engine.player === 0 ? 'creator' : 'opponent';
+};
+
+const isRoleTurn = (engine: SantoriniEngine, role: 'creator' | 'opponent' | null): boolean => {
+  if (!role) {
+    return false;
+  }
+  return resolveActiveRole(engine) === role;
+};
+
 function deriveInitialClocks(match: LobbyMatch | null): ClockState {
   if (!match || match.clock_initial_seconds <= 0) {
     return { creatorMs: 0, opponentMs: 0 };
@@ -192,7 +207,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     try {
       const newEngine = SantoriniEngine.fromSnapshot(match.initial_state);
       moveSelectorRef.current.reset();
-      const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+      const myTurn = isRoleTurn(newEngine, role);
       
       // Atomically update all state
       updateEngineState(newEngine, myTurn);
@@ -312,7 +327,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           moveSelectorRef.current.reset();
           
           // Atomically update all state
-          const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+          const myTurn = isRoleTurn(newEngine, role);
           updateEngineState(newEngine, myTurn);
           
           lastSyncedStateRef.current = { 
@@ -383,7 +398,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
       moveSelectorRef.current.reset();
       
       // Atomically update all state
-      const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+      const myTurn = isRoleTurn(newEngine, role);
       updateEngineState(newEngine, myTurn);
       
       // Update clock states from all moves (only process last clock update for speed)
@@ -416,11 +431,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
   // Use engineVersion as dependency to recompute when engine changes
   const currentTurn = useMemo(() => {
     if (!match) return null;
-    const placement = engineRef.current.getPlacementContext();
-    if (placement) {
-      return placement.player === 0 ? 'creator' : 'opponent';
-    }
-    return engineRef.current.player === 0 ? 'creator' : 'opponent';
+    return resolveActiveRole(engineRef.current);
   }, [engineVersion, match]);
   
   const isMyTurn = useMemo(() => {
@@ -640,7 +651,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
           moveSelectorRef.current.reset();
           
           // Atomically update state
-          const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+          const myTurn = isRoleTurn(newEngine, role);
           updateEngineState(newEngine, myTurn);
           
           // Calculate the correct move index
@@ -710,7 +721,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
             moveSelector.reset();
             
             // Atomically update state
-            const myTurn = role !== null && (newEngine.player === 0 ? 'creator' : 'opponent') === role;
+            const myTurn = isRoleTurn(newEngine, role);
             updateEngineState(newEngine, myTurn);
             
             // Calculate move index and submit (server will compute state)
@@ -768,6 +779,24 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
 
     gameCompletedRef.current = match.id;
 
+     const winnerRole = p0Score === 1 ? 'creator' : p1Score === 1 ? 'opponent' : null;
+     if (winnerRole) {
+       const isUserWinner = winnerRole === role;
+       toast({
+         title: isUserWinner ? 'Victory!' : 'Defeat',
+         description: isUserWinner ? 'You reached level 3.' : 'Your opponent reached level 3.',
+         status: isUserWinner ? 'success' : 'error',
+         duration: 4000,
+       });
+     } else {
+       toast({
+         title: 'Drawn game',
+         description: 'Neither player could secure a win.',
+         status: 'info',
+         duration: 4000,
+       });
+     }
+
     const winnerId = p0Score === 1 ? match.creator_id : p1Score === 1 ? match.opponent_id : null;
     
     console.log('useOnlineSantorini: Game end detected locally, winner:', winnerId);
@@ -775,7 +804,7 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     // DON'T call onGameComplete here! The server already updates match status
     // when it processes the winning move in submit-move edge function.
     // Calling it from client causes 409 Conflict race condition.
-  }, [engineVersion, match, onGameComplete]);
+  }, [engineVersion, match, onGameComplete, role, toast]);
 
   // Clock timeout detection
   useEffect(() => {

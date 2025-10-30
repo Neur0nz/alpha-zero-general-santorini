@@ -1,4 +1,4 @@
-import { ElementType, ReactNode, useState } from 'react';
+import { ElementType, ReactNode, useEffect, useState } from 'react';
 import {
   Alert,
   AlertDescription,
@@ -725,6 +725,15 @@ function LobbyWorkspace({
   const toast = useToast();
   const [creatingQuickMatch, setCreatingQuickMatch] = useBoolean(false);
   const [inlineNotice, setInlineNotice] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
+
+  useEffect(() => {
+    if (!auth.profile) {
+      return;
+    }
+    if (lobby.sessionMode !== 'online') {
+      lobby.enableOnline();
+    }
+  }, [auth.profile, lobby.enableOnline, lobby.sessionMode]);
 
   const handleCreate = async (payload: CreateMatchPayload) => {
     try {
