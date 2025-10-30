@@ -725,27 +725,32 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
 
           // Turn ownership guard: for index N, only accept optimistic apply if
           // player_id matches the expected player based on move 0 parity.
-          if (prev.moves.length > 0) {
-            const first = prev.moves[0];
-            const firstPlayerId = first?.player_id ?? null;
-            const secondPlayerId = firstPlayerId && prev.activeMatch
-              ? (firstPlayerId === prev.activeMatch.creator_id
-                  ? prev.activeMatch.opponent_id
-                  : prev.activeMatch.creator_id)
-              : null;
-            if (firstPlayerId && secondPlayerId) {
-              const expectedPlayerId = (broadcastMove.move_index % 2 === 0)
-                ? firstPlayerId
-                : secondPlayerId;
-              if (broadcastMove.player_id !== expectedPlayerId) {
-                console.warn('⚡ BROADCAST: Player/turn mismatch for optimistic apply, deferring to DB', {
-                  moveIndex: broadcastMove.move_index,
-                  expectedPlayerId,
-                  gotPlayerId: broadcastMove.player_id,
-                });
-                processingMovesRef.current.delete(broadcastMove.move_index);
-                return prev;
-              }
+          if (prev.activeMatch) {
+            const { creator_id, opponent_id } = prev.activeMatch;
+            const placementOrder: Array<string | null> = [
+              creator_id ?? null,
+              creator_id ?? null,
+              opponent_id ?? null,
+              opponent_id ?? null,
+            ];
+
+            let expectedPlayerId: string | null = null;
+
+            if (broadcastMove.move_index < placementOrder.length) {
+              expectedPlayerId = placementOrder[broadcastMove.move_index] ?? null;
+            } else if (creator_id && opponent_id) {
+              const postPlacementIndex = broadcastMove.move_index - placementOrder.length;
+              expectedPlayerId = postPlacementIndex % 2 === 0 ? creator_id : opponent_id;
+            }
+
+            if (expectedPlayerId && broadcastMove.player_id !== expectedPlayerId) {
+              console.warn('⚡ BROADCAST: Player/turn mismatch for optimistic apply, deferring to DB', {
+                moveIndex: broadcastMove.move_index,
+                expectedPlayerId,
+                gotPlayerId: broadcastMove.player_id,
+              });
+              processingMovesRef.current.delete(broadcastMove.move_index);
+              return prev;
             }
           }
             
