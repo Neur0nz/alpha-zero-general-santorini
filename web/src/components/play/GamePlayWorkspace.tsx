@@ -4,6 +4,8 @@ import {
   AlertDescription,
   AlertIcon,
   AlertTitle,
+  Avatar,
+  AvatarBadge,
   Badge,
   Box,
   Button,
@@ -24,8 +26,11 @@ import {
   Tooltip,
   useBoolean,
   useColorModeValue,
+  useClipboard,
   useToast,
   VStack,
+  Wrap,
+  WrapItem,
 } from '@chakra-ui/react';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import type { LobbyMatch, UndoRequestState, UseMatchLobbyReturn } from '@hooks/useMatchLobby';
@@ -34,8 +39,28 @@ import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
 import { SantoriniProvider } from '@hooks/useSantorini';
 import { useLocalSantorini } from '@hooks/useLocalSantorini';
 import GameBoard from '@components/GameBoard';
-import type { SantoriniMoveAction, MatchStatus } from '@/types/match';
+import type { SantoriniMoveAction, MatchStatus, PlayerProfile } from '@/types/match';
 import { useSurfaceTokens } from '@/theme/useSurfaceTokens';
+
+const K_FACTOR = 32;
+
+const formatNameWithRating = (profile: PlayerProfile | null | undefined, fallback: string): string => {
+  if (profile?.display_name) {
+    const rating = Number.isFinite(profile.rating) ? ` (${Math.round(profile.rating)})` : '';
+    return `${profile.display_name}${rating}`;
+  }
+  return fallback;
+};
+
+const formatDelta = (value: number): string => (value >= 0 ? `+${value}` : `${value}`);
+
+const computeEloDeltas = (playerRating: number, opponentRating: number) => {
+  const expectedScore = 1 / (1 + 10 ** ((opponentRating - playerRating) / 400));
+  const winDelta = Math.round(K_FACTOR * (1 - expectedScore));
+  const lossDelta = Math.round(K_FACTOR * (0 - expectedScore));
+  const drawDelta = Math.round(K_FACTOR * (0.5 - expectedScore));
+  return { winDelta, lossDelta, drawDelta };
+};
 
 function LocalMatchPanel({ onExit }: { onExit: () => void }) {
   const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
@@ -238,8 +263,10 @@ function ActiveMatchContent({
     onSubmitMove: onSubmitMove,
     onGameComplete: handleGameComplete,
   });
-  const creatorName = lobbyMatch?.creator?.display_name ?? 'Player 1 (Blue)';
-  const opponentName = lobbyMatch?.opponent?.display_name ?? 'Player 2 (Red)';
+  const creatorBaseName = lobbyMatch?.creator?.display_name ?? 'Player 1 (Blue)';
+  const opponentBaseName = lobbyMatch?.opponent?.display_name ?? 'Player 2 (Red)';
+  const creatorDisplayName = formatNameWithRating(lobbyMatch?.creator, creatorBaseName);
+  const opponentDisplayName = formatNameWithRating(lobbyMatch?.opponent, opponentBaseName);
   const creatorClock = santorini.formatClock(santorini.creatorClockMs);
   const opponentClock = santorini.formatClock(santorini.opponentClockMs);
   const creatorTurnActive = santorini.currentTurn === 'creator';
@@ -248,6 +275,28 @@ function ActiveMatchContent({
   const turnGlowColor = role === 'creator' ? 'blue.400' : role === 'opponent' ? 'red.400' : undefined;
   const [requestingUndo, setRequestingUndo] = useBoolean(false);
   const [respondingUndo, setRespondingUndo] = useBoolean(false);
+  const myProfile = role === 'creator' ? lobbyMatch?.creator : role === 'opponent' ? lobbyMatch?.opponent : null;
+  const opponentProfile = role === 'creator' ? lobbyMatch?.opponent : role === 'opponent' ? lobbyMatch?.creator : null;
+  const playerRating = myProfile?.rating;
+  const opponentRating = opponentProfile?.rating;
+  const ratingProjection = useMemo(() => {
+    if (!lobbyMatch?.rated || !role || typedMoves.length > 0) {
+      return null;
+    }
+    if (!Number.isFinite(playerRating) || !Number.isFinite(opponentRating)) {
+      return null;
+    }
+    const { winDelta, lossDelta, drawDelta } = computeEloDeltas(playerRating as number, opponentRating as number);
+    return {
+      winDelta,
+      lossDelta,
+      drawDelta,
+      playerRating: Math.round(playerRating as number),
+      opponentRating: Math.round(opponentRating as number),
+    };
+  }, [lobbyMatch?.rated, role, typedMoves.length, playerRating, opponentRating]);
+  const creatorSideLabel = role === 'creator' ? 'You · Blue pieces' : 'Blue pieces';
+  const opponentSideLabel = role === 'opponent' ? 'You · Red pieces' : 'Red pieces';
 
   const undoRequestedByMe = undoState && undoState.requestedBy === role;
   const undoPending = undoState?.status === 'pending';
@@ -437,10 +486,39 @@ function ActiveMatchContent({
             align={{ base: 'flex-start', sm: 'center' }}
             gap={3}
           >
-            <Stack spacing={1}>
+            <Stack spacing={3}>
               <Heading size="md" color={accentHeading}>
-                {creatorName} vs {opponentName}
+                {creatorDisplayName} vs {opponentDisplayName}
               </Heading>
+              <Wrap spacing={4} align="center">
+                <WrapItem>
+                  <PlayerSummary
+                    profile={lobbyMatch?.creator}
+                    displayName={creatorDisplayName}
+                    sideLabel={creatorSideLabel}
+                    isCurrentUser={role === 'creator'}
+                    isActiveTurn={creatorTurnActive}
+                    badgeColor="blue.400"
+                  />
+                </WrapItem>
+                <WrapItem>
+                  <Center h="100%">
+                    <Text fontWeight="semibold" color={mutedText}>
+                      vs
+                    </Text>
+                  </Center>
+                </WrapItem>
+                <WrapItem>
+                  <PlayerSummary
+                    profile={lobbyMatch?.opponent}
+                    displayName={opponentDisplayName}
+                    sideLabel={opponentSideLabel}
+                    isCurrentUser={role === 'opponent'}
+                    isActiveTurn={opponentTurnActive}
+                    badgeColor="red.400"
+                  />
+                </WrapItem>
+              </Wrap>
               <HStack spacing={3} flexWrap="wrap">
                 {showJoinCode && (
                   <Badge colorScheme="orange" fontSize="0.8rem">
@@ -488,8 +566,24 @@ function ActiveMatchContent({
               </Tooltip>
             </ButtonGroup>
           </Flex>
-        </CardBody>
-      </Card>
+      </CardBody>
+    </Card>
+
+      {ratingProjection && (
+        <Alert status="info" variant="left-accent" borderRadius="md">
+          <AlertIcon />
+          <Stack spacing={1} flex="1">
+            <AlertTitle>Rated stakes</AlertTitle>
+            <AlertDescription fontSize="sm">
+              Win: {formatDelta(ratingProjection.winDelta)} ELO · Draw: {formatDelta(ratingProjection.drawDelta)} ELO · Loss:{' '}
+              {formatDelta(ratingProjection.lossDelta)} ELO
+            </AlertDescription>
+            <AlertDescription fontSize="xs" color={mutedText}>
+              You: {ratingProjection.playerRating} · Opponent: {ratingProjection.opponentRating}
+            </AlertDescription>
+          </Stack>
+        </Alert>
+      )}
 
       {/* Game Board - Centered and LARGE */}
       <Flex direction="column" align="center" w="100%">
@@ -557,7 +651,7 @@ function ActiveMatchContent({
                 {creatorClock}
               </Heading>
               <Text fontSize="md" fontWeight="medium" color={helperText}>
-                {creatorName}
+                {creatorDisplayName}
               </Text>
             </VStack>
           </Box>
@@ -583,13 +677,47 @@ function ActiveMatchContent({
                 {opponentClock}
               </Heading>
               <Text fontSize="md" fontWeight="medium" color={helperText}>
-                {opponentName}
+                {opponentDisplayName}
               </Text>
             </VStack>
           </Box>
         </Stack>
       </Flex>
     </Stack>
+  );
+}
+
+interface PlayerSummaryProps {
+  profile: PlayerProfile | null | undefined;
+  displayName: string;
+  sideLabel: string;
+  isCurrentUser: boolean;
+  isActiveTurn: boolean;
+  badgeColor: string;
+}
+
+function PlayerSummary({ profile, displayName, sideLabel, isCurrentUser, isActiveTurn, badgeColor }: PlayerSummaryProps) {
+  const { mutedText } = useSurfaceTokens();
+  return (
+    <HStack spacing={3} align="center">
+      <Avatar size="md" name={displayName} src={profile?.avatar_url ?? undefined}>
+        {isActiveTurn ? <AvatarBadge boxSize="1.1em" bg={badgeColor} borderColor="white" /> : null}
+      </Avatar>
+      <Box>
+        <Text fontWeight="semibold">
+          {displayName}
+          {isCurrentUser ? (
+            <Text as="span" color="teal.500" fontWeight="semibold">
+              {' '}
+              (You)
+            </Text>
+          ) : null}
+        </Text>
+        <Text fontSize="xs" color={mutedText}>
+          {sideLabel}
+        </Text>
+      </Box>
+    </HStack>
   );
 }
 
@@ -624,6 +752,8 @@ function WaitingForOpponentState({
 }) {
   const { cardBg, cardBorder, mutedText, accentHeading } = useSurfaceTokens();
   const gradientBg = useColorModeValue('linear(to-r, teal.50, blue.50)', 'linear(to-r, teal.900, blue.900)');
+  const { hasCopied, onCopy } = useClipboard(joinCode ?? '');
+  const hasJoinCode = Boolean(joinCode);
   
   return (
     <Stack spacing={6}>
@@ -646,7 +776,7 @@ function WaitingForOpponentState({
                 </Text>
               </Stack>
               
-              {joinCode && (
+              {hasJoinCode && (
                 <Card bgGradient={gradientBg} borderWidth="1px" borderColor={cardBorder} w="100%" maxW="md">
                   <CardBody>
                     <Stack spacing={3} align="center">
@@ -664,41 +794,58 @@ function WaitingForOpponentState({
                       >
                         {joinCode}
                       </Heading>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          navigator.clipboard.writeText(joinCode);
-                        }}
-                      >
-                        Copy code
-                      </Button>
                     </Stack>
                   </CardBody>
                 </Card>
               )}
               
-              <HStack spacing={4} flexWrap="wrap" justify="center" color={mutedText} fontSize="sm">
-                <Text>✓ Game settings configured</Text>
-                <Text>✓ Board initialized</Text>
-                <Text>✓ Ready to start</Text>
-              </HStack>
+              <Wrap spacing={3} justify="center" color={mutedText} fontSize="sm">
+                <WrapItem>
+                  <Text>✓ Game settings configured</Text>
+                </WrapItem>
+                <WrapItem>
+                  <Text>✓ Board initialized</Text>
+                </WrapItem>
+                <WrapItem>
+                  <Text>✓ Ready to start</Text>
+                </WrapItem>
+              </Wrap>
 
+              {(hasJoinCode || (canCancel && onCancel)) && (
+                <ButtonGroup
+                  size="sm"
+                  variant="outline"
+                  spacing={3}
+                  alignSelf="center"
+                  display="flex"
+                >
+                  {hasJoinCode && (
+                    <Button
+                      variant="outline"
+                      colorScheme={hasCopied ? 'teal' : 'gray'}
+                      onClick={onCopy}
+                    >
+                      {hasCopied ? 'Copied!' : 'Copy code'}
+                    </Button>
+                  )}
+                  {canCancel && onCancel && (
+                    <Tooltip label="Removes this game so you can start a new one" hasArrow>
+                      <Button
+                        colorScheme="red"
+                        variant="ghost"
+                        onClick={onCancel}
+                        isLoading={isCancelling}
+                      >
+                        Cancel match
+                      </Button>
+                    </Tooltip>
+                  )}
+                </ButtonGroup>
+              )}
               {canCancel && onCancel && (
-                <Stack spacing={2} align="center">
-                  <Button
-                    size="sm"
-                    colorScheme="red"
-                    variant="outline"
-                    onClick={onCancel}
-                    isLoading={isCancelling}
-                  >
-                    Cancel match
-                  </Button>
-                  <Text fontSize="xs" color={mutedText}>
-                    Removes this game so you can start a new one.
-                  </Text>
-                </Stack>
+                <Text fontSize="xs" color={mutedText}>
+                  Cancelling removes this lobby so you can post a fresh game.
+                </Text>
               )}
               
               <Text fontSize="xs" color={mutedText} fontStyle="italic">
@@ -759,7 +906,6 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
     setCancellingActiveMatch.on();
     try {
       await lobby.leaveMatch(match.id);
-      workspaceToast({ title: 'Match cancelled', status: 'info', duration: 3000 });
     } catch (error) {
       workspaceToast({
         title: 'Unable to cancel match',

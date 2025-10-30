@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { ElementType, ReactNode, useState } from 'react';
 import {
   Alert,
   AlertDescription,
@@ -102,18 +102,41 @@ function LobbyHero({
   quickMatchLoading,
   onOpenCreate,
   onOpenJoin,
+  onNavigateToPractice,
+  onNavigateToAnalyze,
+  onNavigateToLeaderboard,
   hasActiveGame,
 }: {
   onQuickMatch: () => Promise<void>;
   quickMatchLoading: boolean;
   onOpenCreate: () => void;
   onOpenJoin: () => void;
+  onNavigateToPractice?: () => void;
+  onNavigateToAnalyze?: () => void;
+  onNavigateToLeaderboard?: () => void;
   hasActiveGame: boolean;
 }) {
   const gradientBg = useColorModeValue('linear(to-r, teal.100, teal.300)', 'linear(to-r, teal.700, teal.500)');
   const frameBorder = useColorModeValue('teal.200', 'teal.500');
   const bodyColor = useColorModeValue('gray.900', 'whiteAlpha.900');
   const helperText = useColorModeValue('teal.900', 'teal.50');
+  const secondaryActions = [
+    onNavigateToPractice && {
+      label: 'Practice vs AI',
+      icon: RepeatIcon,
+      onClick: onNavigateToPractice,
+    },
+    onNavigateToAnalyze && {
+      label: 'Analyze games',
+      icon: SearchIcon,
+      onClick: onNavigateToAnalyze,
+    },
+    onNavigateToLeaderboard && {
+      label: 'View rankings',
+      icon: StarIcon,
+      onClick: onNavigateToLeaderboard,
+    },
+  ].filter(Boolean) as Array<{ label: string; icon: ElementType; onClick: () => void }>;
 
   return (
     <Card bgGradient={gradientBg} borderWidth="1px" borderColor={frameBorder} color={bodyColor} shadow="lg">
@@ -129,68 +152,168 @@ function LobbyHero({
             </Text>
           </Stack>
           <Stack
-            direction={{ base: 'column', sm: 'row' }}
-            spacing={{ base: 3, sm: 4 }}
-            align={{ base: 'stretch', sm: 'center' }}
-            w={{ base: '100%', sm: 'auto' }}
+            spacing={4}
           >
-            <Tooltip 
-              label={hasActiveGame ? "Finish your current game first" : ""} 
-              isDisabled={!hasActiveGame}
-              hasArrow
-            >
-              <Button
-                size="lg"
-                colorScheme="teal"
-                rightIcon={<ArrowForwardIcon />}
-                onClick={onQuickMatch}
-                isLoading={quickMatchLoading}
-                isDisabled={hasActiveGame || quickMatchLoading}
-                w={{ base: '100%', sm: 'auto' }}
-                whiteSpace="normal"
-                height="auto"
-                textAlign="center"
-                px={{ base: 4, sm: 6 }}
-              >
-                Start quick match
-              </Button>
-            </Tooltip>
-            <Tooltip 
-              label={hasActiveGame ? "Finish your current game first" : ""} 
-              isDisabled={!hasActiveGame}
-              hasArrow
-            >
-              <Button
-                size="lg"
-                variant="outline"
-                leftIcon={<AddIcon />}
-                onClick={onOpenCreate}
-                isDisabled={hasActiveGame}
-                w={{ base: '100%', sm: 'auto' }}
-                whiteSpace="normal"
-                height="auto"
-                textAlign="center"
-                px={{ base: 4, sm: 6 }}
-              >
-                Custom match
-              </Button>
-            </Tooltip>
-            <Button
-              size="lg"
-              variant="ghost"
-              onClick={onOpenJoin}
-              w={{ base: '100%', sm: 'auto' }}
-              whiteSpace="normal"
-              height="auto"
-              textAlign="center"
-              px={{ base: 4, sm: 6 }}
-            >
-              Join by code
-            </Button>
+            <Wrap spacing={{ base: 2, sm: 3 }} align="center">
+              <WrapItem>
+                <Tooltip 
+                  label={hasActiveGame ? "Finish your current game first" : undefined} 
+                  isDisabled={!hasActiveGame}
+                  hasArrow
+                  placement="top"
+                >
+                  <Button
+                    size="lg"
+                    colorScheme="teal"
+                    rightIcon={<ArrowForwardIcon />}
+                    onClick={onQuickMatch}
+                    isLoading={quickMatchLoading}
+                    isDisabled={hasActiveGame || quickMatchLoading}
+                    w={{ base: '100%', sm: 'auto' }}
+                    whiteSpace="normal"
+                    height="auto"
+                    textAlign="center"
+                    px={{ base: 4, sm: 6 }}
+                  >
+                    Start quick match
+                  </Button>
+                </Tooltip>
+              </WrapItem>
+              <WrapItem>
+                <Tooltip 
+                  label={hasActiveGame ? "Finish your current game first" : undefined} 
+                  isDisabled={!hasActiveGame}
+                  hasArrow
+                  placement="top"
+                >
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    leftIcon={<AddIcon />}
+                    onClick={onOpenCreate}
+                    isDisabled={hasActiveGame}
+                    w={{ base: '100%', sm: 'auto' }}
+                    whiteSpace="normal"
+                    height="auto"
+                    textAlign="center"
+                    px={{ base: 4, sm: 6 }}
+                  >
+                    Custom match
+                  </Button>
+                </Tooltip>
+              </WrapItem>
+              <WrapItem>
+                <Button
+                  size="lg"
+                  variant="ghost"
+                  onClick={onOpenJoin}
+                  w={{ base: '100%', sm: 'auto' }}
+                  whiteSpace="normal"
+                  height="auto"
+                  textAlign="center"
+                  px={{ base: 4, sm: 6 }}
+                >
+                  Join by code
+                </Button>
+              </WrapItem>
+            </Wrap>
           </Stack>
+          {secondaryActions.length > 0 && (
+            <Wrap spacing={2} shouldWrapChildren>
+              {secondaryActions.map((action) => (
+                <Tag
+                  key={action.label}
+                  size="lg"
+                  variant="subtle"
+                  colorScheme="whiteAlpha"
+                  px={3}
+                  py={2}
+                  borderRadius="full"
+                  as="button"
+                  type="button"
+                  onClick={action.onClick}
+                  display="inline-flex"
+                  alignItems="center"
+                  gap={2}
+                  cursor="pointer"
+                  _hover={{ transform: 'translateY(-1px)', boxShadow: 'md' }}
+                  _active={{ transform: 'translateY(0)' }}
+                >
+                  <Icon as={action.icon} boxSize={4} />
+                  <Text fontSize="sm" fontWeight="semibold">
+                    {action.label}
+                  </Text>
+                </Tag>
+              ))}
+            </Wrap>
+          )}
         </Stack>
       </CardBody>
     </Card>
+  );
+}
+
+interface MatchBadgeConfig {
+  label: ReactNode;
+  colorScheme?: string;
+}
+
+function MatchListCard({
+  title,
+  badges = [],
+  description,
+  meta,
+  actions,
+}: {
+  title: ReactNode;
+  badges?: MatchBadgeConfig[];
+  description?: ReactNode;
+  meta?: ReactNode;
+  actions?: ReactNode;
+}) {
+  const { cardBorder, mutedText } = useSurfaceTokens();
+
+  return (
+    <Box
+      borderWidth="1px"
+      borderColor={cardBorder}
+      borderRadius="md"
+      px={4}
+      py={3}
+    >
+      <Flex justify="space-between" align={{ base: 'flex-start', md: 'center' }} gap={4} flexDir={{ base: 'column', md: 'row' }}>
+        <Stack spacing={1} flex="1">
+          <HStack spacing={2} flexWrap="wrap" align="center">
+            <Heading size="sm">{title}</Heading>
+            {badges.map((badge, index) => (
+              <Badge key={`${badge.label}-${index}`} colorScheme={badge.colorScheme ?? 'gray'}>
+                {badge.label}
+              </Badge>
+            ))}
+          </HStack>
+          {description && (
+            <Box fontSize="sm" color={mutedText}>
+              {description}
+            </Box>
+          )}
+          {meta && (
+            <Box fontSize="xs" color={mutedText}>
+              {meta}
+            </Box>
+          )}
+        </Stack>
+        {actions && (
+          <Box
+            display="flex"
+            alignItems="center"
+            justifyContent={{ base: 'flex-start', md: 'flex-end' }}
+            w={{ base: '100%', md: 'auto' }}
+          >
+            {actions}
+          </Box>
+        )}
+      </Flex>
+    </Box>
   );
 }
 
@@ -323,20 +446,20 @@ function PublicLobbies({
   onAfterJoin?: () => void;
 }) {
   const [joiningId, setJoiningId] = useState<string | null>(null);
-  const toast = useToast();
+  const [feedback, setFeedback] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
   const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
 
   const handleJoin = async (id: string) => {
     setJoiningId(id);
+    setFeedback(null);
     try {
       await onJoin(id);
-      toast({ title: 'Joined match', status: 'success' });
+      setFeedback({ status: 'success', message: 'Joined match. Loading the game board…' });
       onAfterJoin?.();
     } catch (error) {
-      toast({
-        title: 'Failed to join match',
+      setFeedback({
         status: 'error',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        message: error instanceof Error ? error.message : 'Unable to join this match right now.',
       });
     } finally {
       setJoiningId(null);
@@ -356,46 +479,54 @@ function PublicLobbies({
         ) : matches.length === 0 ? (
           <Text color={mutedText}>No public games are waiting right now.</Text>
         ) : (
-          <List spacing={3}>
-            {matches.map((match) => (
-              <ListItem
-                key={match.id}
-                borderWidth="1px"
-                borderColor={cardBorder}
-                borderRadius="md"
-                px={4}
-                py={3}
-                display="flex"
-                alignItems="center"
-                justifyContent="space-between"
-                gap={4}
-              >
-                <Box>
-                  <HStack spacing={3} align="center">
-                    <Heading size="sm">{match.creator?.display_name ?? 'Unknown player'}</Heading>
-                    <Badge colorScheme={match.rated ? 'purple' : 'gray'}>{match.rated ? 'Rated' : 'Casual'}</Badge>
-                    {match.clock_initial_seconds > 0 && (
-                      <Badge colorScheme="blue">
-                        {Math.round(match.clock_initial_seconds / 60)}+{match.clock_increment_seconds}
-                      </Badge>
-                    )}
-                  </HStack>
-                  <Text fontSize="sm" color={mutedText}>
-                    {match.opponent ? `Facing ${match.opponent.display_name}` : 'Waiting for an opponent'} ·{' '}
-                    {match.visibility === 'public' ? 'Public lobby' : 'Private code'} · Created {formatDate(match.created_at)}
-                  </Text>
-                </Box>
-                <Button
-                  size="sm"
-                  colorScheme="teal"
-                  onClick={() => handleJoin(match.id)}
-                  isLoading={joiningId === match.id}
-                >
-                  Join
-                </Button>
-              </ListItem>
-            ))}
-          </List>
+          <Stack spacing={3}>
+            {feedback && (
+              <Alert status={feedback.status} variant="left-accent" borderRadius="md" alignItems="center">
+                <AlertIcon />
+                <AlertDescription flex="1">{feedback.message}</AlertDescription>
+                <CloseButton position="relative" onClick={() => setFeedback(null)} />
+              </Alert>
+            )}
+            {matches.map((match) => {
+              const badges: MatchBadgeConfig[] = [
+                { label: match.rated ? 'Rated' : 'Casual', colorScheme: match.rated ? 'purple' : 'gray' },
+              ];
+              if (match.clock_initial_seconds > 0) {
+                badges.push({
+                  label: `${Math.round(match.clock_initial_seconds / 60)}+${match.clock_increment_seconds}`,
+                  colorScheme: 'blue',
+                });
+              }
+
+              const description = match.opponent
+                ? `Facing ${match.opponent.display_name}`
+                : 'Waiting for an opponent';
+              const meta = `${match.visibility === 'public' ? 'Public lobby' : 'Private code'} • Created ${formatDate(
+                match.created_at,
+              )}`;
+
+              return (
+                <MatchListCard
+                  key={match.id}
+                  title={match.creator?.display_name ?? 'Unknown player'}
+                  badges={badges}
+                  description={description}
+                  meta={meta}
+                  actions={(
+                    <ButtonGroup size="sm" variant="outline">
+                      <Button
+                        colorScheme="teal"
+                        onClick={() => handleJoin(match.id)}
+                        isLoading={joiningId === match.id}
+                      >
+                        Join
+                      </Button>
+                    </ButtonGroup>
+                  )}
+                />
+              );
+            })}
+          </Stack>
         )}
       </CardBody>
     </Card>
@@ -417,9 +548,10 @@ function PendingMatches({
 }) {
   const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
   const [cancellingId, setCancellingId] = useState<string | null>(null);
-  const toast = useToast();
+  const [feedback, setFeedback] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
 
   const handleSelect = (matchId: string) => {
+    setFeedback(null);
     onSelect(matchId);
     onAfterSelect?.();
   };
@@ -432,14 +564,14 @@ function PendingMatches({
 
   const handleCancel = async (matchId: string) => {
     setCancellingId(matchId);
+    setFeedback(null);
     try {
       await onCancel(matchId);
-      toast({ title: 'Match cancelled', status: 'info' });
+      setFeedback({ status: 'success', message: 'Match cancelled. You can create a new game whenever you’re ready.' });
     } catch (error) {
-      toast({
-        title: 'Failed to cancel match',
+      setFeedback({
         status: 'error',
-        description: error instanceof Error ? error.message : 'Unknown error',
+        message: error instanceof Error ? error.message : 'Unable to cancel this match right now.',
       });
     } finally {
       setCancellingId(null);
@@ -453,42 +585,44 @@ function PendingMatches({
       </CardHeader>
       <CardBody>
         <Stack spacing={3}>
+          {feedback && (
+            <Alert status={feedback.status} variant="left-accent" borderRadius="md" alignItems="center">
+              <AlertIcon />
+              <AlertDescription flex="1">{feedback.message}</AlertDescription>
+              <CloseButton position="relative" onClick={() => setFeedback(null)} />
+            </Alert>
+          )}
           {pendingMatches.map((match) => {
             const isCreator = profile ? match.creator_id === profile.id : false;
+            const badges: MatchBadgeConfig[] = [
+              { label: 'Pending', colorScheme: 'yellow' },
+            ];
+            if (match.rated) badges.push({ label: 'Rated', colorScheme: 'purple' });
+            if (match.clock_initial_seconds > 0) {
+              badges.push({
+                label: `${Math.round(match.clock_initial_seconds / 60)}+${match.clock_increment_seconds}`,
+                colorScheme: 'blue',
+              });
+            }
+
+            const descriptionParts: string[] = [];
+            if (match.visibility === 'private' && match.private_join_code) {
+              descriptionParts.push(`Code: ${match.private_join_code}`);
+            }
+            descriptionParts.push(`Created ${formatDate(match.created_at)}`);
+
             return (
-              <Box
+              <MatchListCard
                 key={match.id}
-                borderWidth="1px"
-                borderColor={cardBorder}
-                borderRadius="md"
-                px={4}
-                py={3}
-              >
-                <Flex justify="space-between" align="center" gap={4}>
-                  <Stack spacing={1} flex="1">
-                    <HStack spacing={2}>
-                      <Heading size="sm">
-                        {isCreator ? 'Waiting for opponent' : 'Joining...'}
-                      </Heading>
-                      <Badge colorScheme="yellow">Pending</Badge>
-                      {match.rated && <Badge colorScheme="purple">Rated</Badge>}
-                    </HStack>
-                    <Text fontSize="sm" color={mutedText}>
-                      {match.visibility === 'private' && match.private_join_code && (
-                        <>Code: <strong>{match.private_join_code}</strong> · </>
-                      )}
-                      Created {formatDate(match.created_at)}
-                      {match.clock_initial_seconds > 0 && (
-                        <> · {Math.round(match.clock_initial_seconds / 60)}+{match.clock_increment_seconds}</>
-                      )}
-                    </Text>
-                  </Stack>
-                  <HStack spacing={2}>
-                    <Button size="sm" variant="outline" onClick={() => handleSelect(match.id)}>
+                title={isCreator ? 'Waiting for opponent' : 'Joining...'}
+                badges={badges}
+                description={descriptionParts.join(' • ')}
+                actions={(
+                  <ButtonGroup size="sm" variant="outline" spacing={2}>
+                    <Button variant="outline" onClick={() => handleSelect(match.id)}>
                       View
                     </Button>
                     <Button
-                      size="sm"
                       colorScheme="red"
                       variant="ghost"
                       onClick={() => handleCancel(match.id)}
@@ -496,9 +630,9 @@ function PendingMatches({
                     >
                       Cancel
                     </Button>
-                  </HStack>
-                </Flex>
-              </Box>
+                  </ButtonGroup>
+                )}
+              />
             );
           })}
         </Stack>
@@ -574,9 +708,15 @@ function SignInPrompt({ auth }: { auth: SupabaseAuthState }) {
 function LobbyWorkspace({
   auth,
   onNavigateToPlay,
+  onNavigateToPractice,
+  onNavigateToAnalyze,
+  onNavigateToLeaderboard,
 }: {
   auth: SupabaseAuthState;
   onNavigateToPlay: () => void;
+  onNavigateToPractice: () => void;
+  onNavigateToAnalyze: () => void;
+  onNavigateToLeaderboard: () => void;
 }) {
   const lobby = useMatchLobbyContext();
   const [joiningCode, setJoiningCode] = useState('');
@@ -584,6 +724,7 @@ function LobbyWorkspace({
   const { isOpen: isJoinOpen, onOpen: onJoinOpen, onClose: onJoinClose } = useDisclosure();
   const toast = useToast();
   const [creatingQuickMatch, setCreatingQuickMatch] = useBoolean(false);
+  const [inlineNotice, setInlineNotice] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
 
   const handleCreate = async (payload: CreateMatchPayload) => {
     try {
@@ -645,6 +786,7 @@ function LobbyWorkspace({
 
   const handleQuickMatch = async () => {
     setCreatingQuickMatch.on();
+    setInlineNotice(null);
     try {
       await handleCreate({
         visibility: 'public',
@@ -654,16 +796,14 @@ function LobbyWorkspace({
         clockIncrementSeconds: 0,
         startingPlayer: 'random',
       });
-      toast({
-        title: 'Quick match created',
-        status: 'success',
-        description: 'Casual game posted to the lobby. Waiting for an opponent to join…',
-      });
-    } catch (error) {
-      toast({
-        title: 'Quick match failed',
+      setInlineNotice({ status: 'success', message: 'Casual game posted to the lobby. Waiting for an opponent to join…' });
+    } catch (error: any) {
+      if (error?.code === 'ACTIVE_GAME_EXISTS') {
+        return;
+      }
+      setInlineNotice({
         status: 'error',
-        description: error instanceof Error ? error.message : 'Unable to start a new match right now.',
+        message: error instanceof Error ? error.message : 'Unable to start a new match right now.',
       });
     } finally {
       setCreatingQuickMatch.off();
@@ -692,12 +832,23 @@ function LobbyWorkspace({
           onNavigateToPlay={onNavigateToPlay}
         />
       )}
+
+      {inlineNotice && (
+        <Alert status={inlineNotice.status} variant="left-accent" borderRadius="md" alignItems="center">
+          <AlertIcon />
+          <AlertDescription flex="1">{inlineNotice.message}</AlertDescription>
+          <CloseButton position="relative" onClick={() => setInlineNotice(null)} />
+        </Alert>
+      )}
       
       <LobbyHero
         onQuickMatch={handleQuickMatch}
         quickMatchLoading={creatingQuickMatch}
         onOpenCreate={onCreateOpen}
         onOpenJoin={onJoinOpen}
+        onNavigateToPractice={onNavigateToPractice}
+        onNavigateToAnalyze={onNavigateToAnalyze}
+        onNavigateToLeaderboard={onNavigateToLeaderboard}
         hasActiveGame={lobby.hasActiveGame}
       />
       {/* Your Pending Matches */}

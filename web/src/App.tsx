@@ -294,7 +294,7 @@ function App() {
         index={activeIndex}
         onChange={handleTabChange}
         isLazy
-        variant="unstyled"
+        variant="line"
         h="100%"
         display="flex"
         flexDirection="column"
@@ -314,6 +314,9 @@ function App() {
                   <LobbyWorkspace
                     auth={auth}
                     onNavigateToPlay={() => setActiveTab('play')}
+                    onNavigateToPractice={() => setActiveTab('practice')}
+                    onNavigateToAnalyze={() => setActiveTab('analyze')}
+                    onNavigateToLeaderboard={() => setActiveTab('leaderboard')}
                   />
                 </TabPanel>
                 <TabPanel px={0}>
