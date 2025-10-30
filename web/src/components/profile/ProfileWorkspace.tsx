@@ -262,27 +262,51 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
     if (!isCropOpen) {
       return;
     }
-    const element = cropContainerRef.current;
-    if (!element) {
-      return;
-    }
+
+    let frame = 0;
+    let observer: ResizeObserver | null = null;
+    let didAttachWindowResize = false;
 
     const updateSize = () => {
+      const element = cropContainerRef.current;
+      if (!element) {
+        return;
+      }
       const rect = element.getBoundingClientRect();
-      setCropBoxSize(rect.width);
+      if (rect.width > 0) {
+        setCropBoxSize(rect.width);
+      }
     };
 
-    updateSize();
+    const ensureElement = () => {
+      const element = cropContainerRef.current;
+      if (!element) {
+        frame = window.requestAnimationFrame(ensureElement);
+        return;
+      }
+      updateSize();
 
-    if (typeof window !== 'undefined' && 'ResizeObserver' in window) {
-      const observer = new ResizeObserver(() => updateSize());
-      observer.observe(element);
-      return () => observer.disconnect();
-    }
+      if ('ResizeObserver' in window) {
+        observer = new ResizeObserver(() => updateSize());
+        observer.observe(element);
+      } else {
+        window.addEventListener('resize', updateSize);
+        didAttachWindowResize = true;
+      }
+    };
 
-    window.addEventListener('resize', updateSize);
+    frame = window.requestAnimationFrame(ensureElement);
+
     return () => {
-      window.removeEventListener('resize', updateSize);
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      if (observer) {
+        observer.disconnect();
+      }
+      if (didAttachWindowResize) {
+        window.removeEventListener('resize', updateSize);
+      }
     };
   }, [isCropOpen]);
 
@@ -419,19 +443,19 @@ function ProfileWorkspace({ auth }: ProfileWorkspaceProps) {
     }
 
     const previewUrl = URL.createObjectURL(file);
-    const imageElement = new window.Image();
-    imageElement.onload = () => {
+    const imageElement = document.createElement('img');
+    imageElement.addEventListener('load', () => {
       setPendingFile(file);
       setCropImageUrl(previewUrl);
       setImageSize({ width: imageElement.naturalWidth, height: imageElement.naturalHeight });
       setOffset({ x: 0, y: 0 });
       setZoom(1);
       openCrop();
-    };
-    imageElement.onerror = () => {
+    });
+    imageElement.addEventListener('error', () => {
       URL.revokeObjectURL(previewUrl);
       toast({ title: 'Image load failed', status: 'error', description: 'Unable to preview that image.' });
-    };
+    });
     imageElement.src = previewUrl;
     event.target.value = '';
   };
