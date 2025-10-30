@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.76.1';
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.76.1';
 import { SantoriniEngine, SantoriniStateSnapshot } from '../_shared/santorini.ts';
 
 interface SantoriniMoveAction {
@@ -46,20 +47,475 @@ function jsonResponse(body: Record<string, unknown>, init: ResponseInit = {}): R
   });
 }
 
-function sanitizeClocks(value: unknown): { creatorMs: number; opponentMs: number } | undefined {
-  if (!value || typeof value !== 'object') {
-    return undefined;
+class HttpError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = 'HttpError';
   }
-  const clocks = value as Record<string, unknown>;
-  const creator = Number(clocks.creatorMs);
-  const opponent = Number(clocks.opponentMs);
-  if (!Number.isFinite(creator) || !Number.isFinite(opponent)) {
-    return undefined;
+}
+
+const TOKEN_CACHE_TTL_MS = 30_000;
+const MATCH_CACHE_TTL_MS = 120_000;
+const MAX_TOKEN_CACHE_ENTRIES = 512;
+const MAX_MATCH_CACHE_ENTRIES = 256;
+const ILLEGAL_WINDOW_MS = 10_000;
+const ILLEGAL_MAX_ATTEMPTS = 6;
+const ILLEGAL_BLOCK_MS = 5_000;
+const MAX_ELAPSED_SAMPLE_MS = 12 * 60 * 60 * 1000; // clamp elapsed calculations to 12h
+
+type ServiceSupabaseClient = SupabaseClient<any, any, any>;
+type PlayerRole = 'creator' | 'opponent';
+
+interface CachedTokenEntry {
+  userId: string;
+  expiresAt: number;
+  lastSeen: number;
+}
+
+interface CachedParticipant {
+  playerId: string;
+  role: PlayerRole;
+  lastSeen: number;
+}
+
+interface MatchCacheEntry {
+  match: any;
+  lastMove: any | null;
+  lastSnapshot: SantoriniStateSnapshot;
+  lastMoveIndex: number;
+  participants: Map<string, CachedParticipant>;
+  fetchedAt: number;
+}
+
+interface SubmissionContext {
+  match: any;
+  lastMove: any | null;
+  snapshot: SantoriniStateSnapshot;
+  lastMoveIndex: number;
+  role: PlayerRole;
+  playerId: string;
+  fromCache: boolean;
+}
+
+interface CachedAuthResult {
+  userId: string;
+  fromCache: boolean;
+}
+
+interface PenaltyEntry {
+  count: number;
+  windowStart: number;
+  blockedUntil: number | null;
+}
+
+const tokenCache = new Map<string, CachedTokenEntry>();
+const matchCache = new Map<string, MatchCacheEntry>();
+const penaltyTracker = new Map<string, PenaltyEntry>();
+
+function pruneTokenCache(): void {
+  if (tokenCache.size <= MAX_TOKEN_CACHE_ENTRIES) {
+    return;
   }
+  const entries = Array.from(tokenCache.entries()).sort((a, b) => a[1].lastSeen - b[1].lastSeen);
+  for (let i = 0; i < entries.length - MAX_TOKEN_CACHE_ENTRIES; i += 1) {
+    tokenCache.delete(entries[i][0]);
+  }
+}
+
+function pruneMatchCache(): void {
+  if (matchCache.size <= MAX_MATCH_CACHE_ENTRIES) {
+    return;
+  }
+  const entries = Array.from(matchCache.entries()).sort((a, b) => a[1].fetchedAt - b[1].fetchedAt);
+  for (let i = 0; i < entries.length - MAX_MATCH_CACHE_ENTRIES; i += 1) {
+    matchCache.delete(entries[i][0]);
+  }
+}
+
+function cloneSnapshot(snapshot: SantoriniStateSnapshot): SantoriniStateSnapshot {
+  try {
+    return structuredClone(snapshot);
+  } catch (_error) {
+    return JSON.parse(JSON.stringify(snapshot)) as SantoriniStateSnapshot;
+  }
+}
+
+function toTimestampMs(value: unknown): number | null {
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function getInitialClockMs(match: any): number {
+  const initialSeconds = Number(match.clock_initial_seconds ?? 0);
+  if (!Number.isFinite(initialSeconds) || initialSeconds <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.round(initialSeconds * 1000));
+}
+
+function getIncrementMs(match: any): number {
+  const incrementSeconds = Number(match.clock_increment_seconds ?? 0);
+  if (!Number.isFinite(incrementSeconds) || incrementSeconds <= 0) {
+    return 0;
+  }
+  return Math.max(0, Math.round(incrementSeconds * 1000));
+}
+
+interface ComputedClockState {
+  clocks?: { creatorMs: number; opponentMs: number };
+  elapsedMs: number;
+}
+
+function computeServerClocks(
+  match: any,
+  lastMove: any | null,
+  actingPlayerIndex: number,
+): ComputedClockState {
+  const initialMs = getInitialClockMs(match);
+  if (initialMs <= 0) {
+    return { clocks: undefined, elapsedMs: 0 };
+  }
+
+  const previousClocks = lastMove?.action?.clocks;
+  let creatorMs = Number(previousClocks?.creatorMs);
+  let opponentMs = Number(previousClocks?.opponentMs);
+  if (!Number.isFinite(creatorMs) || creatorMs < 0) {
+    creatorMs = initialMs;
+  } else {
+    creatorMs = Math.max(0, Math.round(creatorMs));
+  }
+  if (!Number.isFinite(opponentMs) || opponentMs < 0) {
+    opponentMs = initialMs;
+  } else {
+    opponentMs = Math.max(0, Math.round(opponentMs));
+  }
+
+  const now = Date.now();
+  const timestampSources: Array<unknown> = [lastMove?.created_at, match.clock_updated_at, match.updated_at, match.created_at];
+  let referenceTimestamp = now;
+  for (const source of timestampSources) {
+    const parsed = toTimestampMs(source);
+    if (parsed !== null) {
+      referenceTimestamp = parsed;
+      break;
+    }
+  }
+
+  let elapsedMs = Math.max(0, now - referenceTimestamp);
+  if (elapsedMs > MAX_ELAPSED_SAMPLE_MS) {
+    elapsedMs = MAX_ELAPSED_SAMPLE_MS;
+  }
+
+  if (actingPlayerIndex === 0) {
+    creatorMs = Math.max(0, creatorMs - elapsedMs);
+  } else if (actingPlayerIndex === 1) {
+    opponentMs = Math.max(0, opponentMs - elapsedMs);
+  }
+
+  const incrementMs = getIncrementMs(match);
+  if (incrementMs > 0) {
+    if (actingPlayerIndex === 0) {
+      creatorMs += incrementMs;
+    } else if (actingPlayerIndex === 1) {
+      opponentMs += incrementMs;
+    }
+  }
+
+  console.log(
+    '⏳ Server clock update - elapsedMs:',
+    elapsedMs,
+    'creatorMs ->',
+    creatorMs,
+    'opponentMs ->',
+    opponentMs,
+  );
+
   return {
-    creatorMs: Math.max(0, Math.round(creator)),
-    opponentMs: Math.max(0, Math.round(opponent)),
+    clocks: {
+      creatorMs,
+      opponentMs,
+    },
+    elapsedMs,
   };
+}
+
+function extractTokenExpiry(token: string): number | null {
+  const parts = token.split('.');
+  if (parts.length < 2) {
+    return null;
+  }
+  const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+  const padded = payload.padEnd(payload.length + ((4 - (payload.length % 4)) % 4), '=');
+  try {
+    const json = atob(padded);
+    const parsed = JSON.parse(json) as { exp?: number };
+    if (typeof parsed.exp === 'number' && Number.isFinite(parsed.exp)) {
+      return parsed.exp * 1000;
+    }
+  } catch (_error) {
+    // Ignore malformed token payloads
+  }
+  return null;
+}
+
+function computeTokenCacheExpiry(token: string, now: number): number {
+  const fallback = now + TOKEN_CACHE_TTL_MS;
+  const exp = extractTokenExpiry(token);
+  if (!exp || exp <= now) {
+    return fallback;
+  }
+  return Math.max(now + 1000, Math.min(fallback, exp - 1000));
+}
+
+async function getAuthUserId(
+  supabase: ServiceSupabaseClient,
+  token: string,
+): Promise<CachedAuthResult> {
+  const now = Date.now();
+  const cached = tokenCache.get(token);
+  if (cached && cached.expiresAt > now) {
+    cached.lastSeen = now;
+    return { userId: cached.userId, fromCache: true };
+  }
+  if (cached) {
+    tokenCache.delete(token);
+  }
+  const { data, error } = await supabase.auth.getUser(token);
+  if (error || !data?.user) {
+    throw new HttpError(401, 'Unauthorized');
+  }
+  const expiresAt = computeTokenCacheExpiry(token, now);
+  tokenCache.set(token, { userId: data.user.id, expiresAt, lastSeen: now });
+  pruneTokenCache();
+  return { userId: data.user.id, fromCache: false };
+}
+
+function cacheParticipant(
+  entry: MatchCacheEntry,
+  authUserId: string,
+  playerId: string,
+  role: PlayerRole,
+  timestamp: number,
+): void {
+  if (!entry.participants) {
+    entry.participants = new Map();
+  }
+  entry.participants.set(authUserId, { playerId, role, lastSeen: timestamp });
+}
+
+async function loadSubmissionContext(
+  supabase: ServiceSupabaseClient,
+  authUserId: string,
+  matchId: string,
+): Promise<SubmissionContext> {
+  const now = Date.now();
+  const cachedEntry = matchCache.get(matchId);
+  const cachedParticipant = cachedEntry?.participants?.get(authUserId);
+  if (cachedEntry && cachedParticipant && now - cachedEntry.fetchedAt <= MATCH_CACHE_TTL_MS) {
+    cachedEntry.fetchedAt = now;
+    cachedParticipant.lastSeen = now;
+    const context: SubmissionContext = {
+      match: cachedEntry.match,
+      lastMove: cachedEntry.lastMove,
+      snapshot: cloneSnapshot(cachedEntry.lastSnapshot),
+      lastMoveIndex: cachedEntry.lastMoveIndex,
+      role: cachedParticipant.role,
+      playerId: cachedParticipant.playerId,
+      fromCache: true,
+    };
+    console.log(
+      '♻️  Cache hit for match',
+      matchId,
+      '- participant',
+      cachedParticipant.role,
+      'moveIndex',
+      context.lastMoveIndex,
+    );
+    return context;
+  }
+
+  const { data, error } = await (supabase as any)
+    .rpc('get_move_submission_data', {
+      p_auth_user_id: authUserId,
+      p_match_id: matchId,
+    })
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new HttpError(404, 'Unable to load match data');
+  }
+
+  const match = data.match_data as any;
+  const lastMove = (data.last_move_data as any) ?? null;
+
+  if (!match?.initial_state) {
+    throw new HttpError(500, 'Match state is unavailable');
+  }
+
+  const sourceSnapshot = (lastMove?.state_snapshot ?? match.initial_state) as SantoriniStateSnapshot;
+  const storedSnapshot = cloneSnapshot(sourceSnapshot);
+  const lastMoveIndex = typeof lastMove?.move_index === 'number' ? lastMove.move_index : -1;
+
+  const entry: MatchCacheEntry =
+    cachedEntry ??
+    ({
+      match,
+      lastMove,
+      lastSnapshot: storedSnapshot,
+      lastMoveIndex,
+      participants: new Map<string, CachedParticipant>(),
+      fetchedAt: now,
+    } as MatchCacheEntry);
+
+  entry.match = match;
+  entry.lastMove = lastMove;
+  entry.lastSnapshot = storedSnapshot;
+  entry.lastMoveIndex = lastMoveIndex;
+  entry.fetchedAt = now;
+  cacheParticipant(entry, authUserId, data.player_id as string, data.player_role as PlayerRole, now);
+
+  matchCache.set(matchId, entry);
+  pruneMatchCache();
+
+  const context: SubmissionContext = {
+    match,
+    lastMove,
+    snapshot: cloneSnapshot(storedSnapshot),
+    lastMoveIndex,
+    role: data.player_role as PlayerRole,
+    playerId: data.player_id as string,
+    fromCache: false,
+  };
+  console.log('📦  Cache miss for match', matchId, '- hydrated to moveIndex', lastMoveIndex);
+  return context;
+}
+
+function updateMatchCacheAfterMove(
+  matchId: string,
+  authUserId: string,
+  playerId: string,
+  role: PlayerRole,
+  match: any,
+  move: any,
+  snapshot: SantoriniStateSnapshot,
+): void {
+  const now = Date.now();
+  const entry =
+    matchCache.get(matchId) ??
+    ({
+      match,
+      lastMove: move,
+      lastSnapshot: cloneSnapshot(snapshot),
+      lastMoveIndex: typeof move?.move_index === 'number' ? move.move_index : -1,
+      participants: new Map<string, CachedParticipant>(),
+      fetchedAt: now,
+    } as MatchCacheEntry);
+
+  entry.match = match;
+  entry.lastMove = move;
+  entry.lastSnapshot = cloneSnapshot(snapshot);
+  entry.lastMoveIndex = typeof move?.move_index === 'number' ? move.move_index : entry.lastMoveIndex;
+  entry.fetchedAt = now;
+  cacheParticipant(entry, authUserId, playerId, role, now);
+
+  matchCache.set(matchId, entry);
+  pruneMatchCache();
+  console.log('📝  Cache updated after move for match', matchId, '- new moveIndex', entry.lastMoveIndex);
+}
+
+function updateMatchCacheAfterUndo(
+  matchId: string,
+  authUserId: string,
+  playerId: string,
+  role: PlayerRole,
+  match: any,
+  restoredSnapshot: SantoriniStateSnapshot,
+  previousMove: any | null,
+): void {
+  const now = Date.now();
+  const entry =
+    matchCache.get(matchId) ??
+    ({
+      match,
+      lastMove: previousMove,
+      lastSnapshot: cloneSnapshot(restoredSnapshot),
+      lastMoveIndex: typeof previousMove?.move_index === 'number' ? previousMove.move_index : -1,
+      participants: new Map<string, CachedParticipant>(),
+      fetchedAt: now,
+    } as MatchCacheEntry);
+
+  entry.match = match;
+  entry.lastMove = previousMove ?? null;
+  entry.lastSnapshot = cloneSnapshot(restoredSnapshot);
+  entry.lastMoveIndex = typeof previousMove?.move_index === 'number' ? previousMove.move_index : -1;
+  entry.fetchedAt = now;
+  cacheParticipant(entry, authUserId, playerId, role, now);
+
+  matchCache.set(matchId, entry);
+  pruneMatchCache();
+  console.log('↩️  Cache rewound for match', matchId, '- restored moveIndex', entry.lastMoveIndex);
+}
+
+function isUserBlocked(userId: string): boolean {
+  const now = Date.now();
+  const entry = penaltyTracker.get(userId);
+  if (!entry) {
+    return false;
+  }
+  if (entry.blockedUntil && entry.blockedUntil > now) {
+    console.warn('🚫  Blocking request for user', userId, '- blocked until', new Date(entry.blockedUntil).toISOString());
+    return true;
+  }
+  if (entry.blockedUntil && entry.blockedUntil <= now) {
+    penaltyTracker.delete(userId);
+    return false;
+  }
+  if (now - entry.windowStart > ILLEGAL_WINDOW_MS) {
+    penaltyTracker.delete(userId);
+  }
+  return false;
+}
+
+function recordIllegalMoveAttempt(userId: string): boolean {
+  const now = Date.now();
+  const entry = penaltyTracker.get(userId) ?? {
+    count: 0,
+    windowStart: now,
+    blockedUntil: null,
+  };
+  if (entry.blockedUntil && entry.blockedUntil > now) {
+    penaltyTracker.set(userId, entry);
+    return true;
+  }
+  if (now - entry.windowStart > ILLEGAL_WINDOW_MS) {
+    entry.count = 0;
+    entry.windowStart = now;
+  }
+  entry.count += 1;
+  if (entry.count >= ILLEGAL_MAX_ATTEMPTS) {
+    entry.blockedUntil = now + ILLEGAL_BLOCK_MS;
+    entry.count = 0;
+    penaltyTracker.set(userId, entry);
+    console.warn('🚫  User', userId, 'temporarily blocked for repeated illegal moves');
+    return true;
+  }
+  entry.blockedUntil = null;
+  penaltyTracker.set(userId, entry);
+  console.warn('⚠️  Illegal move attempt recorded for user', userId, '- count', entry.count);
+  return false;
+}
+
+function clearIllegalMovePenalties(userId: string): void {
+  penaltyTracker.delete(userId);
+  console.log('✅  Cleared penalty counter for user', userId);
 }
 
 serve(async (req) => {
@@ -106,35 +562,52 @@ serve(async (req) => {
   });
   console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Supabase client created`);
 
-  const { data: authData, error: authError } = await supabase.auth.getUser(token);
-  if (authError || !authData?.user) {
-    console.error('Failed to authenticate request token', authError);
+  let authContext: CachedAuthResult;
+  try {
+    authContext = await getAuthUserId(supabase, token);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return jsonResponse({ error: error.message }, { status: error.status });
+    }
+    console.error('Failed to authenticate request token', error);
     return jsonResponse({ error: 'Unauthorized' }, { status: 401 });
   }
-  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Auth verified`);
+  console.log(
+    `⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Auth verified${authContext.fromCache ? ' (cached)' : ''}`,
+  );
 
-  // OPTIMIZATION: Combined query - profile + match + last move in ONE RPC call!
-  const { data: moveData, error: moveDataError } = await supabase
-    .rpc('get_move_submission_data', {
-      p_auth_user_id: authData.user.id,
-      p_match_id: payload.matchId,
-    })
-    .maybeSingle();
-  console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Combined data loaded (profile + match + last move)`);
+  if (isUserBlocked(authContext.userId)) {
+    return jsonResponse(
+      { error: 'Too many invalid move attempts. Please wait a moment before trying again.' },
+      { status: 429 },
+    );
+  }
 
-  if (moveDataError || !moveData) {
-    console.error('Failed to load move submission data', moveDataError);
+  let submissionContext: SubmissionContext;
+  try {
+    submissionContext = await loadSubmissionContext(supabase, authContext.userId, payload.matchId);
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return jsonResponse({ error: error.message }, { status: error.status });
+    }
+    console.error('Failed to load move submission data', error);
     return jsonResponse({ error: 'Unable to load match data' }, { status: 404 });
   }
 
-  const { player_id: playerId, player_role: role, match_data: matchData, last_move_data: lastMoveData } = moveData;
+  console.log(
+    `⏱️ [${(performance.now() - startTime).toFixed(0)}ms] ${
+      submissionContext.fromCache
+        ? 'Match state served from memory cache'
+        : 'Combined data loaded (profile + match + last move)'
+    }`,
+  );
+
+  const { match, lastMove, snapshot, lastMoveIndex, role, playerId } = submissionContext;
 
   if (!role) {
     return jsonResponse({ error: 'You are not a participant in this match' }, { status: 403 });
   }
 
-  // Parse match data
-  const match = matchData as any;
   if (!match.opponent_id) {
     return jsonResponse({ error: 'Match has not been joined yet' }, { status: 409 });
   }
@@ -147,9 +620,6 @@ serve(async (req) => {
     console.error('Match is missing initial state snapshot');
     return jsonResponse({ error: 'Match state is unavailable' }, { status: 500 });
   }
-
-  // Parse last move (if any)
-  const lastMove = lastMoveData as any;
 
   if (payload.action.kind === 'undo.reject') {
     return jsonResponse({ undone: false, rejected: true });
@@ -206,7 +676,22 @@ serve(async (req) => {
       }
     }
 
-    const restoredSnapshot = previousMove?.state_snapshot ?? match.initial_state ?? null;
+    const restoredSnapshot = (previousMove?.state_snapshot ?? match.initial_state) as SantoriniStateSnapshot;
+    match.status = 'in_progress';
+    match.winner_id = null;
+    match.updated_at = new Date().toISOString();
+    match.clock_updated_at = match.updated_at;
+
+    updateMatchCacheAfterUndo(
+      match.id,
+      authContext.userId,
+      playerId,
+      role,
+      match,
+      restoredSnapshot,
+      previousMove,
+    );
+    clearIllegalMovePenalties(authContext.userId);
 
     return jsonResponse({
       undone: true,
@@ -226,30 +711,19 @@ serve(async (req) => {
   const moveAction = payload.action as SantoriniMoveAction;
 
   let engine: SantoriniEngine;
-  let expectedMoveIndex = 0;
+  const expectedMoveIndex = lastMoveIndex + 1;
 
-  if (lastMove && lastMove.state_snapshot) {
-    // Resume from last move's snapshot (FAST!)
-    try {
-      console.log('Building engine from last move snapshot, move_index:', lastMove.move_index);
-      engine = SantoriniEngine.fromSnapshot(lastMove.state_snapshot as SantoriniStateSnapshot);
-      expectedMoveIndex = lastMove.move_index + 1;
-      console.log('Engine resumed from snapshot, current player:', engine.player, 'next move index:', expectedMoveIndex);
-    } catch (error) {
-      console.error('Failed to build engine from snapshot', error);
-      return jsonResponse({ error: 'Match state snapshot is corrupted' }, { status: 500 });
-    }
-  } else {
-    // First move - start from initial state
-    try {
+  try {
+    if (lastMoveIndex >= 0) {
+      console.log('Building engine from cached snapshot, move_index:', lastMoveIndex);
+    } else {
       console.log('Building engine from initial state (first move)');
-      engine = SantoriniEngine.fromSnapshot(match.initial_state as SantoriniStateSnapshot);
-      expectedMoveIndex = 0;
-      console.log('Engine created from initial state, current player:', engine.player);
-    } catch (error) {
-      console.error('Failed to build engine from initial state', error);
-      return jsonResponse({ error: 'Match state is corrupted' }, { status: 500 });
     }
+    engine = SantoriniEngine.fromSnapshot(snapshot);
+    console.log('Engine ready - current player:', engine.player, 'next move index:', expectedMoveIndex);
+  } catch (error) {
+    console.error('Failed to build engine from snapshot', error);
+    return jsonResponse({ error: 'Match state snapshot is corrupted' }, { status: 500 });
   }
 
   console.log('Move index validation - payload:', payload.moveIndex, 'expected:', expectedMoveIndex);
@@ -267,26 +741,35 @@ serve(async (req) => {
     return jsonResponse({ error: "It is the opponent's turn" }, { status: 403 });
   }
 
-  const sanitizedClocks = sanitizeClocks(moveAction.clocks ?? undefined);
-
   let applyResult;
   try {
+    const validMoveCount = engine.snapshot.validMoves.filter((value) => Boolean(value)).length;
     console.log('Applying move:', moveAction.move, 'for player:', actingPlayerIndex);
-    console.log('Engine state before move - player:', engine.player, 'validMoves count:', engine.validMoves.filter(v => v).length);
+    console.log('Engine state before move - player:', engine.player, 'validMoves count:', validMoveCount);
     applyResult = engine.applyMove(moveAction.move);
     console.log('Move applied successfully, winner:', applyResult.winner);
   } catch (error) {
     console.error('Rejected illegal move', error);
     console.error('Move was:', payload.action.move, 'Player:', actingPlayerIndex);
     console.error('Engine player:', engine.player);
-    return jsonResponse({ error: 'Illegal move' }, { status: 422 });
+    const blocked = recordIllegalMoveAttempt(authContext.userId);
+    const status = blocked ? 429 : 422;
+    const message = blocked
+      ? 'Too many illegal moves detected. Please wait before trying again.'
+      : 'Illegal move';
+    return jsonResponse({ error: message }, { status });
+  }
+
+  const computedClocks = computeServerClocks(match, lastMove, actingPlayerIndex);
+  if (computedClocks.clocks) {
+    console.log('🕒  Applied clock state', computedClocks.clocks, 'after elapsedMs', computedClocks.elapsedMs);
   }
 
   const actionRecord: SantoriniMoveAction = {
     kind: 'santorini.move',
     move: moveAction.move,
     by: actingPlayerIndex === 0 ? 'creator' : 'opponent',
-    clocks: sanitizedClocks ?? undefined,
+    ...(computedClocks.clocks ? { clocks: computedClocks.clocks } : {}),
   };
 
   const insertPayload = {
@@ -309,6 +792,8 @@ serve(async (req) => {
     return jsonResponse({ error: 'Failed to store move' }, { status: 500 });
   }
 
+  clearIllegalMovePenalties(authContext.userId);
+
   let winnerId: string | null = null;
   if (applyResult.winner === 0) {
     winnerId = match.creator_id;
@@ -326,6 +811,26 @@ serve(async (req) => {
     }
     console.log(`⏱️ [${(performance.now() - startTime).toFixed(0)}ms] Match status updated`);
   }
+
+  match.updated_at = new Date().toISOString();
+  match.clock_updated_at = match.updated_at;
+  if (winnerId) {
+    match.status = 'completed';
+    match.winner_id = winnerId;
+  } else {
+    match.status = 'in_progress';
+    match.winner_id = null;
+  }
+
+  updateMatchCacheAfterMove(
+    match.id,
+    authContext.userId,
+    playerId,
+    role,
+    match,
+    insertedMove,
+    applyResult.snapshot,
+  );
 
   console.log(`⏱️ [TOTAL: ${(performance.now() - startTime).toFixed(0)}ms] Request complete`);
   return jsonResponse({ move: insertedMove, snapshot: applyResult.snapshot });

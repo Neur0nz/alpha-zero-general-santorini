@@ -611,10 +611,16 @@ function NoActiveGamePrompt() {
 
 function WaitingForOpponentState({ 
   match, 
-  joinCode 
+  joinCode,
+  canCancel = false,
+  onCancel,
+  isCancelling = false,
 }: { 
   match: LobbyMatch; 
   joinCode: string | null;
+  canCancel?: boolean;
+  onCancel?: () => void;
+  isCancelling?: boolean;
 }) {
   const { cardBg, cardBorder, mutedText, accentHeading } = useSurfaceTokens();
   const gradientBg = useColorModeValue('linear(to-r, teal.50, blue.50)', 'linear(to-r, teal.900, blue.900)');
@@ -677,6 +683,23 @@ function WaitingForOpponentState({
                 <Text>✓ Board initialized</Text>
                 <Text>✓ Ready to start</Text>
               </HStack>
+
+              {canCancel && onCancel && (
+                <Stack spacing={2} align="center">
+                  <Button
+                    size="sm"
+                    colorScheme="red"
+                    variant="outline"
+                    onClick={onCancel}
+                    isLoading={isCancelling}
+                  >
+                    Cancel match
+                  </Button>
+                  <Text fontSize="xs" color={mutedText}>
+                    Removes this game so you can start a new one.
+                  </Text>
+                </Stack>
+              )}
               
               <Text fontSize="xs" color={mutedText} fontStyle="italic">
                 {match.visibility === 'public' 
@@ -700,6 +723,7 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
     [lobby.rematchOffers],
   );
   const [joiningRematchId, setJoiningRematchId] = useState<string | null>(null);
+  const [cancellingActiveMatch, setCancellingActiveMatch] = useBoolean(false);
 
   const handleAcceptRematch = useCallback(
     async (matchId: string) => {
@@ -726,6 +750,26 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
     },
     [lobby],
   );
+
+  const handleCancelWaitingMatch = useCallback(async () => {
+    const match = lobby.activeMatch;
+    if (!match || match.status !== 'waiting_for_opponent') {
+      return;
+    }
+    setCancellingActiveMatch.on();
+    try {
+      await lobby.leaveMatch(match.id);
+      workspaceToast({ title: 'Match cancelled', status: 'info', duration: 3000 });
+    } catch (error) {
+      workspaceToast({
+        title: 'Unable to cancel match',
+        status: 'error',
+        description: error instanceof Error ? error.message : 'Please try again.',
+      });
+    } finally {
+      setCancellingActiveMatch.off();
+    }
+  }, [lobby, setCancellingActiveMatch, workspaceToast]);
   const sessionMode = lobby.sessionMode ?? 'online';
   const { cardBg, cardBorder } = useSurfaceTokens();
   const { activeMatchId, clearUndoRequest, undoRequests } = lobby;
@@ -769,6 +813,12 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   const hasActiveMatch = sessionMode === 'online' && lobby.activeMatch;
   const isWaitingForOpponent = hasActiveMatch && lobby.activeMatch?.status === 'waiting_for_opponent';
   const isInProgress = hasActiveMatch && lobby.activeMatch?.status === 'in_progress';
+  const canCancelWaitingMatch = Boolean(
+    isWaitingForOpponent &&
+    lobby.activeRole === 'creator' &&
+    lobby.activeMatch &&
+    !lobby.activeMatch.opponent_id
+  );
 
   return (
     <Stack spacing={6} py={{ base: 6, md: 10 }}>
@@ -865,6 +915,9 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
         <WaitingForOpponentState 
           match={lobby.activeMatch}
           joinCode={lobby.joinCode}
+          canCancel={canCancelWaitingMatch}
+          onCancel={canCancelWaitingMatch ? handleCancelWaitingMatch : undefined}
+          isCancelling={cancellingActiveMatch}
         />
       )}
 

@@ -314,9 +314,6 @@ function App() {
                   <LobbyWorkspace
                     auth={auth}
                     onNavigateToPlay={() => setActiveTab('play')}
-                    onNavigateToPractice={() => setActiveTab('practice')}
-                    onNavigateToAnalyze={() => setActiveTab('analyze')}
-                    onNavigateToLeaderboard={() => setActiveTab('leaderboard')}
                   />
                 </TabPanel>
                 <TabPanel px={0}>

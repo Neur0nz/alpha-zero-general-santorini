@@ -16,7 +16,6 @@ import {
   FormLabel,
   Heading,
   HStack,
-  Icon,
   Input,
   List,
   ListItem,
@@ -29,7 +28,6 @@ import {
   ModalOverlay,
   Radio,
   RadioGroup,
-  SimpleGrid,
   Spinner,
   Stack,
   Switch,
@@ -40,7 +38,7 @@ import {
   useToast,
   useBoolean,
 } from '@chakra-ui/react';
-import { AddIcon, ArrowForwardIcon, RepeatIcon, SearchIcon, StarIcon } from '@chakra-ui/icons';
+import { AddIcon, ArrowForwardIcon } from '@chakra-ui/icons';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import type { CreateMatchPayload, LobbyMatch, StartingPlayer } from '@hooks/useMatchLobby';
 import { useMatchLobbyContext } from '@hooks/matchLobbyContext';
@@ -100,25 +98,18 @@ function LobbyHero({
   quickMatchLoading,
   onOpenCreate,
   onOpenJoin,
-  onNavigateToPractice,
-  onNavigateToAnalyze,
-  onNavigateToLeaderboard,
   hasActiveGame,
 }: {
   onQuickMatch: () => Promise<void>;
   quickMatchLoading: boolean;
   onOpenCreate: () => void;
   onOpenJoin: () => void;
-  onNavigateToPractice: () => void;
-  onNavigateToAnalyze: () => void;
-  onNavigateToLeaderboard: () => void;
   hasActiveGame: boolean;
 }) {
   const gradientBg = useColorModeValue('linear(to-r, teal.100, teal.300)', 'linear(to-r, teal.700, teal.500)');
   const frameBorder = useColorModeValue('teal.200', 'teal.500');
   const bodyColor = useColorModeValue('gray.900', 'whiteAlpha.900');
   const helperText = useColorModeValue('teal.900', 'teal.50');
-  const subtleText = useColorModeValue('teal.800', 'teal.100');
 
   return (
     <Card bgGradient={gradientBg} borderWidth="1px" borderColor={frameBorder} color={bodyColor} shadow="lg">
@@ -193,101 +184,9 @@ function LobbyHero({
               Join by code
             </Button>
           </Stack>
-          <HStack spacing={{ base: 3, md: 6 }} flexWrap="wrap">
-            <Button
-              variant="link"
-              colorScheme="whiteAlpha"
-              size="sm"
-              rightIcon={<ArrowForwardIcon />}
-              onClick={onNavigateToPractice}
-            >
-              Practice vs AI
-            </Button>
-            <Button
-              variant="link"
-              colorScheme="whiteAlpha"
-              size="sm"
-              rightIcon={<ArrowForwardIcon />}
-              onClick={onNavigateToAnalyze}
-            >
-              Analyze past games
-            </Button>
-            <Button
-              variant="link"
-              colorScheme="whiteAlpha"
-              size="sm"
-              rightIcon={<ArrowForwardIcon />}
-              onClick={onNavigateToLeaderboard}
-            >
-              View leaderboard
-            </Button>
-          </HStack>
         </Stack>
       </CardBody>
     </Card>
-  );
-}
-
-function FeatureHighlights({
-  onNavigateToPractice,
-  onNavigateToAnalyze,
-  onNavigateToLeaderboard,
-}: {
-  onNavigateToPractice: () => void;
-  onNavigateToAnalyze: () => void;
-  onNavigateToLeaderboard: () => void;
-}) {
-  const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
-  const items = [
-    {
-      title: 'Practice with AI',
-      description: 'Play locally with move evaluation and undo',
-      actionLabel: 'Open practice',
-      onClick: onNavigateToPractice,
-      icon: RepeatIcon,
-    },
-    {
-      title: 'Analyze games',
-      description: 'Review your completed games',
-      actionLabel: 'View analyzer',
-      onClick: onNavigateToAnalyze,
-      icon: SearchIcon,
-    },
-    {
-      title: 'View rankings',
-      description: 'See top players',
-      actionLabel: 'See leaderboard',
-      onClick: onNavigateToLeaderboard,
-      icon: StarIcon,
-    },
-  ] as const;
-
-  return (
-    <SimpleGrid columns={{ base: 1, md: 3 }} spacing={{ base: 4, md: 6 }}>
-      {items.map((item) => (
-        <Card key={item.title} bg={cardBg} borderWidth="1px" borderColor={cardBorder} h="100%">
-          <CardBody as={Stack} spacing={4}>
-            <HStack spacing={3} align="center">
-              <Icon as={item.icon} boxSize={5} color="teal.400" />
-              <Heading size="sm">{item.title}</Heading>
-            </HStack>
-            <Text color={mutedText} fontSize="sm">
-              {item.description}
-            </Text>
-            <Button
-              variant="link"
-              colorScheme="teal"
-              size="sm"
-              rightIcon={<ArrowForwardIcon />}
-              onClick={item.onClick}
-              alignSelf="flex-start"
-            >
-              {item.actionLabel}
-            </Button>
-          </CardBody>
-        </Card>
-      ))}
-    </SimpleGrid>
   );
 }
 
@@ -671,15 +570,9 @@ function SignInPrompt({ auth }: { auth: SupabaseAuthState }) {
 function LobbyWorkspace({
   auth,
   onNavigateToPlay,
-  onNavigateToPractice,
-  onNavigateToAnalyze,
-  onNavigateToLeaderboard,
 }: {
   auth: SupabaseAuthState;
   onNavigateToPlay: () => void;
-  onNavigateToPractice: () => void;
-  onNavigateToAnalyze: () => void;
-  onNavigateToLeaderboard: () => void;
 }) {
   const lobby = useMatchLobbyContext();
   const [joiningCode, setJoiningCode] = useState('');
@@ -752,9 +645,9 @@ function LobbyWorkspace({
       await handleCreate({
         visibility: 'public',
         rated: false,
-        hasClock: true,
-        clockInitialMinutes: 10,
-        clockIncrementSeconds: 5,
+        hasClock: false,
+        clockInitialMinutes: 0,
+        clockIncrementSeconds: 0,
         startingPlayer: 'random',
       });
       toast({
@@ -777,11 +670,6 @@ function LobbyWorkspace({
     return (
       <Stack spacing={6} py={{ base: 6, md: 10 }}>
         <SignInPrompt auth={auth} />
-        <FeatureHighlights
-          onNavigateToPractice={onNavigateToPractice}
-          onNavigateToAnalyze={onNavigateToAnalyze}
-          onNavigateToLeaderboard={onNavigateToLeaderboard}
-        />
       </Stack>
     );
   }
@@ -806,15 +694,7 @@ function LobbyWorkspace({
         quickMatchLoading={creatingQuickMatch}
         onOpenCreate={onCreateOpen}
         onOpenJoin={onJoinOpen}
-        onNavigateToPractice={onNavigateToPractice}
-        onNavigateToAnalyze={onNavigateToAnalyze}
-        onNavigateToLeaderboard={onNavigateToLeaderboard}
         hasActiveGame={lobby.hasActiveGame}
-      />
-      <FeatureHighlights
-        onNavigateToPractice={onNavigateToPractice}
-        onNavigateToAnalyze={onNavigateToAnalyze}
-        onNavigateToLeaderboard={onNavigateToLeaderboard}
       />
       {/* Your Pending Matches */}
       {lobby.myMatches && (

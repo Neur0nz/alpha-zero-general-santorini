@@ -1326,6 +1326,30 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
             : candidate.creator_id
           : null;
 
+      const existingUndo = state.undoRequests[targetId];
+
+      if (candidate) {
+        setState((prev) => {
+          const remaining = removeMatch(prev.myMatches, targetId);
+          const remainingLobby = removeMatch(prev.matches, targetId);
+          const wasActive = prev.activeMatchId === targetId;
+          const fallback = wasActive ? selectPreferredMatch(remaining) : null;
+          const nextUndo = { ...prev.undoRequests };
+          delete nextUndo[targetId];
+          return {
+            ...prev,
+            myMatches: remaining,
+            matches: remainingLobby,
+            sessionMode: wasActive ? (fallback ? 'online' : null) : prev.sessionMode,
+            activeMatchId: wasActive ? fallback?.id ?? null : prev.activeMatchId,
+            activeMatch: wasActive ? fallback ?? null : prev.activeMatch,
+            moves: wasActive ? [] : prev.moves,
+            joinCode: wasActive && fallback ? fallback.private_join_code ?? null : wasActive ? null : prev.joinCode,
+            undoRequests: nextUndo,
+          };
+        });
+      }
+
       const { error } = await client.functions.invoke('update-match-status', {
         body: {
           matchId: targetId,
@@ -1336,28 +1360,45 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
 
       if (error) {
         console.error('Failed to mark match as abandoned', error);
+        if (candidate) {
+          setState((prev) => {
+            const restoredMatches = upsertMatch(prev.matches, candidate);
+            const restoredMyMatches = upsertMatch(prev.myMatches, candidate);
+            const shouldRestoreActive = prev.activeMatchId === null || prev.activeMatchId === targetId;
+            const nextActive = shouldRestoreActive ? candidate : prev.activeMatch;
+            const restoredUndo = { ...prev.undoRequests };
+            if (existingUndo) {
+              restoredUndo[targetId] = existingUndo;
+            }
+            return {
+              ...prev,
+              matches: restoredMatches,
+              myMatches: restoredMyMatches,
+              sessionMode: shouldRestoreActive ? 'online' : prev.sessionMode,
+              activeMatchId: shouldRestoreActive ? candidate.id : prev.activeMatchId,
+              activeMatch: nextActive,
+              undoRequests: restoredUndo,
+            };
+          });
+        }
         return;
       }
 
-      setState((prev) => {
-        const remaining = removeMatch(prev.myMatches, targetId);
-        const wasActive = prev.activeMatchId === targetId;
-        const fallback = wasActive ? selectPreferredMatch(remaining) : null;
-        const nextUndo = { ...prev.undoRequests };
-        delete nextUndo[targetId];
-        return {
+      if (!candidate) {
+        setState((prev) => ({
           ...prev,
-          myMatches: remaining,
-          sessionMode: fallback ? 'online' : null,
-          activeMatchId: wasActive ? fallback?.id ?? null : prev.activeMatchId,
-          activeMatch: wasActive ? fallback ?? null : prev.activeMatch,
-          moves: wasActive ? [] : prev.moves,
-          joinCode: wasActive && fallback ? fallback.private_join_code ?? null : wasActive ? null : prev.joinCode,
-          undoRequests: nextUndo,
-        };
-      });
+          matches: removeMatch(prev.matches, targetId),
+          myMatches: removeMatch(prev.myMatches, targetId),
+          undoRequests: (() => {
+            if (!existingUndo) return prev.undoRequests;
+            const next = { ...prev.undoRequests };
+            delete next[targetId];
+            return next;
+          })(),
+        }));
+      }
     },
-    [onlineEnabled, profile, state.activeMatch, state.activeMatchId, state.myMatches, state.sessionMode],
+    [onlineEnabled, profile, state.activeMatch, state.activeMatchId, state.myMatches, state.sessionMode, state.undoRequests],
   );
 
   const submitMove = useCallback(
