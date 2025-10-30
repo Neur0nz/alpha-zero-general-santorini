@@ -963,9 +963,22 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   const activeGameBg = useColorModeValue('teal.50', 'teal.900');
   const activeGameBorder = useColorModeValue('teal.200', 'teal.600');
   const activeGameHoverBorder = useColorModeValue('teal.300', 'teal.500');
-  
+
   const initializedOnlineRef = useRef(false);
   const sessionMode = lobby.sessionMode ?? 'online';
+  const inProgressMatches = useMemo(
+    () => lobby.myMatches.filter((match) => match.status === 'in_progress'),
+    [lobby.myMatches],
+  );
+  const activeOpponentName = useMemo(() => {
+    if (!auth.profile || !lobby.activeMatch || lobby.activeMatch.status !== 'in_progress') {
+      return null;
+    }
+    const isCreator = lobby.activeMatch.creator_id === auth.profile.id;
+    const opponent = isCreator ? lobby.activeMatch.opponent : lobby.activeMatch.creator;
+    return opponent?.display_name ?? 'Opponent';
+  }, [auth.profile, lobby.activeMatch]);
+  const showActiveStatusBanner = Boolean(auth.profile) && sessionMode === 'online' && inProgressMatches.length > 0;
 
   useEffect(() => {
     // Auto-enable online mode by default
@@ -1066,7 +1079,25 @@ function PlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
           </CardBody>
         </Card>
       )}
-      
+
+      {showActiveStatusBanner && (
+        <Alert status="info" variant="left-accent" borderRadius="md" alignItems="flex-start">
+          <AlertIcon />
+          <Stack spacing={0} fontSize="sm">
+            <AlertTitle fontSize="sm">
+              {inProgressMatches.length === 1
+                ? 'You have 1 active game'
+                : `You have ${inProgressMatches.length} active games`}
+            </AlertTitle>
+            <AlertDescription>
+              {activeOpponentName
+                ? `Currently playing vs ${activeOpponentName}. Use the My Matches panel to switch between games.`
+                : 'Use the My Matches panel to jump between in-progress matches.'}
+            </AlertDescription>
+          </Stack>
+        </Alert>
+      )}
+
       {!auth.profile && (
         <MatchModeSelector
           mode={sessionMode}

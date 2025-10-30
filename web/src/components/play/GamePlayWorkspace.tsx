@@ -34,7 +34,6 @@ import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
 import { SantoriniProvider } from '@hooks/useSantorini';
 import { useLocalSantorini } from '@hooks/useLocalSantorini';
 import GameBoard from '@components/GameBoard';
-import ActiveGameSwitcher from './ActiveGameSwitcher';
 import type { SantoriniMoveAction, MatchStatus } from '@/types/match';
 import { useSurfaceTokens } from '@/theme/useSurfaceTokens';
 
@@ -709,6 +708,23 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
     }
   }, [sessionMode, lobby.activeMatch, lobby.myMatches, lobby.setActiveMatch]);
 
+  const inProgressMatches = useMemo(
+    () => lobby.myMatches.filter((match) => match.status === 'in_progress'),
+    [lobby.myMatches],
+  );
+
+  const activeOpponentName = useMemo(() => {
+    if (!auth.profile || !lobby.activeMatch || lobby.activeMatch.status !== 'in_progress') {
+      return null;
+    }
+    const isCreator = lobby.activeMatch.creator_id === auth.profile.id;
+    const opponent = isCreator ? lobby.activeMatch.opponent : lobby.activeMatch.creator;
+    return opponent?.display_name ?? 'Opponent';
+  }, [auth.profile, lobby.activeMatch]);
+
+  const showActiveStatusBanner =
+    Boolean(auth.profile) && sessionMode === 'online' && inProgressMatches.length > 0;
+
   // Check if we have an active online game or waiting
   const hasActiveMatch = sessionMode === 'online' && lobby.activeMatch;
   const isWaitingForOpponent = hasActiveMatch && lobby.activeMatch?.status === 'waiting_for_opponent';
@@ -746,14 +762,23 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
         </CardBody>
       </Card>
 
-      {/* Active Game Switcher - only show if user has multiple active games */}
-      {auth.profile && sessionMode === 'online' && lobby.myMatches.filter(m => m.status === 'in_progress').length > 0 && (
-        <ActiveGameSwitcher
-          matches={lobby.myMatches}
-          activeMatchId={lobby.activeMatchId}
-          profile={auth.profile}
-          onSelectMatch={lobby.setActiveMatch}
-        />
+      {/* Active Game Status */}
+      {showActiveStatusBanner && (
+        <Alert status="info" variant="left-accent" borderRadius="md" alignItems="flex-start">
+          <AlertIcon />
+          <Stack spacing={0} fontSize="sm">
+            <AlertTitle fontSize="sm">
+              {inProgressMatches.length === 1
+                ? 'You have 1 active game'
+                : `You have ${inProgressMatches.length} active games`}
+            </AlertTitle>
+            <AlertDescription>
+              {activeOpponentName
+                ? `Currently playing vs ${activeOpponentName}. Use the My Matches panel to switch between games.`
+                : 'Use the My Matches panel to jump between in-progress matches.'}
+            </AlertDescription>
+          </Stack>
+        </Alert>
       )}
 
       {/* Game Board - Local */}
