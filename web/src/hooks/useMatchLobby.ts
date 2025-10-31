@@ -873,12 +873,24 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         (payload: { type: string; event: string; payload: any }) => {
           const data = payload.payload ?? {};
           const moveIndexRaw = typeof data.move_index === 'number' ? data.move_index : null;
+          const removedIndexesRaw = Array.isArray(data.removed_move_indexes)
+            ? (data.removed_move_indexes as unknown[])
+            : [];
+          const removedIndexesClean: number[] = removedIndexesRaw
+            .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+            .map((value) => Math.trunc(value));
           setState((prev) => {
             if (prev.activeMatchId !== matchId) {
               return prev;
             }
             const existing = prev.undoRequests[matchId];
-            const targetIndex = moveIndexRaw ?? existing?.moveIndex ?? prev.moves.length - 1;
+            const fallbackIndex = moveIndexRaw ?? existing?.moveIndex ?? prev.moves.length - 1;
+            const removalList =
+              removedIndexesClean.length > 0
+                ? Array.from(new Set(removedIndexesClean)).sort((a, b) => a - b)
+                : [fallbackIndex];
+            const removalSet = new Set(removalList);
+            const targetIndex = removalList.length > 0 ? removalList[0] : fallbackIndex;
             const nextUndo = existing
               ? {
                   ...existing,
@@ -890,7 +902,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
             if (nextUndo) {
               nextUndoRequests[matchId] = nextUndo;
             }
-            const updatedMoves = prev.moves.filter((move) => move.move_index !== targetIndex);
+            const updatedMoves = prev.moves.filter((move) => !removalSet.has(move.move_index));
             return {
               ...prev,
               moves: updatedMoves,
@@ -1754,8 +1766,15 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
       if (!responderRole) {
         throw new Error('Only participants may respond to undo requests.');
       }
-      const moveIndex = pending.moveIndex;
-      let undoResult: { undone?: boolean; moveIndex?: number; snapshot?: SantoriniStateSnapshot | null } | null = null;
+      const requestedMoveIndex = pending.moveIndex;
+      let undoResult:
+        | {
+            undone?: boolean;
+            moveIndex?: number;
+            removedMoveIndexes?: number[];
+            snapshot?: SantoriniStateSnapshot | null;
+          }
+        | null = null;
       if (accepted) {
         if (!client) {
           throw new Error('Supabase client unavailable.');
@@ -1763,10 +1782,10 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         const { data, error } = await client.functions.invoke('submit-move', {
           body: {
             matchId: match.id,
-            moveIndex,
+            moveIndex: requestedMoveIndex,
             action: {
               kind: 'undo.accept',
-              moveIndex,
+              moveIndex: requestedMoveIndex,
             },
           },
         });
@@ -1774,7 +1793,12 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
           console.error('Failed to apply undo on server', error);
           throw error;
         }
-        undoResult = (data ?? null) as { undone?: boolean; moveIndex?: number; snapshot?: SantoriniStateSnapshot | null } | null;
+        undoResult = (data ?? null) as {
+          undone?: boolean;
+          moveIndex?: number;
+          removedMoveIndexes?: number[];
+          snapshot?: SantoriniStateSnapshot | null;
+        } | null;
       }
       const respondedAt = new Date().toISOString();
       await channel.send({
@@ -1782,7 +1806,7 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         event: 'undo-response',
         payload: {
           match_id: match.id,
-          move_index: moveIndex,
+          move_index: requestedMoveIndex,
           accepted,
           responded_by_role: responderRole,
           responded_by_user_id: profile.id,
@@ -1790,13 +1814,17 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         },
       });
       if (undoResult?.undone) {
+        const removedIndexes = Array.isArray(undoResult.removedMoveIndexes) && undoResult.removedMoveIndexes.length > 0
+          ? Array.from(new Set(undoResult.removedMoveIndexes)).sort((a, b) => a - b)
+          : [undoResult.moveIndex ?? requestedMoveIndex];
         try {
           await channel.send({
             type: 'broadcast',
             event: 'undo-applied',
             payload: {
               match_id: match.id,
-              move_index: undoResult.moveIndex ?? moveIndex,
+              move_index: undoResult.moveIndex ?? requestedMoveIndex,
+              removed_move_indexes: removedIndexes,
               snapshot: undoResult.snapshot ?? null,
             },
           });
@@ -1809,10 +1837,17 @@ export function useMatchLobby(profile: PlayerProfile | null, options: UseMatchLo
         if (!existing) {
           return prev;
         }
-        const targetIndex = undoResult?.moveIndex ?? existing.moveIndex ?? moveIndex;
-        const updatedMoves = undoResult?.undone
-          ? prev.moves.filter((move) => move.move_index !== targetIndex)
-          : prev.moves;
+        const targetIndex = undoResult?.moveIndex ?? existing.moveIndex ?? requestedMoveIndex;
+        const removedIndexesSet =
+          undoResult?.undone && Array.isArray(undoResult?.removedMoveIndexes) && undoResult.removedMoveIndexes.length > 0
+            ? new Set(undoResult.removedMoveIndexes)
+            : undoResult?.undone
+              ? new Set([targetIndex])
+              : null;
+        const updatedMoves =
+          undoResult?.undone && removedIndexesSet
+            ? prev.moves.filter((move) => !removedIndexesSet.has(move.move_index))
+            : prev.moves;
         return {
           ...prev,
           moves: updatedMoves,

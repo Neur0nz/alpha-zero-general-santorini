@@ -151,7 +151,9 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
           }
         }
 
-        await santorini.importState(playbackEngine.snapshot as SantoriniStateSnapshot);
+        await santorini.importState(playbackEngine.snapshot as SantoriniStateSnapshot, {
+          waitForEvaluation: false,
+        });
         setCurrentIndex(index);
         setIsExploring(false);
       } catch (error) {
@@ -609,9 +611,12 @@ function AnalyzeWorkspace({ auth }: AnalyzeWorkspaceProps) {
                       evaluation={santorini.evaluation}
                       topMoves={santorini.topMoves}
                       calcOptionsBusy={santorini.calcOptionsBusy}
+                      evaluationDepth={santorini.evaluationDepth}
+                      optionsDepth={santorini.optionsDepth}
                       refreshEvaluation={santorini.controls.refreshEvaluation}
                       calculateOptions={santorini.controls.calculateOptions}
-                      updateDepth={santorini.controls.updateCalcDepth}
+                      updateEvaluationDepth={santorini.controls.updateEvaluationDepth}
+                      updateOptionsDepth={santorini.controls.updateOptionsDepth}
                     />
 
                     <Box>

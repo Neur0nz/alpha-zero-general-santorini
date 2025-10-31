@@ -35,6 +35,49 @@ import { AuthLoadingScreen } from '@components/auth/AuthLoadingScreen';
 
 const TAB_STORAGE_KEY = 'santorini:lastTab';
 
+function resolveInitialTab(tabOrder: readonly AppTab[]): AppTab {
+  if (typeof window === 'undefined') {
+    return 'lobby';
+  }
+
+  const { hash, pathname, search } = window.location;
+  const hashTab = hash.slice(1) as AppTab;
+  if (hashTab && tabOrder.includes(hashTab)) {
+    return hashTab;
+  }
+
+  if (hash && !tabOrder.includes(hashTab)) {
+    try {
+      window.history.replaceState(null, '', `${pathname}${search}#lobby`);
+    } catch (error) {
+      console.error('Failed to reset to default tab hash', error);
+    }
+  }
+
+  try {
+    const storedTab = window.localStorage.getItem(TAB_STORAGE_KEY) as AppTab | null;
+    if (storedTab && tabOrder.includes(storedTab)) {
+      const targetUrl = `${pathname}${search}#${storedTab}`;
+      if (`#${storedTab}` !== hash) {
+        window.history.replaceState(null, '', targetUrl);
+      }
+      return storedTab;
+    }
+  } catch (error) {
+    console.error('Failed to restore last active tab', error);
+  }
+
+  if (!hash) {
+    try {
+      window.history.replaceState(null, '', `${pathname}${search}#lobby`);
+    } catch (error) {
+      console.error('Failed to set default tab hash', error);
+    }
+  }
+
+  return 'lobby';
+}
+
 function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
   const {
     loading,
@@ -52,6 +95,8 @@ function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
     redo,
     undo,
     calcOptionsBusy,
+    evaluationDepth,
+    optionsDepth,
     gameMode,
     difficulty,
     nextPlayer,
@@ -149,9 +194,12 @@ function PracticeTabContent({ onShowHistory }: { onShowHistory: () => void }) {
             evaluation={evaluation}
             topMoves={topMoves}
             calcOptionsBusy={calcOptionsBusy}
+            evaluationDepth={evaluationDepth}
+            optionsDepth={optionsDepth}
             refreshEvaluation={controls.refreshEvaluation}
             calculateOptions={controls.calculateOptions}
-            updateDepth={controls.updateCalcDepth}
+            updateEvaluationDepth={controls.updateEvaluationDepth}
+            updateOptionsDepth={controls.updateOptionsDepth}
           />
         </Box>
       </Flex>
@@ -291,38 +339,9 @@ function MatchLobbySideEffects({
 function App() {
   const { isOpen: isHistoryOpen, onOpen: openHistory, onClose: closeHistory } = useDisclosure();
   const tabOrder = useMemo<AppTab[]>(() => NAV_TABS.map((tab) => tab.key), []);
-  const [activeTab, setActiveTab] = useState<AppTab>('lobby');
+  const [activeTab, setActiveTab] = useState<AppTab>(() => resolveInitialTab(tabOrder));
   const activeIndex = Math.max(0, tabOrder.indexOf(activeTab));
   const auth = useSupabaseAuth();
-
-  // Initialize tab from URL hash or localStorage
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    
-    // Check URL hash first (e.g., #play)
-    const hash = window.location.hash.slice(1) as AppTab;
-    if (hash && tabOrder.includes(hash)) {
-      setActiveTab(hash);
-      return;
-    }
-
-    // Fallback to localStorage
-    try {
-      const storedTab = window.localStorage.getItem(TAB_STORAGE_KEY) as AppTab | null;
-      if (storedTab && tabOrder.includes(storedTab)) {
-        setActiveTab(storedTab);
-        // Set the hash to match
-        window.history.replaceState(null, '', `#${storedTab}`);
-      } else {
-        // Set default hash
-        window.history.replaceState(null, '', `#${activeTab}`);
-      }
-    } catch (error) {
-      console.error('Failed to restore last active tab', error);
-    }
-  }, [tabOrder]);
 
   // Update URL hash and localStorage when tab changes
   useEffect(() => {
@@ -330,10 +349,11 @@ function App() {
       return;
     }
     try {
-      // Update URL hash
-      window.history.replaceState(null, '', `#${activeTab}`);
-      
-      // Update localStorage
+      const { pathname, search, hash } = window.location;
+      const nextHash = `#${activeTab}`;
+      if (hash !== nextHash) {
+        window.history.replaceState(null, '', `${pathname}${search}${nextHash}`);
+      }
       window.localStorage.setItem(TAB_STORAGE_KEY, activeTab);
     } catch (error) {
       console.error('Failed to persist last active tab', error);

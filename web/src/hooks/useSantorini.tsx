@@ -195,7 +195,8 @@ export type Controls = {
   setEditMode: (mode: number) => void;
   refreshEvaluation: () => Promise<void>;
   calculateOptions: () => Promise<void>;
-  updateCalcDepth: (depth: number | null) => void;
+  updateEvaluationDepth: (depth: number | null) => void;
+  updateOptionsDepth: (depth: number | null) => void;
   jumpToMove: (index: number) => Promise<void>;
 };
 
@@ -416,7 +417,9 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   const [history, setHistory] = useState<MoveSummary[]>([]);
   const [nextPlayer, setNextPlayer] = useState(0);
   const [calcOptionsBusy, setCalcOptionsBusy] = useState(false);
-  const [calcDepthOverride, setCalcDepthOverride] = useState<number | null>(null);
+  const [evaluationDepthOverride, setEvaluationDepthOverride] = useState<number | null>(null);
+  const [optionsDepthOverride, setOptionsDepthOverride] = useState<number | null>(null);
+  const evaluationRequestIdRef = useRef(0);
 
   const toast = useToast();
   
@@ -969,11 +972,17 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     }
     const game = gameRef.current;
     if (!game || !game.py) return;
-    
+
+    const requestId = ++evaluationRequestIdRef.current;
+    let nextEvaluation: EvaluationState | undefined;
+    let nextTopMoves: TopMove[] | undefined;
+
     try {
       // Always calculate evaluation first to ensure last_probs is populated
       if (game.py.calculate_eval_for_current_position) {
-        const resultProxy = await game.py.calculate_eval_for_current_position();
+        const resultProxy = await game.py.calculate_eval_for_current_position(
+          evaluationDepthOverride ?? undefined,
+        );
         const result = Array.isArray(resultProxy)
           ? resultProxy
           : resultProxy.toJs({ create_proxies: false });
@@ -981,42 +990,56 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
           const value = Number(result[0]);
           const label = value >= 0 ? `+${value.toFixed(3)}` : value.toFixed(3);
           const advantage = value > 0 ? 'Player 0 ahead' : value < 0 ? 'Player 1 ahead' : 'Balanced';
-          setEvaluation({ value, label, advantage });
+          nextEvaluation = { value, label, advantage };
         }
       }
-      
+
       // Now get the moves (last_probs should be populated from the evaluation above)
       if (game.py.list_current_moves) {
         const movesProxy = game.py.list_current_moves(10);
         const moves = movesProxy.toJs({ create_proxies: false });
         const normalizedMoves = normalizeTopMoves(moves);
-        
+
         // If no moves or all moves have 0 probability, try the advanced version
-        if (normalizedMoves.length === 0 || normalizedMoves.every(move => move.prob === 0)) {
+        if (normalizedMoves.length === 0 || normalizedMoves.every((move) => move.prob === 0)) {
           console.log('No moves or zero probabilities from list_current_moves, trying list_current_moves_with_adv...');
           if (game.py.list_current_moves_with_adv) {
             try {
-              const advMovesProxy = await game.py.list_current_moves_with_adv(6);
+              const advMovesProxy = await game.py.list_current_moves_with_adv(
+                6,
+                optionsDepthOverride ?? undefined,
+              );
               const advMoves = advMovesProxy.toJs({ create_proxies: false });
-              setTopMoves(normalizeTopMoves(advMoves));
+              nextTopMoves = normalizeTopMoves(advMoves);
             } catch (advError) {
               console.error('Failed to get advanced moves:', advError);
-              setTopMoves(normalizedMoves);
+              nextTopMoves = normalizedMoves;
             }
           } else {
-            setTopMoves(normalizedMoves);
+            nextTopMoves = normalizedMoves;
           }
         } else {
-          setTopMoves(normalizedMoves);
+          nextTopMoves = normalizedMoves;
+        }
+      }
+
+      if (requestId === evaluationRequestIdRef.current) {
+        if (nextEvaluation !== undefined) {
+          setEvaluation(nextEvaluation);
+        }
+        if (nextTopMoves !== undefined) {
+          setTopMoves(nextTopMoves);
         }
       }
     } catch (error) {
       console.error('Failed to refresh evaluation:', error);
-      // Set default evaluation on error
-      setEvaluation({ value: 0, advantage: 'Error', label: '0.00' });
-      setTopMoves([]);
+      if (requestId === evaluationRequestIdRef.current) {
+        // Set default evaluation on error
+        setEvaluation({ value: 0, advantage: 'Error', label: '0.00' });
+        setTopMoves([]);
+      }
     }
-  }, [evaluationEnabled]);
+  }, [evaluationDepthOverride, evaluationEnabled, optionsDepthOverride]);
 
   const calculateOptions = useCallback(async () => {
     if (!evaluationEnabled) {
@@ -1027,7 +1050,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     if (!game || !game.py || !game.py.list_current_moves_with_adv) return;
     setCalcOptionsBusy(true);
     try {
-      const resultProxy = await game.py.list_current_moves_with_adv(6, calcDepthOverride ?? undefined);
+      const resultProxy = await game.py.list_current_moves_with_adv(6, optionsDepthOverride ?? undefined);
       const result = resultProxy.toJs({ create_proxies: false });
       setTopMoves(normalizeTopMoves(result));
     } catch (error) {
@@ -1036,7 +1059,7 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     } finally {
       setCalcOptionsBusy(false);
     }
-  }, [calcDepthOverride, evaluationEnabled]);
+  }, [evaluationEnabled, optionsDepthOverride]);
 
   const syncUi = useCallback(async (loadingState = false) => {
     // TypeScript engine is source of truth - sync UI from it
@@ -1208,7 +1231,9 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
   const finalizeGuidedSetup = useCallback(async () => {
     // After 4 workers are placed, sync to Python and trigger AI if needed
     await syncPythonFromTypeScript();
-    await refreshEvaluation();
+    refreshEvaluation().catch((error) => {
+      console.error('Failed to refresh evaluation after guided setup:', error);
+    });
     
     // Trigger AI if it should move first
     const game = gameRef.current;
@@ -1236,7 +1261,9 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
         await syncPythonFromTypeScript();
         
         await syncUi();
-        await refreshEvaluation();
+        refreshEvaluation().catch((error) => {
+          console.error('Failed to refresh evaluation after applying move:', error);
+        });
         
         // Only trigger AI if not in placement phase
         const placement = engineRef.current.getPlacementContext();
@@ -1408,7 +1435,9 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     // Sync UI and Python engine
     await syncUi();
     await syncPythonFromTypeScript();
-    await refreshEvaluation();
+    refreshEvaluation().catch((error) => {
+      console.error('Failed to refresh evaluation after undo:', error);
+    });
   }, [ensureAiIdle, refreshEvaluation, syncPythonFromTypeScript, syncUi, toast]);
 
   const redo = useCallback(async () => {
@@ -1427,7 +1456,9 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     // Sync UI and Python engine
     await syncUi();
     await syncPythonFromTypeScript();
-    await refreshEvaluation();
+    refreshEvaluation().catch((error) => {
+      console.error('Failed to refresh evaluation after redo:', error);
+    });
   }, [ensureAiIdle, refreshEvaluation, syncPythonFromTypeScript, syncUi, toast]);
 
   const reset = useCallback(async () => {
@@ -1506,17 +1537,24 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       }
       selector.resetAndStart();
       await syncUi();
-      await refreshEvaluation();
+      refreshEvaluation().catch((error) => {
+        console.error('Failed to refresh evaluation after jumping to move:', error);
+      });
     },
     [refreshEvaluation, syncUi],
   );
 
   const importState = useCallback(
-    async (snapshot: SantoriniStateSnapshot | null | undefined) => {
+    async (
+      snapshot: SantoriniStateSnapshot | null | undefined,
+      options: { waitForEvaluation?: boolean } = {},
+    ) => {
       if (!snapshot) {
         return;
       }
       await ensureAiIdle();
+
+      const { waitForEvaluation = true } = options;
 
       try {
         engineRef.current = SantoriniEngine.fromSnapshot(snapshot as SantoriniSnapshot);
@@ -1539,13 +1577,29 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       }
 
       await syncUi();
-      await refreshEvaluation();
+      if (waitForEvaluation) {
+        await refreshEvaluation();
+      } else {
+        refreshEvaluation().catch((error) => {
+          console.error('Failed to refresh evaluation after importing state:', error);
+        });
+      }
     },
     [ensureAiIdle, refreshEvaluation, syncPythonFromTypeScript, syncUi],
   );
 
-  const updateCalcDepth = useCallback((depth: number | null) => {
-    setCalcDepthOverride(depth);
+  const updateEvaluationDepth = useCallback(
+    (depth: number | null) => {
+      setEvaluationDepthOverride(depth);
+      refreshEvaluation().catch((error) => {
+        console.error('Failed to refresh evaluation with updated depth:', error);
+      });
+    },
+    [refreshEvaluation],
+  );
+
+  const updateOptionsDepth = useCallback((depth: number | null) => {
+    setOptionsDepthOverride(depth);
   }, []);
 
   const controls: Controls = useMemo(
@@ -1557,10 +1611,22 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
       setEditMode,
       refreshEvaluation,
       calculateOptions,
-      updateCalcDepth,
+      updateEvaluationDepth,
+      updateOptionsDepth,
       jumpToMove,
     }),
-    [calculateOptions, changeDifficulty, jumpToMove, refreshEvaluation, reset, setEditMode, setGameMode, toggleEdit, updateCalcDepth],
+    [
+      calculateOptions,
+      changeDifficulty,
+      jumpToMove,
+      refreshEvaluation,
+      reset,
+      setEditMode,
+      setGameMode,
+      toggleEdit,
+      updateEvaluationDepth,
+      updateOptionsDepth,
+    ],
   );
 
   return {
@@ -1580,6 +1646,8 @@ function useSantoriniInternal(options: UseSantoriniOptions = {}) {
     history,
     undo,
     redo,
+    evaluationDepth: evaluationDepthOverride,
+    optionsDepth: optionsDepthOverride,
     calcOptionsBusy,
     nextPlayer,
     gameEnded: gameRef.current?.gameEnded ?? [0, 0],

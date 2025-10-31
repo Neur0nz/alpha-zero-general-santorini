@@ -21,9 +21,12 @@ interface EvaluationPanelProps {
   evaluation: EvaluationState;
   topMoves: TopMove[];
   calcOptionsBusy: boolean;
+  evaluationDepth: number | null;
+  optionsDepth: number | null;
   refreshEvaluation: () => Promise<void>;
   calculateOptions: () => Promise<void>;
-  updateDepth: (depth: number | null) => void;
+  updateEvaluationDepth: (depth: number | null) => void;
+  updateOptionsDepth: (depth: number | null) => void;
 }
 
 const depthOptions = [
@@ -93,9 +96,12 @@ function EvaluationPanel({
   evaluation,
   topMoves,
   calcOptionsBusy,
+  evaluationDepth,
+  optionsDepth,
   refreshEvaluation,
   calculateOptions,
-  updateDepth,
+  updateEvaluationDepth,
+  updateOptionsDepth,
 }: EvaluationPanelProps) {
   const disclosure = useDisclosure({ defaultIsOpen: true });
   const movesDisclosure = useDisclosure({ defaultIsOpen: true });
@@ -105,6 +111,21 @@ function EvaluationPanel({
   const subtleText = useColorModeValue('gray.500', 'whiteAlpha.600');
   const strongText = useColorModeValue('gray.800', 'whiteAlpha.800');
   const moveBg = useColorModeValue('gray.50', 'whiteAlpha.100');
+  const evalSelectValue = evaluationDepth == null ? 'ai' : String(evaluationDepth);
+  const resolvedEvalOptions =
+    evaluationDepth != null && !depthOptions.some((option) => option.value === evalSelectValue)
+      ? [...depthOptions, { label: `Custom (${evaluationDepth})`, value: evalSelectValue }]
+      : depthOptions;
+  const optionsSelectValue = optionsDepth == null ? 'ai' : String(optionsDepth);
+  const resolvedOptionsDepth =
+    optionsDepth != null && !depthOptions.some((option) => option.value === optionsSelectValue)
+      ? [...depthOptions, { label: `Custom (${optionsDepth})`, value: optionsSelectValue }]
+      : depthOptions;
+  const panelMinHeight = disclosure.isOpen
+    ? movesDisclosure.isOpen
+      ? '360px'
+      : 'auto'
+    : 'auto';
 
   return (
     <Box
@@ -113,7 +134,7 @@ function EvaluationPanel({
       borderColor={panelBorder}
       bgGradient={panelGradient}
       p={disclosure.isOpen ? { base: 5, md: 6 } : 3}
-      minH={disclosure.isOpen ? (movesDisclosure.isOpen ? "360px" : "200px") : "auto"}
+      minH={panelMinHeight}
       boxShadow="dark-lg"
       transition="all 0.3s ease"
     >
@@ -136,6 +157,23 @@ function EvaluationPanel({
               </Text>
             </Box>
             <HStack spacing={3}>
+              <Select
+                size="sm"
+                maxW="160px"
+                value={evalSelectValue}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  updateEvaluationDepth(value === 'ai' ? null : Number(value));
+                }}
+                aria-label="Evaluation depth"
+                title="Evaluation depth"
+              >
+                {resolvedEvalOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
               <Button size="sm" variant="outline" onClick={disclosure.onToggle}>
                 Hide
               </Button>
@@ -167,29 +205,35 @@ function EvaluationPanel({
                 >
                   {movesDisclosure.isOpen ? 'Hide' : 'Show'}
                 </Button>
-                <Select
-                  size="sm"
-                  maxW="180px"
-                  defaultValue="ai"
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    updateDepth(value === 'ai' ? null : Number(value));
-                  }}
-                >
-                  {depthOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-                <Button
-                  size="sm"
-                  colorScheme="purple"
-                  onClick={calculateOptions}
-                  isLoading={calcOptionsBusy}
-                >
-                  Analyze
-                </Button>
+                {movesDisclosure.isOpen && (
+                  <>
+                    <Select
+                      size="sm"
+                      maxW="180px"
+                      value={optionsSelectValue}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        updateOptionsDepth(value === 'ai' ? null : Number(value));
+                      }}
+                      aria-label="Best move analysis depth"
+                      title="Best move analysis depth"
+                    >
+                      {resolvedOptionsDepth.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </Select>
+                    <Button
+                      size="sm"
+                      colorScheme="purple"
+                      onClick={calculateOptions}
+                      isLoading={calcOptionsBusy}
+                    >
+                      Analyze
+                    </Button>
+                  </>
+                )}
               </HStack>
             </Flex>
             <Collapse in={movesDisclosure.isOpen} animateOpacity>

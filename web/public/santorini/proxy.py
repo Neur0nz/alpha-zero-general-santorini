@@ -247,32 +247,42 @@ def get_current_eval():
     return current_eval
 
 
-async def calculate_eval_for_current_position():
-    """Calculate evaluation for current position without making a move."""
+async def calculate_eval_for_current_position(numMCTSSims: int | None = None):
+    """Calculate evaluation for current position without making a move.
+
+    Optionally overrides the Monte Carlo search depth for this calculation only.
+    """
     global g, board, mcts, player, current_eval, last_probs
 
     if g is None or mcts is None:
         print("Game not initialized yet")
         return [0.0, 0.0]
 
-    # Get evaluation for current position
-    canonical_board = g.getCanonicalForm(board, player)
-    probs, q, _ = await mcts.getActionProb(canonical_board, force_full_search=True)
-    g.board.copy_state(board, True)  # Restore board state
+    prev_sims = mcts.args.numMCTSSims
+    try:
+        if numMCTSSims is not None and numMCTSSims > 0:
+            mcts.args.numMCTSSims = int(numMCTSSims)
 
-    # Store evaluation values (q is from current player's perspective)
-    # Convert to Player 0's perspective
-    if player == 0:
-        current_eval = [float(q[0]), -float(q[0])]
-    else:
-        current_eval = [-float(q[0]), float(q[0])]
-    last_probs = probs
+        # Get evaluation for current position
+        canonical_board = g.getCanonicalForm(board, player)
+        probs, q, _ = await mcts.getActionProb(canonical_board, force_full_search=True)
+        g.board.copy_state(board, True)  # Restore board state
 
-    print(
-        f"🔄 Eval recalculated: Player 0: {current_eval[0]:+.3f}, Player 1: {current_eval[1]:+.3f} (current player: {player})"
-    )
+        # Store evaluation values (q is from current player's perspective)
+        # Convert to Player 0's perspective
+        if player == 0:
+            current_eval = [float(q[0]), -float(q[0])]
+        else:
+            current_eval = [-float(q[0]), float(q[0])]
+        last_probs = probs
 
-    return current_eval
+        print(
+            f"🔄 Eval recalculated: Player 0: {current_eval[0]:+.3f}, Player 1: {current_eval[1]:+.3f} (current player: {player}, sims: {mcts.args.numMCTSSims})"
+        )
+
+        return current_eval
+    finally:
+        mcts.args.numMCTSSims = prev_sims
 
 
 def list_current_moves(limit: int = 10):

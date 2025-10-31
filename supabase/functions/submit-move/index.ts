@@ -629,23 +629,49 @@ serve(async (req) => {
     if (!lastMove) {
       return jsonResponse({ error: 'No moves available to undo' }, { status: 409 });
     }
-    const lastMoveActionKind = lastMove?.action?.kind ?? 'santorini.move';
-    if (lastMoveActionKind !== 'santorini.move') {
-      return jsonResponse({ error: 'Only standard moves can be undone' }, { status: 409 });
+    const targetIndex =
+      typeof payload.action.moveIndex === 'number'
+        ? payload.action.moveIndex
+        : typeof payload.moveIndex === 'number'
+          ? payload.moveIndex
+          : lastMove.move_index;
+    if (!Number.isInteger(targetIndex) || targetIndex < 0) {
+      return jsonResponse({ error: 'Invalid move index for undo' }, { status: 400 });
     }
-    if (payload.action.moveIndex !== undefined && payload.action.moveIndex !== null) {
-      if (payload.action.moveIndex !== lastMove.move_index) {
-        return jsonResponse({ error: 'Move index mismatch' }, { status: 409 });
-      }
-    }
-    if (payload.moveIndex !== undefined && payload.moveIndex !== lastMove.move_index) {
+    if (targetIndex > lastMove.move_index) {
       return jsonResponse({ error: 'Move index mismatch' }, { status: 409 });
     }
+
+    const { data: rewindMoves, error: rewindError } = await supabase
+      .from('match_moves')
+      .select('id, move_index, action, state_snapshot')
+      .eq('match_id', match.id)
+      .gte('move_index', targetIndex)
+      .order('move_index', { ascending: false });
+
+    if (rewindError) {
+      console.error('Failed to load moves for undo', rewindError);
+      return jsonResponse({ error: 'Unable to load moves to undo' }, { status: 500 });
+    }
+    if (!Array.isArray(rewindMoves) || rewindMoves.length === 0) {
+      return jsonResponse({ error: 'Move to undo not found' }, { status: 404 });
+    }
+
+    const targetMove = rewindMoves.find((move) => move.move_index === targetIndex) ?? null;
+    if (!targetMove) {
+      return jsonResponse({ error: 'Move to undo not found' }, { status: 404 });
+    }
+
+    const targetActionKind = (targetMove.action as { kind?: string } | null)?.kind ?? 'santorini.move';
+    if (targetActionKind !== 'santorini.move') {
+      return jsonResponse({ error: 'Only standard moves can be undone' }, { status: 409 });
+    }
+
     const { data: previousMoves, error: previousError } = await supabase
       .from('match_moves')
       .select('id, move_index, state_snapshot')
       .eq('match_id', match.id)
-      .lt('move_index', lastMove.move_index)
+      .lt('move_index', targetIndex)
       .order('move_index', { ascending: false })
       .limit(1);
 
@@ -655,16 +681,21 @@ serve(async (req) => {
     }
 
     const previousMove = Array.isArray(previousMoves) && previousMoves.length > 0 ? previousMoves[0] : null;
-
+    const deleteIds = rewindMoves.map((move) => move.id);
     const undoClockUpdatedAt = new Date().toISOString();
+
+    if (deleteIds.length === 0) {
+      return jsonResponse({ error: 'No moves available to undo' }, { status: 409 });
+    }
+
     const { error: deleteError } = await supabase
       .from('match_moves')
       .delete()
-      .eq('id', lastMove.id);
+      .in('id', deleteIds);
 
     if (deleteError) {
-      console.error('Failed to delete last move during undo', deleteError);
-      return jsonResponse({ error: 'Failed to remove last move' }, { status: 500 });
+      console.error('Failed to delete moves during undo', deleteError);
+      return jsonResponse({ error: 'Failed to remove moves' }, { status: 500 });
     }
 
     const undoUpdatePayload: Record<string, unknown> = { clock_updated_at: undoClockUpdatedAt };
@@ -697,9 +728,14 @@ serve(async (req) => {
     );
     clearIllegalMovePenalties(authContext.userId);
 
+    const removedMoveIndexes = Array.from(
+      new Set(rewindMoves.map((move) => Math.trunc(Number(move.move_index)))),
+    ).sort((a, b) => a - b);
+
     return jsonResponse({
       undone: true,
-      moveIndex: lastMove.move_index,
+      moveIndex: targetMove.move_index,
+      removedMoveIndexes,
       snapshot: restoredSnapshot,
     });
   }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AlertDescription,
@@ -301,6 +301,7 @@ function ActiveMatchContent({
   const undoRequestedByMe = undoState && undoState.requestedBy === role;
   const undoPending = undoState?.status === 'pending';
   const undoMoveNumber = undoState ? undoState.moveIndex + 1 : null;
+  const seenUndoToastRef = useRef<string | null>(null);
   const canRequestUndo = Boolean(
     match?.status === 'in_progress' &&
       role &&
@@ -321,6 +322,26 @@ function ActiveMatchContent({
     }
     return undefined;
   }, [undoState, onClearUndo]);
+
+  useEffect(() => {
+    if (!undoState || undoState.status !== 'pending' || undoRequestedByMe) {
+      return;
+    }
+    const toastKey = `${undoState.matchId}:${undoState.requestedAt}`;
+    if (seenUndoToastRef.current === toastKey) {
+      return;
+    }
+    seenUndoToastRef.current = toastKey;
+    toast({
+      title: 'Undo requested',
+      description:
+        undoMoveNumber !== null
+          ? `Your opponent wants to undo move #${undoMoveNumber}.`
+          : 'Your opponent requested an undo.',
+      status: 'info',
+      duration: 5000,
+    });
+  }, [toast, undoMoveNumber, undoRequestedByMe, undoState]);
 
   const handleRequestUndo = useCallback(async () => {
     setRequestingUndo.on();
