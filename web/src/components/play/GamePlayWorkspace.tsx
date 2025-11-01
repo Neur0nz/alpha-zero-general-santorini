@@ -4,6 +4,12 @@ import {
   AlertDescription,
   AlertIcon,
   AlertTitle,
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
   Avatar,
   AvatarBadge,
   Badge,
@@ -28,6 +34,7 @@ import {
   useColorModeValue,
   useBreakpointValue,
   useClipboard,
+  useDisclosure,
   useToast,
   VStack,
   Wrap,
@@ -319,6 +326,8 @@ function ActiveMatchContent({
     () => typeof document !== 'undefined' && document.visibilityState === 'hidden',
     [],
   );
+  const { isOpen: isResignOpen, onOpen: onResignOpen, onClose: onResignClose } = useDisclosure();
+  const resignCancelRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     opponentTrackerInitializedRef.current = false;
@@ -758,13 +767,14 @@ function ActiveMatchContent({
     return null;
   }, [undoState, undoMoveNumber, undoRequestedByMe, respondingUndo, handleRespondUndo, onClearUndo]);
 
-  const handleLeave = async () => {
+  const handleConfirmResign = async () => {
     setLeaveBusy.on();
     try {
       await onLeave(match?.id);
       await santorini.resetMatch();
     } finally {
       setLeaveBusy.off();
+      onResignClose();
     }
   };
 
@@ -840,17 +850,6 @@ function ActiveMatchContent({
               </Text>
             </WrapItem>
           </Wrap>
-          <Tooltip label="Resign and lose the game (affects rating if rated)" hasArrow>
-            <Button
-              colorScheme="red"
-              variant="outline"
-              onClick={handleLeave}
-              isLoading={leaveBusy}
-              alignSelf={{ base: 'stretch', md: 'auto' }}
-            >
-              Resign
-            </Button>
-          </Tooltip>
         </Flex>
       </Stack>
 
@@ -907,7 +906,41 @@ function ActiveMatchContent({
 
         {undoBanner}
 
+        <Box w="100%" maxW="960px" mt={4} px={{ base: 0, md: 3 }} display="flex" justifyContent="flex-end">
+          <Tooltip label="Resign and lose the game (affects rating if rated)" hasArrow>
+            <Button
+              colorScheme="red"
+              variant="outline"
+              onClick={onResignOpen}
+              isLoading={leaveBusy}
+            >
+              Resign
+            </Button>
+          </Tooltip>
+        </Box>
+
       </Flex>
+
+      <AlertDialog isOpen={isResignOpen} leastDestructiveRef={resignCancelRef} onClose={onResignClose}>
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Confirm resignation
+            </AlertDialogHeader>
+            <AlertDialogBody>
+              Resigning ends the game immediately and awards the win to your opponent. Are you sure you want to resign?
+            </AlertDialogBody>
+            <AlertDialogFooter>
+              <Button ref={resignCancelRef} onClick={onResignClose} variant="ghost">
+                Continue playing
+              </Button>
+              <Button colorScheme="red" onClick={handleConfirmResign} ml={3} isLoading={leaveBusy}>
+                Resign game
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
     </Stack>
   );
 }

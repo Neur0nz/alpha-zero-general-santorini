@@ -805,6 +805,7 @@ function LobbyWorkspace({
     requestPermission: requestNotificationPermission,
   } = useBrowserNotifications();
   const notificationsPromptedRef = useRef(false);
+  const matchesHydratedRef = useRef(false);
 
   const clearPendingJoinKey = useCallback(() => {
     setPendingJoinKey(null);
@@ -1011,10 +1012,16 @@ function LobbyWorkspace({
   useEffect(() => {
     const previous = previousStatusesRef.current;
     const next: Record<string, MatchStatus> = {};
+    let shouldSkipToasts = false;
+    if (!matchesHydratedRef.current) {
+      shouldSkipToasts = true;
+      matchesHydratedRef.current = true;
+    }
     lobby.myMatches.forEach((match) => {
       next[match.id] = match.status;
       const prevStatus = previous[match.id];
       if (
+        !shouldSkipToasts &&
         prevStatus === 'waiting_for_opponent' &&
         match.status === 'in_progress' &&
         match.creator_id === auth.profile?.id
