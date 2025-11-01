@@ -26,6 +26,7 @@ import {
   Tooltip,
   useBoolean,
   useColorModeValue,
+  useBreakpointValue,
   useClipboard,
   useToast,
   VStack,
@@ -773,10 +774,13 @@ function ActiveMatchContent({
     <Stack spacing={6}>
       <Stack spacing={{ base: 5, md: 6 }} align="center">
         <Stack
-          direction={{ base: 'column', md: 'row' }}
-          spacing={{ base: 4, md: 6 }}
+          direction="row"
+          spacing={{ base: 3, md: 6 }}
           w="100%"
           maxW="960px"
+          flexWrap="wrap"
+          justify="center"
+          align="stretch"
         >
           <PlayerClockCard
             label={creatorClockLabel}
@@ -1018,11 +1022,17 @@ function PlayerClockCard({
   const clockColor = active ? accentColor : strongText;
   const alignItems: 'flex-start' | 'flex-end' = alignment;
   const textAlign = alignment === 'flex-end' ? 'right' : 'left';
+  const cardPadding = useBreakpointValue({ base: 3, md: 4 });
+  const clockFontSize = useBreakpointValue({ base: '2xl', md: '3xl' });
+  const labelFontSize = useBreakpointValue({ base: 'xs', md: 'sm' });
+  const sideFontSize = useBreakpointValue({ base: '2xs', md: 'xs' });
+  const avatarSize = useBreakpointValue<'sm' | 'md' | 'lg'>({ base: 'md', md: 'lg' });
 
   return (
     <Box
-      flex="1"
-      p={{ base: 3, md: 4 }}
+      flex="1 1 0"
+      minW={{ base: '0', md: '220px' }}
+      p={cardPadding ?? 3}
       borderRadius="xl"
       borderWidth="2px"
       borderColor={active ? accentColor : cardBorder}
@@ -1032,19 +1042,19 @@ function PlayerClockCard({
     >
       <Stack spacing={3} align={alignItems}>
         <Avatar
-          size="lg"
+          size={avatarSize ?? 'md'}
           name={profile?.display_name ?? label}
           src={profile?.avatar_url ?? undefined}
           alignSelf={alignItems}
         >
           {active ? <AvatarBadge boxSize="1.1em" bg={accentColor} borderColor="white" /> : null}
         </Avatar>
-        <Stack spacing={1} align={alignItems} w="100%">
-          <Text fontSize="sm" fontWeight="semibold" color={mutedText} textAlign={textAlign}>
+      <Stack spacing={1} align={alignItems} w="100%">
+          <Text fontSize={labelFontSize ?? 'sm'} fontWeight="semibold" color={mutedText} textAlign={textAlign}>
             {label}
           </Text>
           <Heading
-            size={{ base: 'xl', md: '2xl' }}
+            fontSize={clockFontSize ?? '2xl'}
             color={clockColor}
             fontFamily="mono"
             letterSpacing="tight"
@@ -1052,7 +1062,7 @@ function PlayerClockCard({
           >
             {clock}
           </Heading>
-          <Text fontSize="xs" color={mutedText} textAlign={textAlign}>
+          <Text fontSize={sideFontSize ?? 'xs'} color={mutedText} textAlign={textAlign}>
             {sideLabel}
           </Text>
         </Stack>
@@ -1398,23 +1408,6 @@ function GamePlayWorkspace({ auth, onNavigateToLobby }: { auth: SupabaseAuthStat
     }
   }, [sessionMode, lobby.activeMatch, lobby.myMatches, lobby.setActiveMatch]);
 
-  const inProgressMatches = useMemo(
-    () => lobby.myMatches.filter((match) => match.status === 'in_progress'),
-    [lobby.myMatches],
-  );
-
-  const activeOpponentName = useMemo(() => {
-    if (!auth.profile || !lobby.activeMatch || lobby.activeMatch.status !== 'in_progress') {
-      return null;
-    }
-    const isCreator = lobby.activeMatch.creator_id === auth.profile.id;
-    const opponent = isCreator ? lobby.activeMatch.opponent : lobby.activeMatch.creator;
-    return opponent?.display_name ?? 'Opponent';
-  }, [auth.profile, lobby.activeMatch]);
-
-  const showActiveStatusBanner =
-    Boolean(auth.profile) && sessionMode === 'online' && inProgressMatches.length > 0;
-
   // Check if we have an active online game or waiting
   const hasActiveMatch = sessionMode === 'online' && lobby.activeMatch;
   const isWaitingForOpponent = hasActiveMatch && lobby.activeMatch?.status === 'waiting_for_opponent';
@@ -1499,25 +1492,6 @@ function GamePlayWorkspace({ auth, onNavigateToLobby }: { auth: SupabaseAuthStat
           </Flex>
         </CardBody>
       </Card>
-
-      {/* Active Game Status */}
-      {showActiveStatusBanner && (
-        <Alert status="info" variant="left-accent" borderRadius="md" alignItems="flex-start">
-          <AlertIcon />
-          <Stack spacing={0} fontSize="sm">
-            <AlertTitle fontSize="sm">
-              {inProgressMatches.length === 1
-                ? 'You have 1 active game'
-                : `You have ${inProgressMatches.length} active games`}
-            </AlertTitle>
-            <AlertDescription>
-              {activeOpponentName
-                ? `Currently playing vs ${activeOpponentName}. Use the My Matches panel to switch between games.`
-                : 'Use the My Matches panel to jump between in-progress matches.'}
-            </AlertDescription>
-          </Stack>
-        </Alert>
-      )}
 
       {sessionMode === 'online' && rematchOffers.map((offer) => {
         const opponentName = offer.creator?.display_name ?? 'Opponent';
