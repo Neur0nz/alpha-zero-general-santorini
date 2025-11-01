@@ -39,6 +39,7 @@ import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
 import { SantoriniProvider } from '@hooks/useSantorini';
 import { useLocalSantorini } from '@hooks/useLocalSantorini';
 import { buildMatchJoinLink } from '@/utils/joinLinks';
+import { scheduleAutoOpenCreate } from '@/utils/lobbyStorage';
 import GameBoard from '@components/GameBoard';
 import type { SantoriniMoveAction, MatchStatus, PlayerProfile } from '@/types/match';
 import { useSurfaceTokens } from '@/theme/useSurfaceTokens';
@@ -828,15 +829,56 @@ function PlayerSummary({ profile, displayName, sideLabel, isCurrentUser, isActiv
   );
 }
 
-function NoActiveGamePrompt() {
+function NoActiveGamePrompt({ onNavigateToLobby }: { onNavigateToLobby?: () => void }) {
   const { cardBg, cardBorder, mutedText } = useSurfaceTokens();
   return (
     <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} w="100%">
       <CardBody>
         <Center py={20}>
-          <Stack spacing={3} textAlign="center">
+          <Stack spacing={4} align="center" textAlign="center">
             <Heading size="md">No active game</Heading>
             <Text color={mutedText}>Visit the Lobby tab to find or create a match.</Text>
+            {onNavigateToLobby && (
+              <Button colorScheme="teal" variant="solid" onClick={onNavigateToLobby}>
+                Open lobby
+              </Button>
+            )}
+          </Stack>
+        </Center>
+      </CardBody>
+    </Card>
+  );
+}
+
+function CancelledMatchPrompt({
+  onCreateNewMatch,
+  onNavigateToLobby,
+}: {
+  onCreateNewMatch: () => void;
+  onNavigateToLobby: () => void;
+}) {
+  const { cardBg, cardBorder, mutedText, accentHeading } = useSurfaceTokens();
+  return (
+    <Card bg={cardBg} borderWidth="1px" borderColor={cardBorder} w="100%">
+      <CardBody>
+        <Center py={20}>
+          <Stack spacing={5} align="center" textAlign="center" maxW="lg">
+            <Stack spacing={2}>
+              <Heading size="md" color={accentHeading}>
+                Match cancelled
+              </Heading>
+              <Text color={mutedText}>
+                You’re back in the lobby. Create a fresh game or browse other matches when you’re ready.
+              </Text>
+            </Stack>
+            <ButtonGroup size="sm" variant="solid">
+              <Button colorScheme="teal" onClick={onCreateNewMatch}>
+                Create new match
+              </Button>
+              <Button variant="outline" onClick={onNavigateToLobby}>
+                Open lobby
+              </Button>
+            </ButtonGroup>
           </Stack>
         </Center>
       </CardBody>
@@ -1004,7 +1046,7 @@ function WaitingForOpponentState({
   );
 }
 
-function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
+function GamePlayWorkspace({ auth, onNavigateToLobby }: { auth: SupabaseAuthState; onNavigateToLobby: () => void }) {
   const lobby = useMatchLobbyContext();
   const workspaceToast = useToast();
   const rematchOffers = useMemo(
@@ -1015,6 +1057,7 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
   const [joiningRematchId, setJoiningRematchId] = useState<string | null>(null);
   const [cancellingActiveMatch, setCancellingActiveMatch] = useBoolean(false);
   const [requestingSummaryRematch, setRequestingSummaryRematch] = useBoolean(false);
+  const [lastCancelledMatchId, setLastCancelledMatchId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!auth.profile) {
@@ -1054,6 +1097,12 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
     [lobby],
   );
 
+  useEffect(() => {
+    if (lobby.activeMatch) {
+      setLastCancelledMatchId(null);
+    }
+  }, [lobby.activeMatch]);
+
   const handleCancelWaitingMatch = useCallback(async () => {
     const match = lobby.activeMatch;
     if (!match || match.status !== 'waiting_for_opponent') {
@@ -1062,6 +1111,12 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
     setCancellingActiveMatch.on();
     try {
       await lobby.leaveMatch(match.id);
+      setLastCancelledMatchId(match.id);
+      workspaceToast({
+        title: 'Match cancelled',
+        status: 'info',
+        description: 'The lobby is clear. Start a new game whenever you like.',
+      });
     } catch (error) {
       workspaceToast({
         title: 'Unable to cancel match',
@@ -1072,6 +1127,17 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
       setCancellingActiveMatch.off();
     }
   }, [lobby, setCancellingActiveMatch, workspaceToast]);
+
+  const handleNavigateToLobby = useCallback(() => {
+    setLastCancelledMatchId(null);
+    onNavigateToLobby();
+  }, [onNavigateToLobby]);
+
+  const handleCreateNewMatchFromPlay = useCallback(() => {
+    setLastCancelledMatchId(null);
+    scheduleAutoOpenCreate();
+    onNavigateToLobby();
+  }, [onNavigateToLobby]);
   const sessionMode = lobby.sessionMode ?? 'online';
   const completedMatch =
     sessionMode === 'online' &&
@@ -1302,7 +1368,16 @@ function GamePlayWorkspace({ auth }: { auth: SupabaseAuthState }) {
       )}
 
       {/* No Active Game */}
-      {sessionMode === 'online' && !hasActiveMatch && <NoActiveGamePrompt />}
+      {sessionMode === 'online' && !hasActiveMatch && (
+        lastCancelledMatchId ? (
+          <CancelledMatchPrompt
+            onCreateNewMatch={handleCreateNewMatchFromPlay}
+            onNavigateToLobby={handleNavigateToLobby}
+          />
+        ) : (
+          <NoActiveGamePrompt onNavigateToLobby={handleNavigateToLobby} />
+        )
+      )}
     </Stack>
   );
 }

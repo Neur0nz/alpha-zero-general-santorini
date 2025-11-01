@@ -451,7 +451,7 @@ function App() {
                   />
                 </TabPanel>
                 <TabPanel px={0}>
-                  <GamePlayWorkspace auth={auth} />
+                  <GamePlayWorkspace auth={auth} onNavigateToLobby={() => setActiveTab('lobby')} />
                 </TabPanel>
                 <TabPanel px={0}>
                   <LeaderboardWorkspace

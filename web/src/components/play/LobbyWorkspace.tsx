@@ -50,8 +50,7 @@ import { useMatchLobbyContext } from '@hooks/matchLobbyContext';
 import GoogleIcon from '@components/auth/GoogleIcon';
 import { useSurfaceTokens } from '@/theme/useSurfaceTokens';
 import { buildMatchJoinLink } from '@/utils/joinLinks';
-
-const PENDING_JOIN_STORAGE_KEY = 'santorini:pendingJoin';
+import { PENDING_JOIN_STORAGE_KEY, consumeAutoOpenCreateFlag } from '@/utils/lobbyStorage';
 
 function formatDate(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -886,6 +885,15 @@ function LobbyWorkspace({
       isActive = false;
     };
   }, [pendingJoinKey, auth.profile, joinMatch, toast, clearPendingJoinKey, onNavigateToPlay, setActiveMatch]);
+
+  useEffect(() => {
+    if (isCreateOpen) {
+      return;
+    }
+    if (consumeAutoOpenCreateFlag()) {
+      onCreateOpen();
+    }
+  }, [isCreateOpen, onCreateOpen]);
 
   useEffect(() => {
     if (!auth.profile) {
