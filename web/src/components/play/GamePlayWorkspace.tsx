@@ -38,6 +38,7 @@ import { useMatchLobbyContext } from '@hooks/matchLobbyContext';
 import { useOnlineSantorini } from '@hooks/useOnlineSantorini';
 import { SantoriniProvider } from '@hooks/useSantorini';
 import { useLocalSantorini } from '@hooks/useLocalSantorini';
+import { buildMatchJoinLink } from '@/utils/joinLinks';
 import GameBoard from '@components/GameBoard';
 import type { SantoriniMoveAction, MatchStatus, PlayerProfile } from '@/types/match';
 import { useSurfaceTokens } from '@/theme/useSurfaceTokens';
@@ -858,8 +859,13 @@ function WaitingForOpponentState({
 }) {
   const { cardBg, cardBorder, mutedText, accentHeading } = useSurfaceTokens();
   const gradientBg = useColorModeValue('linear(to-r, teal.50, blue.50)', 'linear(to-r, teal.900, blue.900)');
-  const { hasCopied, onCopy } = useClipboard(joinCode ?? '');
-  const hasJoinCode = Boolean(joinCode);
+  const linkBackground = useColorModeValue('white', 'whiteAlpha.100');
+  const joinKey = match.private_join_code ?? joinCode ?? match.id;
+  const joinLink = joinKey ? buildMatchJoinLink(joinKey) : '';
+  const { hasCopied: hasCopiedCode, onCopy: onCopyCode } = useClipboard(joinCode ?? '');
+  const { hasCopied: hasCopiedLink, onCopy: onCopyLink } = useClipboard(joinLink);
+  const hasJoinCode = Boolean(match.private_join_code ?? joinCode);
+  const hasJoinLink = Boolean(joinLink);
   
   return (
     <Stack spacing={6}>
@@ -905,6 +911,28 @@ function WaitingForOpponentState({
                 </Card>
               )}
               
+              {hasJoinLink && (
+                <Stack spacing={2} align="center" w="100%" maxW="md">
+                  <Text fontSize="sm" color={mutedText}>
+                    Or send them this link:
+                  </Text>
+                  <Box
+                    w="100%"
+                    px={4}
+                    py={2}
+                    borderWidth="1px"
+                    borderColor={cardBorder}
+                    borderRadius="md"
+                    fontFamily="mono"
+                    fontSize="sm"
+                    wordBreak="break-all"
+                    bg={linkBackground}
+                  >
+                    {joinLink}
+                  </Box>
+                </Stack>
+              )}
+              
               <Wrap spacing={3} justify="center" color={mutedText} fontSize="sm">
                 <WrapItem>
                   <Text>✓ Game settings configured</Text>
@@ -928,10 +956,19 @@ function WaitingForOpponentState({
                   {hasJoinCode && (
                     <Button
                       variant="outline"
-                      colorScheme={hasCopied ? 'teal' : 'gray'}
-                      onClick={onCopy}
+                      colorScheme={hasCopiedCode ? 'teal' : 'gray'}
+                      onClick={onCopyCode}
                     >
-                      {hasCopied ? 'Copied!' : 'Copy code'}
+                      {hasCopiedCode ? 'Code copied' : 'Copy code'}
+                    </Button>
+                  )}
+                  {hasJoinLink && (
+                    <Button
+                      variant="outline"
+                      colorScheme={hasCopiedLink ? 'teal' : 'gray'}
+                      onClick={onCopyLink}
+                    >
+                      {hasCopiedLink ? 'Link copied' : 'Copy invite link'}
                     </Button>
                   )}
                   {canCancel && onCancel && (

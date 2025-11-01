@@ -1,4 +1,4 @@
-import { ElementType, ReactNode, useEffect, useState } from 'react';
+import { ElementType, ReactNode, useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   AlertDescription,
@@ -37,10 +37,11 @@ import {
   Tooltip,
   Wrap,
   WrapItem,
-  useColorModeValue,
   useDisclosure,
   useToast,
   useBoolean,
+  useClipboard,
+  useColorModeValue,
 } from '@chakra-ui/react';
 import { AddIcon, ArrowForwardIcon, RepeatIcon, SearchIcon, StarIcon } from '@chakra-ui/icons';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
@@ -48,6 +49,9 @@ import type { CreateMatchPayload, LobbyMatch, StartingPlayer } from '@hooks/useM
 import { useMatchLobbyContext } from '@hooks/matchLobbyContext';
 import GoogleIcon from '@components/auth/GoogleIcon';
 import { useSurfaceTokens } from '@/theme/useSurfaceTokens';
+import { buildMatchJoinLink } from '@/utils/joinLinks';
+
+const PENDING_JOIN_STORAGE_KEY = 'santorini:pendingJoin';
 
 function formatDate(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -61,8 +65,12 @@ function ActiveGameNotice({
   onNavigateToPlay: () => void;
 }) {
   const { cardBorder } = useSurfaceTokens();
-  
   const isWaiting = match.status === 'waiting_for_opponent';
+  const joinKey = match.private_join_code ?? match.id;
+  const joinLink = buildMatchJoinLink(joinKey);
+  const { hasCopied, onCopy } = useClipboard(joinLink);
+  const hasShareLink = isWaiting && Boolean(joinKey);
+  
   const opponentName = match.opponent?.display_name || 'an opponent';
   
   return (
@@ -85,14 +93,26 @@ function ActiveGameNotice({
           }
         </AlertDescription>
       </Stack>
-      <Button 
-        colorScheme="teal" 
-        size="sm"
-        onClick={onNavigateToPlay}
-        rightIcon={<ArrowForwardIcon />}
-      >
-        {isWaiting ? 'View game' : 'Continue game'}
-      </Button>
+      <ButtonGroup size="sm" variant="solid">
+        {hasShareLink && (
+          <Tooltip label="Copy a link to share with your opponent" hasArrow>
+            <Button
+              variant="outline"
+              onClick={onCopy}
+              colorScheme={hasCopied ? 'teal' : 'gray'}
+            >
+              {hasCopied ? 'Link copied' : 'Copy invite link'}
+            </Button>
+          </Tooltip>
+        )}
+        <Button 
+          colorScheme="teal" 
+          onClick={onNavigateToPlay}
+          rightIcon={<ArrowForwardIcon />}
+        >
+          {isWaiting ? 'View game' : 'Continue game'}
+        </Button>
+      </ButtonGroup>
     </Alert>
   );
 }
@@ -314,6 +334,53 @@ function MatchListCard({
         )}
       </Flex>
     </Box>
+  );
+}
+
+function PendingMatchActions({
+  match,
+  onSelect,
+  onCancel,
+  isCancelling,
+}: {
+  match: LobbyMatch;
+  onSelect: () => void;
+  onCancel: () => void;
+  isCancelling: boolean;
+}) {
+  const joinKey = match.private_join_code ?? match.id;
+  const joinLink = buildMatchJoinLink(joinKey);
+  const { hasCopied, onCopy } = useClipboard(joinLink);
+  const hasJoinLink = Boolean(joinKey);
+
+  return (
+    <ButtonGroup size="sm" variant="outline" spacing={2}>
+      <Button variant="outline" onClick={onSelect}>
+        View
+      </Button>
+      <Tooltip
+        label="Copy a link your friend can use to join this match"
+        hasArrow
+        isDisabled={!hasJoinLink}
+      >
+        <Button
+          variant="outline"
+          colorScheme={hasCopied ? 'teal' : 'gray'}
+          onClick={onCopy}
+          isDisabled={!hasJoinLink}
+        >
+          {hasCopied ? 'Link copied' : 'Copy invite link'}
+        </Button>
+      </Tooltip>
+      <Button
+        colorScheme="red"
+        variant="ghost"
+        onClick={onCancel}
+        isLoading={isCancelling}
+      >
+        Cancel
+      </Button>
+    </ButtonGroup>
   );
 }
 
@@ -618,19 +685,12 @@ function PendingMatches({
                 badges={badges}
                 description={descriptionParts.join(' • ')}
                 actions={(
-                  <ButtonGroup size="sm" variant="outline" spacing={2}>
-                    <Button variant="outline" onClick={() => handleSelect(match.id)}>
-                      View
-                    </Button>
-                    <Button
-                      colorScheme="red"
-                      variant="ghost"
-                      onClick={() => handleCancel(match.id)}
-                      isLoading={cancellingId === match.id}
-                    >
-                      Cancel
-                    </Button>
-                  </ButtonGroup>
+                  <PendingMatchActions
+                    match={match}
+                    onSelect={() => handleSelect(match.id)}
+                    onCancel={() => handleCancel(match.id)}
+                    isCancelling={cancellingId === match.id}
+                  />
                 )}
               />
             );
@@ -719,12 +779,113 @@ function LobbyWorkspace({
   onNavigateToLeaderboard: () => void;
 }) {
   const lobby = useMatchLobbyContext();
+  const { joinMatch, setActiveMatch } = lobby;
   const [joiningCode, setJoiningCode] = useState('');
+  const [pendingJoinKey, setPendingJoinKey] = useState<string | null>(null);
   const { isOpen: isCreateOpen, onOpen: onCreateOpen, onClose: onCreateClose } = useDisclosure();
   const { isOpen: isJoinOpen, onOpen: onJoinOpen, onClose: onJoinClose } = useDisclosure();
   const toast = useToast();
   const [creatingQuickMatch, setCreatingQuickMatch] = useBoolean(false);
   const [inlineNotice, setInlineNotice] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
+
+  const clearPendingJoinKey = useCallback(() => {
+    setPendingJoinKey(null);
+    if (typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.removeItem(PENDING_JOIN_STORAGE_KEY);
+      } catch (storageError) {
+        console.error('Failed to clear pending join key', storageError);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      const url = new URL(window.location.href);
+      const joinParam = url.searchParams.get('join');
+
+      if (joinParam) {
+        setPendingJoinKey(joinParam);
+        setJoiningCode((current) => (current ? current : joinParam));
+        try {
+          window.sessionStorage.setItem(PENDING_JOIN_STORAGE_KEY, joinParam);
+        } catch (storageError) {
+          console.error('Failed to persist pending join key', storageError);
+        }
+
+        url.searchParams.delete('join');
+        window.history.replaceState(null, '', url.toString());
+        return;
+      }
+
+      const stored = window.sessionStorage.getItem(PENDING_JOIN_STORAGE_KEY);
+      if (stored) {
+        setPendingJoinKey(stored);
+        setJoiningCode((current) => (current ? current : stored));
+      }
+    } catch (error) {
+      console.error('Failed to initialize join parameter', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pendingJoinKey) {
+      return;
+    }
+    if (!auth.profile) {
+      return;
+    }
+
+    let isActive = true;
+
+    const attemptJoin = async () => {
+      try {
+        await joinMatch(pendingJoinKey);
+        if (!isActive) {
+          return;
+        }
+        toast({ title: 'Joined match', status: 'success' });
+        clearPendingJoinKey();
+        setJoiningCode('');
+        onNavigateToPlay();
+      } catch (error: any) {
+        if (!isActive) {
+          return;
+        }
+
+        if (error?.code === 'ACTIVE_GAME_EXISTS') {
+          toast({
+            title: 'Active game exists',
+            description: error.message,
+            status: 'warning',
+            duration: 5000,
+          });
+          if (error.activeMatchId) {
+            setActiveMatch(error.activeMatchId);
+            onNavigateToPlay();
+          }
+        } else {
+          toast({
+            title: 'Unable to join match',
+            status: 'error',
+            description: error instanceof Error ? error.message : 'Please try again or create a new game.',
+          });
+          setJoiningCode((current) => (current ? current : pendingJoinKey));
+        }
+        clearPendingJoinKey();
+      }
+    };
+
+    attemptJoin();
+
+    return () => {
+      isActive = false;
+    };
+  }, [pendingJoinKey, auth.profile, joinMatch, toast, clearPendingJoinKey, onNavigateToPlay, setActiveMatch]);
 
   useEffect(() => {
     if (!auth.profile) {
