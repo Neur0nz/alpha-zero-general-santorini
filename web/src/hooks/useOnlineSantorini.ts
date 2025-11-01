@@ -494,7 +494,12 @@ export function useOnlineSantorini(options: UseOnlineSantoriniOptions) {
     const expectedMoveIndex = pending.expectedMoveIndex;
     
     // Check if the server already has this move
-    const serverHasThisMove = moves.length > expectedMoveIndex;
+    const serverHasThisMove = moves.some(
+      (move) =>
+        move.move_index === expectedMoveIndex &&
+        typeof move.id === 'string' &&
+        !move.id.startsWith('optimistic-'),
+    );
     
     if (serverHasThisMove) {
       console.log('useOnlineSantorini: Move already received from server, skipping submission');

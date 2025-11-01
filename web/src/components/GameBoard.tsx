@@ -100,11 +100,15 @@ function GameBoard({
   const boardColumns = Math.max(1, board[0]?.length ?? board.length);
   const gridTemplateColumns = `repeat(${boardColumns}, 1fr)`;
 
-  const boardMaxWidth = useMemo(() => `min(${boardPixels}px, calc(100vw - 24px))`, [boardPixels]);
+  const boardMaxWidth = useMemo(() => `min(${boardPixels}px, 100vw)`, [boardPixels]);
   const activeGlowColor = turnHighlightColor ?? useColorModeValue('teal.400', 'teal.200');
   const boardBoxShadow = isTurnActive
     ? `0 0 0 3px ${activeGlowColor}, 0 0 30px ${activeGlowColor}66`
     : '2xl';
+  const responsiveBoardShadow = useBreakpointValue({ base: 'none', md: boardBoxShadow });
+  const responsiveBorderRadius = useBreakpointValue({ base: 'none', md: 'xl' });
+  const responsiveBorderWidth = useBreakpointValue({ base: '0px', md: isTurnActive ? '2px' : '0px' });
+  const responsiveFrameBg = useBreakpointValue({ base: 'transparent', md: boardFrameBg });
 
   return (
     <Flex
@@ -145,11 +149,11 @@ function GameBoard({
             direction="column"
             w="100%"
             h="100%"
-            bg={boardFrameBg}
-            p={{ base: 2, sm: 4, md: 6 }}
-            borderRadius="xl"
-            boxShadow={boardBoxShadow}
-            borderWidth={isTurnActive ? '2px' : '0px'}
+            bg={responsiveFrameBg ?? boardFrameBg}
+            p={{ base: 0, md: 6 }}
+            borderRadius={responsiveBorderRadius ?? 'xl'}
+            boxShadow={responsiveBoardShadow ?? boardBoxShadow}
+            borderWidth={responsiveBorderWidth ?? (isTurnActive ? '2px' : '0px')}
             borderColor={isTurnActive ? activeGlowColor : 'transparent'}
             transition="box-shadow 0.3s ease, border-color 0.3s ease"
           >

@@ -275,6 +275,12 @@ function ActiveMatchContent({
   const opponentTurnActive = santorini.currentTurn === 'opponent';
   const isMyTurn = role === 'creator' ? creatorTurnActive : role === 'opponent' ? opponentTurnActive : false;
   const turnGlowColor = role === 'creator' ? 'blue.400' : role === 'opponent' ? 'red.400' : undefined;
+  const creatorClockLabel = role === 'creator' ? '🟢 YOU (Blue)' : 'Player 1 (Blue)';
+  const opponentClockLabel = role === 'opponent' ? '🟢 YOU (Red)' : 'Player 2 (Red)';
+  const mobileClockBarBg = useColorModeValue('whiteAlpha.900', 'blackAlpha.700');
+  const mobileClockActiveBg = useColorModeValue('teal.50', 'teal.900');
+  const mobileClockInactiveBg = useColorModeValue('white', 'whiteAlpha.200');
+  const mobileClockBorderColor = useColorModeValue('blackAlpha.200', 'whiteAlpha.300');
   const [requestingUndo, setRequestingUndo] = useBoolean(false);
   const [respondingUndo, setRespondingUndo] = useBoolean(false);
   const myProfile = role === 'creator' ? lobbyMatch?.creator : role === 'opponent' ? lobbyMatch?.opponent : null;
@@ -611,16 +617,73 @@ function ActiveMatchContent({
       {/* Game Board - Centered and LARGE */}
       <Flex direction="column" align="center" w="100%">
         <Box
-          bg={panelBg}
-          borderRadius="xl"
-          borderWidth="1px"
-          borderColor={cardBorder}
-          p={{ base: 2, md: 3 }}
+          bg={{ base: 'transparent', md: panelBg }}
+          borderRadius={{ base: 'none', md: 'xl' }}
+          borderWidth={{ base: 0, md: '1px' }}
+          borderColor={{ base: 'transparent', md: cardBorder }}
+          p={{ base: 0, md: 3 }}
           display="flex"
+          flexDirection="column"
           justifyContent="center"
           w="100%"
           maxW="960px"
+          mx={{ base: -3, md: 0 }}
+          boxShadow={{ base: 'none', md: 'md' }}
+          overflow="hidden"
         >
+          <Stack
+            direction="row"
+            spacing={3}
+            px={4}
+            py={3}
+            display={{ base: 'flex', md: 'none' }}
+            bg={mobileClockBarBg}
+            borderBottomWidth="1px"
+            borderColor={mobileClockBorderColor}
+          >
+            <Box
+              flex="1"
+              borderRadius="md"
+              borderWidth="1px"
+              borderColor={creatorTurnActive ? accentHeading : mobileClockBorderColor}
+              bg={creatorTurnActive ? mobileClockActiveBg : mobileClockInactiveBg}
+              px={3}
+              py={2}
+            >
+              <Stack spacing={1} align="flex-start">
+                <Text fontSize="xs" fontWeight="semibold" color={mutedText}>
+                  {creatorClockLabel}
+                </Text>
+                <Text fontSize="lg" fontFamily="mono" fontWeight="semibold" color={creatorTurnActive ? accentHeading : strongText}>
+                  {creatorClock}
+                </Text>
+                <Text fontSize="xs" color={helperText} noOfLines={1}>
+                  {creatorDisplayName}
+                </Text>
+              </Stack>
+            </Box>
+            <Box
+              flex="1"
+              borderRadius="md"
+              borderWidth="1px"
+              borderColor={opponentTurnActive ? accentHeading : mobileClockBorderColor}
+              bg={opponentTurnActive ? mobileClockActiveBg : mobileClockInactiveBg}
+              px={3}
+              py={2}
+            >
+              <Stack spacing={1} align="flex-end">
+                <Text fontSize="xs" fontWeight="semibold" color={mutedText}>
+                  {opponentClockLabel}
+                </Text>
+                <Text fontSize="lg" fontFamily="mono" fontWeight="semibold" color={opponentTurnActive ? accentHeading : strongText}>
+                  {opponentClock}
+                </Text>
+                <Text fontSize="xs" color={helperText} noOfLines={1} textAlign="right" w="100%">
+                  {opponentDisplayName}
+                </Text>
+              </Stack>
+            </Box>
+          </Stack>
           <GameBoard
             board={santorini.board}
             selectable={santorini.selectable}
@@ -651,6 +714,7 @@ function ActiveMatchContent({
           maxW="960px"
           justify="center"
           align={{ base: 'stretch', sm: 'center' }}
+          display={{ base: 'none', md: 'flex' }}
         >
           <Box
             flex="1"
