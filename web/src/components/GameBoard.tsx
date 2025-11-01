@@ -101,7 +101,8 @@ function GameBoard({
   const gridTemplateColumns = `repeat(${boardColumns}, 1fr)`;
 
   const boardMaxWidth = useMemo(() => `min(${boardPixels}px, 100vw)`, [boardPixels]);
-  const activeGlowColor = turnHighlightColor ?? useColorModeValue('teal.400', 'teal.200');
+  const defaultGlowColor = useColorModeValue('teal.400', 'teal.200');
+  const activeGlowColor = turnHighlightColor ?? defaultGlowColor;
   const boardBoxShadow = isTurnActive
     ? `0 0 0 3px ${activeGlowColor}, 0 0 30px ${activeGlowColor}66`
     : '2xl';
