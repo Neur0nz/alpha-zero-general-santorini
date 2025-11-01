@@ -1,4 +1,4 @@
-import { ElementType, ReactNode, useCallback, useEffect, useState } from 'react';
+import { ElementType, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AlertDescription,
@@ -46,15 +46,19 @@ import {
 import { AddIcon, ArrowForwardIcon, RepeatIcon, SearchIcon, StarIcon } from '@chakra-ui/icons';
 import type { SupabaseAuthState } from '@hooks/useSupabaseAuth';
 import type { CreateMatchPayload, LobbyMatch, StartingPlayer } from '@hooks/useMatchLobby';
+import type { MatchStatus } from '@/types/match';
 import { useMatchLobbyContext } from '@hooks/matchLobbyContext';
 import GoogleIcon from '@components/auth/GoogleIcon';
 import { useSurfaceTokens } from '@/theme/useSurfaceTokens';
 import { buildMatchJoinLink } from '@/utils/joinLinks';
 import { PENDING_JOIN_STORAGE_KEY, consumeAutoOpenCreateFlag } from '@/utils/lobbyStorage';
+import { useBrowserNotifications } from '@hooks/useBrowserNotifications';
 
 function formatDate(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
+
+const NOTIFICATION_PROMPT_STORAGE_KEY = 'santorini:notificationsPrompted';
 
 function ActiveGameNotice({ 
   match, 
@@ -189,13 +193,15 @@ function LobbyHero({
                     isLoading={quickMatchLoading}
                     isDisabled={hasActiveGame || quickMatchLoading}
                     w={{ base: '100%', sm: 'auto' }}
-                    whiteSpace="normal"
-                    height="auto"
-                    textAlign="center"
-                    px={{ base: 4, sm: 6 }}
-                  >
-                    Start quick match
-                  </Button>
+                  whiteSpace="normal"
+                  minH="58px"
+                  textAlign="center"
+                  px={{ base: 4, sm: 6 }}
+                  fontSize="md"
+                  fontWeight="semibold"
+                >
+                  Start quick match
+                </Button>
                 </Tooltip>
               </WrapItem>
               <WrapItem>
@@ -212,13 +218,15 @@ function LobbyHero({
                     onClick={onOpenCreate}
                     isDisabled={hasActiveGame}
                     w={{ base: '100%', sm: 'auto' }}
-                    whiteSpace="normal"
-                    height="auto"
-                    textAlign="center"
-                    px={{ base: 4, sm: 6 }}
-                  >
-                    Custom match
-                  </Button>
+                  whiteSpace="normal"
+                  minH="58px"
+                  textAlign="center"
+                  px={{ base: 4, sm: 6 }}
+                  fontSize="md"
+                  fontWeight="semibold"
+                >
+                  Custom match
+                </Button>
                 </Tooltip>
               </WrapItem>
               <WrapItem>
@@ -786,6 +794,17 @@ function LobbyWorkspace({
   const toast = useToast();
   const [creatingQuickMatch, setCreatingQuickMatch] = useBoolean(false);
   const [inlineNotice, setInlineNotice] = useState<{ status: 'success' | 'error'; message: string } | null>(null);
+  const previousStatusesRef = useRef<Record<string, MatchStatus>>({});
+  const joinToastBg = useColorModeValue('white', 'gray.800');
+  const joinToastBorder = useColorModeValue('teal.400', 'teal.300');
+  const notificationPromptBg = useColorModeValue('white', 'gray.800');
+  const notificationPromptBorder = useColorModeValue('teal.400', 'teal.300');
+  const {
+    permission: notificationPermission,
+    isSupported: notificationsSupported,
+    requestPermission: requestNotificationPermission,
+  } = useBrowserNotifications();
+  const notificationsPromptedRef = useRef(false);
 
   const clearPendingJoinKey = useCallback(() => {
     setPendingJoinKey(null);
@@ -797,6 +816,91 @@ function LobbyWorkspace({
       }
     }
   }, []);
+
+  const promptNotificationPermission = useCallback(() => {
+    if (!notificationsSupported) {
+      return;
+    }
+    if (notificationPermission !== 'default') {
+      return;
+    }
+    if (notificationsPromptedRef.current) {
+      return;
+    }
+    const alreadyPrompted = (() => {
+      try {
+        if (typeof window === 'undefined') {
+          return false;
+        }
+        return window.localStorage.getItem(NOTIFICATION_PROMPT_STORAGE_KEY) === 'true';
+      } catch (error) {
+        console.warn('Unable to read notification prompt state', error);
+        return false;
+      }
+    })();
+    if (alreadyPrompted) {
+      notificationsPromptedRef.current = true;
+      return;
+    }
+    notificationsPromptedRef.current = true;
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(NOTIFICATION_PROMPT_STORAGE_KEY, 'true');
+      } catch (error) {
+        console.warn('Unable to persist notification prompt state', error);
+      }
+    }
+    toast({
+      duration: 10000,
+      position: 'top',
+      render: ({ onClose }) => (
+        <Box
+          bg={notificationPromptBg}
+          borderRadius="lg"
+          borderWidth="1px"
+          borderColor={notificationPromptBorder}
+          boxShadow="lg"
+          px={4}
+          py={3}
+        >
+          <Stack spacing={3}>
+            <Heading size="sm">Enable notifications</Heading>
+            <Text fontSize="sm">
+              Stay informed when opponents join or move while you&apos;re away from this tab.
+            </Text>
+            <ButtonGroup size="sm" justifyContent="flex-end">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  onClose();
+                }}
+              >
+                Not now
+              </Button>
+              <Button
+                colorScheme="teal"
+                onClick={async () => {
+                  const result = await requestNotificationPermission();
+                  if (result !== 'default') {
+                    onClose();
+                  }
+                }}
+              >
+                Enable
+              </Button>
+            </ButtonGroup>
+          </Stack>
+        </Box>
+      ),
+    });
+  }, [
+    notificationsSupported,
+    notificationPermission,
+    toast,
+    notificationPromptBg,
+    notificationPromptBorder,
+    requestNotificationPermission,
+  ]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -904,11 +1008,70 @@ function LobbyWorkspace({
     }
   }, [auth.profile, lobby.enableOnline, lobby.sessionMode]);
 
+  useEffect(() => {
+    const previous = previousStatusesRef.current;
+    const next: Record<string, MatchStatus> = {};
+    lobby.myMatches.forEach((match) => {
+      next[match.id] = match.status;
+      const prevStatus = previous[match.id];
+      if (
+        prevStatus === 'waiting_for_opponent' &&
+        match.status === 'in_progress' &&
+        match.creator_id === auth.profile?.id
+      ) {
+        const opponentName = match.opponent?.display_name ?? 'Opponent';
+        toast({
+          duration: 7000,
+          position: 'top',
+          render: ({ onClose }) => (
+            <Box
+              bg={joinToastBg}
+              borderRadius="lg"
+              borderWidth="1px"
+              borderColor={joinToastBorder}
+              boxShadow="lg"
+              px={4}
+              py={3}
+            >
+              <Stack spacing={2}>
+                <Heading size="sm">Opponent joined!</Heading>
+                <Text fontSize="sm">
+                  {opponentName} joined your game. Jump in to start playing.
+                </Text>
+                <ButtonGroup size="sm" alignSelf="flex-end">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      onClose();
+                    }}
+                  >
+                    Later
+                  </Button>
+                  <Button
+                    colorScheme="teal"
+                    onClick={() => {
+                      onNavigateToPlay();
+                      onClose();
+                    }}
+                  >
+                    Open game
+                  </Button>
+                </ButtonGroup>
+              </Stack>
+            </Box>
+          ),
+        });
+      }
+    });
+    previousStatusesRef.current = next;
+  }, [lobby.myMatches, auth.profile?.id, toast, joinToastBg, joinToastBorder, onNavigateToPlay]);
+
   const handleCreate = async (payload: CreateMatchPayload) => {
     try {
       await lobby.createMatch(payload);
       // Navigate to Play tab after creating match
       onNavigateToPlay();
+      promptNotificationPermission();
     } catch (error: any) {
       // Re-throw to be caught by the modal's error handling
       if (error.code === 'ACTIVE_GAME_EXISTS') {

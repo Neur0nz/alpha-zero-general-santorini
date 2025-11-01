@@ -40,11 +40,13 @@ import { SantoriniProvider } from '@hooks/useSantorini';
 import { useLocalSantorini } from '@hooks/useLocalSantorini';
 import { buildMatchJoinLink } from '@/utils/joinLinks';
 import { scheduleAutoOpenCreate } from '@/utils/lobbyStorage';
+import { useBrowserNotifications } from '@hooks/useBrowserNotifications';
 import GameBoard from '@components/GameBoard';
 import type { SantoriniMoveAction, MatchStatus, PlayerProfile } from '@/types/match';
 import { useSurfaceTokens } from '@/theme/useSurfaceTokens';
 
 const K_FACTOR = 32;
+const NOTIFICATION_PROMPT_STORAGE_KEY = 'santorini:notificationsPrompted';
 
 const formatNameWithRating = (profile: PlayerProfile | null | undefined, fallback: string): string => {
   if (profile?.display_name) {
@@ -182,12 +184,12 @@ function ActiveMatchContent({
   joinCode,
   onSubmitMove,
   onLeave,
-  onOfferRematch,
   onGameComplete,
   undoState,
   onRequestUndo,
   onRespondUndo,
   onClearUndo,
+  profileId,
 }: {
   match: LobbyMatch | null;
   role: 'creator' | 'opponent' | null;
@@ -195,18 +197,17 @@ function ActiveMatchContent({
   joinCode: string | null;
   onSubmitMove: UseMatchLobbyReturn['submitMove'];
   onLeave: (matchId?: string | null) => Promise<void>;
-  onOfferRematch: UseMatchLobbyReturn['offerRematch'];
   onGameComplete: (status: MatchStatus, payload?: { winner_id?: string | null }) => Promise<void>;
   undoState?: UndoRequestState;
   onRequestUndo: UseMatchLobbyReturn['requestUndo'];
   onRespondUndo: UseMatchLobbyReturn['respondUndo'];
   onClearUndo: () => void;
+  profileId: string | null;
 }) {
   const toast = useToast();
-  const [offerBusy, setOfferBusy] = useBoolean();
   const [leaveBusy, setLeaveBusy] = useBoolean();
   const lobbyMatch = match ?? null;
-  const { cardBg, cardBorder, mutedText, helperText, strongText, accentHeading, panelBg } = useSurfaceTokens();
+  const { cardBg, cardBorder, mutedText, strongText, accentHeading, panelBg } = useSurfaceTokens();
   const typedMoves = useMemo(
     () =>
       moves
@@ -265,8 +266,8 @@ function ActiveMatchContent({
     onSubmitMove: onSubmitMove,
     onGameComplete: handleGameComplete,
   });
-  const creatorBaseName = lobbyMatch?.creator?.display_name ?? 'Player 1 (Blue)';
-  const opponentBaseName = lobbyMatch?.opponent?.display_name ?? 'Player 2 (Red)';
+  const creatorBaseName = lobbyMatch?.creator?.display_name ?? 'Player 1';
+  const opponentBaseName = lobbyMatch?.opponent?.display_name ?? 'Player 2';
   const creatorDisplayName = formatNameWithRating(lobbyMatch?.creator, creatorBaseName);
   const opponentDisplayName = formatNameWithRating(lobbyMatch?.opponent, opponentBaseName);
   const creatorClock = santorini.formatClock(santorini.creatorClockMs);
@@ -274,17 +275,59 @@ function ActiveMatchContent({
   const creatorTurnActive = santorini.currentTurn === 'creator';
   const opponentTurnActive = santorini.currentTurn === 'opponent';
   const isMyTurn = role === 'creator' ? creatorTurnActive : role === 'opponent' ? opponentTurnActive : false;
-  const turnGlowColor = role === 'creator' ? 'blue.400' : role === 'opponent' ? 'red.400' : undefined;
-  const creatorClockLabel = role === 'creator' ? '🟢 YOU (Blue)' : 'Player 1 (Blue)';
-  const opponentClockLabel = role === 'opponent' ? '🟢 YOU (Red)' : 'Player 2 (Red)';
-  const mobileClockBarBg = useColorModeValue('whiteAlpha.900', 'blackAlpha.700');
-  const mobileClockActiveBg = useColorModeValue('teal.50', 'teal.900');
-  const mobileClockInactiveBg = useColorModeValue('white', 'whiteAlpha.200');
-  const mobileClockBorderColor = useColorModeValue('blackAlpha.200', 'whiteAlpha.300');
+  const turnGlowColor = role === 'creator' ? 'green.400' : role === 'opponent' ? 'red.400' : undefined;
+  const normalizeRating = (value: number | null | undefined): number | null =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : null;
+  const creatorRatingValue = normalizeRating(lobbyMatch?.creator?.rating);
+  const opponentRatingValue = normalizeRating(lobbyMatch?.opponent?.rating);
+  const formatClockLabel = (
+    name: string,
+    rating: number | null,
+    colorName: 'Green' | 'Red',
+    isSelf: boolean,
+  ) => {
+    const colorEmoji = colorName === 'Green' ? '🟢' : '🔴';
+    const segments: string[] = [`${colorEmoji} ${isSelf ? 'YOU' : name}`];
+    if (rating !== null) {
+      segments.push(`${rating} ELO`);
+    }
+    segments.push(colorName);
+    return segments.join(' · ');
+  };
+  const creatorClockLabel = formatClockLabel(creatorBaseName, creatorRatingValue, 'Green', role === 'creator');
+  const opponentClockLabel = formatClockLabel(opponentBaseName, opponentRatingValue, 'Red', role === 'opponent');
+  const notificationPromptBg = useColorModeValue('white', 'gray.800');
+  const notificationPromptBorder = useColorModeValue('teal.400', 'teal.300');
   const [requestingUndo, setRequestingUndo] = useBoolean(false);
   const [respondingUndo, setRespondingUndo] = useBoolean(false);
   const myProfile = role === 'creator' ? lobbyMatch?.creator : role === 'opponent' ? lobbyMatch?.opponent : null;
   const opponentProfile = role === 'creator' ? lobbyMatch?.opponent : role === 'opponent' ? lobbyMatch?.creator : null;
+  const {
+    permission: notificationPermission,
+    isSupported: notificationsSupported,
+    requestPermission,
+    showNotification,
+  } = useBrowserNotifications();
+  const notificationToastIdRef = useRef<string | number | undefined>();
+  const hasPromptedNotificationsRef = useRef(false);
+  const lastOpponentIdRef = useRef<string | null>(lobbyMatch?.opponent_id ?? null);
+  const opponentTrackerInitializedRef = useRef(false);
+  const lastMoveCountRef = useRef<number>(moves.length);
+  const movesHydratedRef = useRef(false);
+  const isPageHidden = useCallback(
+    () => typeof document !== 'undefined' && document.visibilityState === 'hidden',
+    [],
+  );
+
+  useEffect(() => {
+    opponentTrackerInitializedRef.current = false;
+    lastOpponentIdRef.current = lobbyMatch?.opponent_id ?? null;
+  }, [lobbyMatch?.id, lobbyMatch?.opponent_id]);
+
+  useEffect(() => {
+    movesHydratedRef.current = false;
+    lastMoveCountRef.current = moves.length;
+  }, [lobbyMatch?.id]);
   const playerRating = myProfile?.rating;
   const opponentRating = opponentProfile?.rating;
   const ratingProjection = useMemo(() => {
@@ -303,7 +346,7 @@ function ActiveMatchContent({
       opponentRating: Math.round(opponentRating as number),
     };
   }, [lobbyMatch?.rated, role, typedMoves.length, playerRating, opponentRating]);
-  const creatorSideLabel = role === 'creator' ? 'You · Blue pieces' : 'Blue pieces';
+  const creatorSideLabel = role === 'creator' ? 'You · Green pieces' : 'Green pieces';
   const opponentSideLabel = role === 'opponent' ? 'You · Red pieces' : 'Red pieces';
 
   const undoRequestedByMe = undoState && undoState.requestedBy === role;
@@ -319,6 +362,192 @@ function ActiveMatchContent({
   const undoDisabledOverride = !canRequestUndo || requestingUndo || undoPending;
 
   useEffect(() => {
+    if (!notificationsSupported) {
+      return;
+    }
+    if (notificationPermission === 'default') {
+      if (hasPromptedNotificationsRef.current) {
+        return;
+      }
+      const alreadyPrompted = (() => {
+        try {
+          if (typeof window === 'undefined') {
+            return false;
+          }
+          return window.localStorage.getItem(NOTIFICATION_PROMPT_STORAGE_KEY) === 'true';
+        } catch (error) {
+          console.warn('Unable to read notification prompt state', error);
+          return false;
+        }
+      })();
+      if (alreadyPrompted) {
+        hasPromptedNotificationsRef.current = true;
+        return;
+      }
+      hasPromptedNotificationsRef.current = true;
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(NOTIFICATION_PROMPT_STORAGE_KEY, 'true');
+        } catch (error) {
+          console.warn('Unable to persist notification prompt state', error);
+        }
+      }
+      notificationToastIdRef.current = toast({
+        duration: 10000,
+        position: 'top',
+        render: ({ onClose }) => (
+          <Box
+            bg={notificationPromptBg}
+            borderRadius="lg"
+            borderWidth="1px"
+            borderColor={notificationPromptBorder}
+            boxShadow="lg"
+            px={4}
+            py={3}
+          >
+            <Stack spacing={3}>
+              <Heading size="sm">Enable game alerts</Heading>
+              <Text fontSize="sm">
+                Allow browser notifications so you know when opponents join or make a move while this tab is hidden.
+              </Text>
+              <HStack spacing={3} justify="flex-end">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    onClose();
+                  }}
+                >
+                  Not now
+                </Button>
+                <Button
+                  size="sm"
+                  colorScheme="teal"
+                  onClick={async () => {
+                    const result = await requestPermission();
+                    if (result !== 'default') {
+                      onClose();
+                    }
+                  }}
+                >
+                  Enable
+                </Button>
+              </HStack>
+            </Stack>
+          </Box>
+        ),
+      });
+      return;
+    }
+    if (notificationToastIdRef.current) {
+      toast.close(notificationToastIdRef.current);
+      notificationToastIdRef.current = undefined;
+    }
+  }, [
+    notificationsSupported,
+    notificationPermission,
+    toast,
+    notificationPromptBg,
+    notificationPromptBorder,
+    requestPermission,
+  ]);
+
+  useEffect(() => {
+    const opponentId = lobbyMatch?.opponent_id ?? null;
+    if (!opponentTrackerInitializedRef.current) {
+      opponentTrackerInitializedRef.current = true;
+      lastOpponentIdRef.current = opponentId;
+      return;
+    }
+    if (!lobbyMatch || !role) {
+      lastOpponentIdRef.current = opponentId;
+      return;
+    }
+    if (opponentId && opponentId !== lastOpponentIdRef.current) {
+      const isCreator = lobbyMatch.creator_id === profileId;
+      if (isCreator) {
+        const opponentName = lobbyMatch.opponent?.display_name ?? 'Opponent';
+        if (notificationsSupported && notificationPermission === 'granted' && isPageHidden()) {
+          showNotification('Opponent joined your game', {
+            body: `${opponentName} just joined. Your match is ready.`,
+            id: `match-${lobbyMatch.id}-join`,
+          });
+        } else {
+          toast({
+            title: 'Opponent joined',
+            description: `${opponentName} is ready to play.`,
+            status: 'success',
+            duration: 4000,
+          });
+        }
+      }
+    }
+    lastOpponentIdRef.current = opponentId;
+  }, [
+    lobbyMatch?.opponent_id,
+    lobbyMatch?.opponent?.display_name,
+    lobbyMatch?.creator_id,
+    lobbyMatch?.id,
+    role,
+    profileId,
+    notificationsSupported,
+    notificationPermission,
+    isPageHidden,
+    showNotification,
+  ]);
+
+  useEffect(() => {
+    if (!lobbyMatch || !role) {
+      lastMoveCountRef.current = moves.length;
+      return;
+    }
+    if (!movesHydratedRef.current) {
+      movesHydratedRef.current = true;
+      lastMoveCountRef.current = moves.length;
+      return;
+    }
+    if (moves.length <= lastMoveCountRef.current) {
+      lastMoveCountRef.current = moves.length;
+      return;
+    }
+    const latestMove = moves[moves.length - 1];
+    lastMoveCountRef.current = moves.length;
+    if (!latestMove) {
+      return;
+    }
+    if (latestMove.player_id === profileId) {
+      return;
+    }
+    if (lobbyMatch.status !== 'in_progress') {
+      return;
+    }
+    const opponentName =
+      latestMove.player_id === lobbyMatch.creator_id
+        ? creatorDisplayName
+        : latestMove.player_id === lobbyMatch.opponent_id
+          ? opponentDisplayName
+          : 'Opponent';
+    if (notificationsSupported && notificationPermission === 'granted' && isPageHidden()) {
+      showNotification('Your turn', {
+        body: `${opponentName} made their move.`,
+        id: `match-${lobbyMatch.id}-move`,
+      });
+    }
+  }, [
+    lobbyMatch,
+    moves,
+    role,
+    profileId,
+    creatorDisplayName,
+    opponentDisplayName,
+    notificationsSupported,
+    notificationPermission,
+    isPageHidden,
+    showNotification,
+    toast,
+  ]);
+
+  useEffect(() => {
     if (!undoState) {
       return undefined;
     }
@@ -330,26 +559,6 @@ function ActiveMatchContent({
     }
     return undefined;
   }, [undoState, onClearUndo]);
-
-  useEffect(() => {
-    if (!undoState || undoState.status !== 'pending' || undoRequestedByMe) {
-      return;
-    }
-    const toastKey = `${undoState.matchId}:${undoState.requestedAt}`;
-    if (seenUndoToastRef.current === toastKey) {
-      return;
-    }
-    seenUndoToastRef.current = toastKey;
-    toast({
-      title: 'Undo requested',
-      description:
-        undoMoveNumber !== null
-          ? `Your opponent wants to undo move #${undoMoveNumber}.`
-          : 'Your opponent requested an undo.',
-      status: 'info',
-      duration: 5000,
-    });
-  }, [toast, undoMoveNumber, undoRequestedByMe, undoState]);
 
   const handleRequestUndo = useCallback(async () => {
     setRequestingUndo.on();
@@ -386,6 +595,85 @@ function ActiveMatchContent({
       setRespondingUndo.off();
     }
   }, [onRespondUndo, setRespondingUndo, toast]);
+
+  useEffect(() => {
+    if (!undoState || undoState.status !== 'pending' || undoRequestedByMe) {
+      return;
+    }
+    const toastKey = `${undoState.matchId}:${undoState.requestedAt}`;
+    if (seenUndoToastRef.current === toastKey) {
+      return;
+    }
+    seenUndoToastRef.current = toastKey;
+    toast({
+      duration: null,
+      position: 'top-right',
+      render: ({ onClose }) => (
+        <Box
+          bg={notificationPromptBg}
+          borderRadius="lg"
+          borderWidth="1px"
+          borderColor={notificationPromptBorder}
+          boxShadow="lg"
+          px={4}
+          py={3}
+        >
+          <Stack spacing={2}>
+            <Heading size="sm">Undo requested</Heading>
+            <Text fontSize="sm">
+              {undoMoveNumber !== null
+                ? `Your opponent wants to undo move #${undoMoveNumber}.`
+                : 'Your opponent requested an undo.'}
+            </Text>
+            <ButtonGroup size="sm" justifyContent="flex-end">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  onClose();
+                }}
+              >
+                Later
+              </Button>
+              <Button
+                variant="outline"
+                colorScheme="red"
+                onClick={() => {
+                  void handleRespondUndo(false).finally(() => {
+                    onClose();
+                  });
+                }}
+                isDisabled={respondingUndo}
+                isLoading={respondingUndo}
+              >
+                Decline
+              </Button>
+              <Button
+                colorScheme="teal"
+                onClick={() => {
+                  void handleRespondUndo(true).finally(() => {
+                    onClose();
+                  });
+                }}
+                isDisabled={respondingUndo}
+                isLoading={respondingUndo}
+              >
+                Accept
+              </Button>
+            </ButtonGroup>
+          </Stack>
+        </Box>
+      ),
+    });
+  }, [
+    toast,
+    undoMoveNumber,
+    undoRequestedByMe,
+    undoState,
+    handleRespondUndo,
+    respondingUndo,
+    notificationPromptBg,
+    notificationPromptBorder,
+  ]);
 
   const undoBanner = useMemo(() => {
     if (!undoState || undoMoveNumber === null) {
@@ -479,124 +767,88 @@ function ActiveMatchContent({
     }
   };
 
-  const handleOfferRematch = async () => {
-    if (!lobbyMatch) return;
-    setOfferBusy.on();
-    try {
-      const result = await onOfferRematch();
-      if (result) {
-        toast({
-          title: 'Rematch created',
-          description: `Share code ${result.private_join_code ?? result.id.slice(0, 8)}`,
-          status: 'success',
-        });
-      }
-    } catch (error) {
-      toast({
-        title: 'Failed to create rematch',
-        status: 'error',
-        description: error instanceof Error ? error.message : 'Unknown error',
-      });
-    } finally {
-      setOfferBusy.off();
-    }
-  };
-
   const showJoinCode = lobbyMatch?.visibility === 'private' && joinCode;
 
   return (
     <Stack spacing={6}>
-      {/* Game Identity Bar - CLEAR indication of which game */}
-      <Card bg={cardBg} borderWidth="2px" borderColor="teal.400">
-        <CardBody py={3}>
-          <Flex
-            direction={{ base: 'column', sm: 'row' }}
-            justify="space-between"
-            align={{ base: 'flex-start', sm: 'center' }}
-            gap={3}
-          >
-            <Stack spacing={3}>
-              <Heading size="md" color={accentHeading}>
+      <Stack spacing={{ base: 5, md: 6 }} align="center">
+        <Stack
+          direction={{ base: 'column', md: 'row' }}
+          spacing={{ base: 4, md: 6 }}
+          w="100%"
+          maxW="960px"
+        >
+          <PlayerClockCard
+            label={creatorClockLabel}
+            clock={creatorClock}
+            active={creatorTurnActive}
+            accentColor={accentHeading}
+            profile={lobbyMatch?.creator}
+            sideLabel={creatorSideLabel}
+            alignment="flex-start"
+          />
+          <PlayerClockCard
+            label={opponentClockLabel}
+            clock={opponentClock}
+            active={opponentTurnActive}
+            accentColor={accentHeading}
+            profile={lobbyMatch?.opponent}
+            sideLabel={opponentSideLabel}
+            alignment="flex-end"
+          />
+        </Stack>
+        <Flex
+          w="100%"
+          maxW="960px"
+          direction={{ base: 'column', md: 'row' }}
+          justify="space-between"
+          align={{ base: 'flex-start', md: 'center' }}
+          gap={{ base: 3, md: 4 }}
+        >
+          <Wrap spacing={3} align="center">
+            <WrapItem>
+              <Heading size="sm" color={accentHeading}>
                 {creatorDisplayName} vs {opponentDisplayName}
               </Heading>
-              <Wrap spacing={4} align="center">
-                <WrapItem>
-                  <PlayerSummary
-                    profile={lobbyMatch?.creator}
-                    displayName={creatorDisplayName}
-                    sideLabel={creatorSideLabel}
-                    isCurrentUser={role === 'creator'}
-                    isActiveTurn={creatorTurnActive}
-                    badgeColor="blue.400"
-                  />
-                </WrapItem>
-                <WrapItem>
-                  <Center h="100%">
-                    <Text fontWeight="semibold" color={mutedText}>
-                      vs
-                    </Text>
-                  </Center>
-                </WrapItem>
-                <WrapItem>
-                  <PlayerSummary
-                    profile={lobbyMatch?.opponent}
-                    displayName={opponentDisplayName}
-                    sideLabel={opponentSideLabel}
-                    isCurrentUser={role === 'opponent'}
-                    isActiveTurn={opponentTurnActive}
-                    badgeColor="red.400"
-                  />
-                </WrapItem>
-              </Wrap>
-              <HStack spacing={3} flexWrap="wrap">
-                {showJoinCode && (
-                  <Badge colorScheme="orange" fontSize="0.8rem">
-                    Code: {joinCode}
-                  </Badge>
-                )}
-                <Badge colorScheme={lobbyMatch?.rated ? 'purple' : 'gray'}>
-                  {lobbyMatch?.rated ? 'Rated' : 'Casual'}
+            </WrapItem>
+            {showJoinCode && (
+              <WrapItem>
+                <Badge colorScheme="orange" fontSize="0.8rem">
+                  Code: {joinCode}
                 </Badge>
-                {lobbyMatch && lobbyMatch.clock_initial_seconds > 0 && (
-                  <Badge colorScheme="blue">
-                    {Math.round(lobbyMatch.clock_initial_seconds / 60)}+{lobbyMatch.clock_increment_seconds}
-                  </Badge>
-                )}
-                <Text fontSize="sm" color={mutedText}>
-                  {typedMoves.length} moves
-                </Text>
-              </HStack>
-            </Stack>
-            <ButtonGroup size="sm" variant="outline" spacing={2} flexWrap="wrap">
-              <Tooltip label="Resign and lose the game (affects rating if rated)" hasArrow>
-                <Button colorScheme="red" onClick={handleLeave} isLoading={leaveBusy}>
-                  Resign
-                </Button>
-              </Tooltip>
-              <Tooltip label="Offer a new game with the same settings" hasArrow>
-                <Button colorScheme="teal" onClick={handleOfferRematch} isLoading={offerBusy} isDisabled={!role || offerBusy}>
-                  Rematch
-                </Button>
-              </Tooltip>
-              <Tooltip label="Review this game from the Analyze tab" hasArrow>
-                <Button
-                  onClick={() => {
-                    if (!lobbyMatch) return;
-                    localStorage.setItem('santorini:lastAnalyzedMatch', lobbyMatch.id);
-                    toast({
-                      title: 'Ready for analysis',
-                      description: 'Open the Analyze tab to review this game.',
-                      status: 'success',
-                    });
-                  }}
-                >
-                  Analyze
-                </Button>
-              </Tooltip>
-            </ButtonGroup>
-          </Flex>
-      </CardBody>
-    </Card>
+              </WrapItem>
+            )}
+            <WrapItem>
+              <Badge colorScheme={lobbyMatch?.rated ? 'purple' : 'gray'}>
+                {lobbyMatch?.rated ? 'Rated' : 'Casual'}
+              </Badge>
+            </WrapItem>
+            {lobbyMatch && lobbyMatch.clock_initial_seconds > 0 && (
+              <WrapItem>
+                <Badge colorScheme="blue">
+                  {Math.round(lobbyMatch.clock_initial_seconds / 60)}+{lobbyMatch.clock_increment_seconds}
+                </Badge>
+              </WrapItem>
+            )}
+            <WrapItem>
+              <Text fontSize="sm" color={mutedText}>
+                {typedMoves.length} moves
+              </Text>
+            </WrapItem>
+          </Wrap>
+          <Tooltip label="Resign and lose the game (affects rating if rated)" hasArrow>
+            <Button
+              colorScheme="red"
+              variant="outline"
+              onClick={handleLeave}
+              isLoading={leaveBusy}
+              alignSelf={{ base: 'stretch', md: 'auto' }}
+            >
+              Resign
+            </Button>
+          </Tooltip>
+        </Flex>
+      </Stack>
 
       {ratingProjection && (
         <Alert status="info" variant="left-accent" borderRadius="md">
@@ -623,7 +875,6 @@ function ActiveMatchContent({
           borderColor={{ base: 'transparent', md: cardBorder }}
           p={{ base: 0, md: 3 }}
           display="flex"
-          flexDirection="column"
           justifyContent="center"
           w="100%"
           maxW="960px"
@@ -631,59 +882,6 @@ function ActiveMatchContent({
           boxShadow={{ base: 'none', md: 'md' }}
           overflow="hidden"
         >
-          <Stack
-            direction="row"
-            spacing={3}
-            px={4}
-            py={3}
-            display={{ base: 'flex', md: 'none' }}
-            bg={mobileClockBarBg}
-            borderBottomWidth="1px"
-            borderColor={mobileClockBorderColor}
-          >
-            <Box
-              flex="1"
-              borderRadius="md"
-              borderWidth="1px"
-              borderColor={creatorTurnActive ? accentHeading : mobileClockBorderColor}
-              bg={creatorTurnActive ? mobileClockActiveBg : mobileClockInactiveBg}
-              px={3}
-              py={2}
-            >
-              <Stack spacing={1} align="flex-start">
-                <Text fontSize="xs" fontWeight="semibold" color={mutedText}>
-                  {creatorClockLabel}
-                </Text>
-                <Text fontSize="lg" fontFamily="mono" fontWeight="semibold" color={creatorTurnActive ? accentHeading : strongText}>
-                  {creatorClock}
-                </Text>
-                <Text fontSize="xs" color={helperText} noOfLines={1}>
-                  {creatorDisplayName}
-                </Text>
-              </Stack>
-            </Box>
-            <Box
-              flex="1"
-              borderRadius="md"
-              borderWidth="1px"
-              borderColor={opponentTurnActive ? accentHeading : mobileClockBorderColor}
-              bg={opponentTurnActive ? mobileClockActiveBg : mobileClockInactiveBg}
-              px={3}
-              py={2}
-            >
-              <Stack spacing={1} align="flex-end">
-                <Text fontSize="xs" fontWeight="semibold" color={mutedText}>
-                  {opponentClockLabel}
-                </Text>
-                <Text fontSize="lg" fontFamily="mono" fontWeight="semibold" color={opponentTurnActive ? accentHeading : strongText}>
-                  {opponentClock}
-                </Text>
-                <Text fontSize="xs" color={helperText} noOfLines={1} textAlign="right" w="100%">
-                  {opponentDisplayName}
-                </Text>
-              </Stack>
-            </Box>
-          </Stack>
           <GameBoard
             board={santorini.board}
             selectable={santorini.selectable}
@@ -705,70 +903,6 @@ function ActiveMatchContent({
 
         {undoBanner}
 
-        {/* Player Clocks - Below board - PROMINENT */}
-        <Stack
-          direction={{ base: 'column', sm: 'row' }}
-          spacing={{ base: 4, sm: 8, md: 16 }}
-          mt={8}
-          w="100%"
-          maxW="960px"
-          justify="center"
-          align={{ base: 'stretch', sm: 'center' }}
-          display={{ base: 'none', md: 'flex' }}
-        >
-          <Box
-            flex="1"
-            p={4}
-            borderRadius="lg"
-            borderWidth="2px"
-            borderColor={creatorTurnActive ? accentHeading : cardBorder}
-            bg={creatorTurnActive ? useColorModeValue('teal.50', 'teal.900') : 'transparent'}
-            transition="all 0.3s"
-          >
-            <VStack spacing={2} align="center">
-              <Text fontSize="sm" fontWeight="semibold" color={mutedText}>
-                {role === 'creator' ? '🟢 YOUR CLOCK' : 'Player 1 (Blue)'}
-              </Text>
-              <Heading 
-                size={{ base: '2xl', md: '3xl' }} 
-                color={creatorTurnActive ? accentHeading : strongText}
-                fontFamily="mono"
-                letterSpacing="tight"
-              >
-                {creatorClock}
-              </Heading>
-              <Text fontSize="md" fontWeight="medium" color={helperText}>
-                {creatorDisplayName}
-              </Text>
-            </VStack>
-          </Box>
-          <Box
-            flex="1"
-            p={4}
-            borderRadius="lg"
-            borderWidth="2px"
-            borderColor={opponentTurnActive ? accentHeading : cardBorder}
-            bg={opponentTurnActive ? useColorModeValue('teal.50', 'teal.900') : 'transparent'}
-            transition="all 0.3s"
-          >
-            <VStack spacing={2} align="center">
-              <Text fontSize="sm" fontWeight="semibold" color={mutedText}>
-                {role === 'opponent' ? '🟢 YOUR CLOCK' : 'Player 2 (Red)'}
-              </Text>
-              <Heading 
-                size={{ base: '2xl', md: '3xl' }} 
-                color={opponentTurnActive ? accentHeading : strongText}
-                fontFamily="mono"
-                letterSpacing="tight"
-              >
-                {opponentClock}
-              </Heading>
-              <Text fontSize="md" fontWeight="medium" color={helperText}>
-                {opponentDisplayName}
-              </Text>
-            </VStack>
-          </Box>
-        </Stack>
       </Flex>
     </Stack>
   );
@@ -859,37 +993,71 @@ function CompletedMatchSummary({
   );
 }
 
-interface PlayerSummaryProps {
+interface PlayerClockCardProps {
+  label: string;
+  clock: string;
+  active: boolean;
+  accentColor: string;
   profile: PlayerProfile | null | undefined;
-  displayName: string;
   sideLabel: string;
-  isCurrentUser: boolean;
-  isActiveTurn: boolean;
-  badgeColor: string;
+  alignment: 'flex-start' | 'flex-end';
 }
 
-function PlayerSummary({ profile, displayName, sideLabel, isCurrentUser, isActiveTurn, badgeColor }: PlayerSummaryProps) {
-  const { mutedText } = useSurfaceTokens();
+function PlayerClockCard({
+  label,
+  clock,
+  active,
+  accentColor,
+  profile,
+  sideLabel,
+  alignment,
+}: PlayerClockCardProps) {
+  const { cardBorder, mutedText, strongText } = useSurfaceTokens();
+  const activeBg = useColorModeValue('teal.50', 'teal.900');
+  const inactiveBg = useColorModeValue('white', 'whiteAlpha.100');
+  const clockColor = active ? accentColor : strongText;
+  const alignItems: 'flex-start' | 'flex-end' = alignment;
+  const textAlign = alignment === 'flex-end' ? 'right' : 'left';
+
   return (
-    <HStack spacing={3} align="center">
-      <Avatar size="md" name={displayName} src={profile?.avatar_url ?? undefined}>
-        {isActiveTurn ? <AvatarBadge boxSize="1.1em" bg={badgeColor} borderColor="white" /> : null}
-      </Avatar>
-      <Box>
-        <Text fontWeight="semibold">
-          {displayName}
-          {isCurrentUser ? (
-            <Text as="span" color="teal.500" fontWeight="semibold">
-              {' '}
-              (You)
-            </Text>
-          ) : null}
-        </Text>
-        <Text fontSize="xs" color={mutedText}>
-          {sideLabel}
-        </Text>
-      </Box>
-    </HStack>
+    <Box
+      flex="1"
+      p={{ base: 3, md: 4 }}
+      borderRadius="xl"
+      borderWidth="2px"
+      borderColor={active ? accentColor : cardBorder}
+      bg={active ? activeBg : inactiveBg}
+      transition="all 0.3s ease"
+      boxShadow={active ? `0 0 0 1px ${accentColor}` : 'none'}
+    >
+      <Stack spacing={3} align={alignItems}>
+        <Avatar
+          size="lg"
+          name={profile?.display_name ?? label}
+          src={profile?.avatar_url ?? undefined}
+          alignSelf={alignItems}
+        >
+          {active ? <AvatarBadge boxSize="1.1em" bg={accentColor} borderColor="white" /> : null}
+        </Avatar>
+        <Stack spacing={1} align={alignItems} w="100%">
+          <Text fontSize="sm" fontWeight="semibold" color={mutedText} textAlign={textAlign}>
+            {label}
+          </Text>
+          <Heading
+            size={{ base: 'xl', md: '2xl' }}
+            color={clockColor}
+            fontFamily="mono"
+            letterSpacing="tight"
+            textAlign={textAlign}
+          >
+            {clock}
+          </Heading>
+          <Text fontSize="xs" color={mutedText} textAlign={textAlign}>
+            {sideLabel}
+          </Text>
+        </Stack>
+      </Stack>
+    </Box>
   );
 }
 
@@ -1421,12 +1589,12 @@ function GamePlayWorkspace({ auth, onNavigateToLobby }: { auth: SupabaseAuthStat
             joinCode={lobby.joinCode}
             onSubmitMove={lobby.submitMove}
             onLeave={lobby.leaveMatch}
-            onOfferRematch={lobby.offerRematch}
             onGameComplete={lobby.updateMatchStatus}
             undoState={activeUndoState}
             onRequestUndo={lobby.requestUndo}
             onRespondUndo={lobby.respondUndo}
             onClearUndo={handleClearUndoState}
+            profileId={auth.profile?.id ?? null}
           />
         </SantoriniProvider>
       )}
